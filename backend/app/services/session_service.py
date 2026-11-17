@@ -79,19 +79,8 @@ def create_session(
     return session
 
 
-def list_sessions(
-    db: Session,
-    user_id: str,
-    search: str | None = None,
-    company: str | None = None,
-    staff_id: str | None = None,
-    status: str | None = None,
-    sort_by: str = "vehicle",
-    limit: int = 50,
-    offset: int = 0,
-    type_filter: str | None = None,
-) -> tuple[list[SessionModel], int]:
-    base = (
+def _base_visible_sessions_query():
+    return (
         select(SessionModel)
         .join(UploadedFile, SessionModel.uploaded_file_id == UploadedFile.id)
         .outerjoin(QuotationDraft, SessionModel.draft_id == QuotationDraft.id)
@@ -109,6 +98,119 @@ def list_sessions(
             ),
         )
     )
+
+
+def get_session_tab_counts(db: Session) -> dict[str, int]:
+    """Return exact server-side session counts across all tabs."""
+    base = _base_visible_sessions_query()
+    all_cnt = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    test_cnt = (
+        db.scalar(
+            select(func.count()).select_from(
+                base.where(SessionModel.is_test.is_(True)).subquery()
+            )
+        )
+        or 0
+    )
+    live_cnt = max(0, all_cnt - test_cnt)
+    cn_cnt = (
+        db.scalar(
+            select(func.count()).select_from(
+                base.where(
+                    SessionModel.is_test.is_(False),
+                    SessionModel.document_type == "covernote",
+                ).subquery()
+            )
+        )
+        or 0
+    )
+    quote_cnt = max(0, live_cnt - cn_cnt)
+    return {
+        "all": all_cnt,
+        "live": live_cnt,
+        "quotations": quote_cnt,
+        "covernotes": cn_cnt,
+        "test": test_cnt,
+    }
+
+
+def purge_test_sessions(db: Session) -> int:
+    """Move all active test/sandbox sessions to trash and detach any accidental tenure link."""
+    rows = list(
+        db.scalars(
+            select(SessionModel).where(
+                SessionModel.is_test.is_(True),
+                SessionModel.status != "trash",
+            )
+        ).all()
+    )
+    for row in rows:
+        row.status = "trash"
+        row.tenure_id = None
+        row.customer_id = None
+        row.tracked_vehicle_id = None
+    if rows:
+        db.commit()
+        invalidate_cache("sessions:filter_options")
+    return len(rows)
+
+
+def preload_session_templates(
+    db: Session,
+    sessions: list[SessionModel],
+) -> dict[str, tuple[str | None, str]]:
+    """Batch-resolve (template_id, template_name) for a list of sessions in 2 queries (zero N+1)."""
+    rev_ids: set[str] = set()
+    direct_tpl_ids: set[str] = set()
+    for s in sessions:
+        if s.draft:
+            if s.draft.layout_override_template_id and _is_valid_uuid_for_db(db, s.draft.layout_override_template_id):
+                direct_tpl_ids.add(s.draft.layout_override_template_id)
+            elif s.draft.template_revision_id and _is_valid_uuid_for_db(db, s.draft.template_revision_id):
+                rev_ids.add(s.draft.template_revision_id)
+        if s.uploaded_file and s.uploaded_file.template_id and _is_valid_uuid_for_db(db, s.uploaded_file.template_id):
+            direct_tpl_ids.add(s.uploaded_file.template_id)
+
+    rev_to_tpl: dict[str, str] = {}
+    if rev_ids:
+        for rev in db.scalars(select(TemplateRevision).where(TemplateRevision.id.in_(list(rev_ids)))).all():
+            if rev.template_id:
+                rev_to_tpl[rev.id] = rev.template_id
+                if _is_valid_uuid_for_db(db, rev.template_id):
+                    direct_tpl_ids.add(rev.template_id)
+
+    tpl_names: dict[str, str] = {}
+    if direct_tpl_ids:
+        for tpl in db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.id.in_(list(direct_tpl_ids)))).all():
+            tpl_names[tpl.id] = tpl.name
+
+    out: dict[str, tuple[str | None, str]] = {}
+    for s in sessions:
+        tpl_id = None
+        if s.draft:
+            tpl_id = s.draft.layout_override_template_id
+            if not tpl_id and s.draft.template_revision_id:
+                tpl_id = rev_to_tpl.get(s.draft.template_revision_id)
+        if not tpl_id and s.uploaded_file:
+            tpl_id = s.uploaded_file.template_id
+        tpl_name = tpl_names.get(tpl_id, "Agency Motor (Bilingual)") if tpl_id else "Agency Motor (Bilingual)"
+        out[s.id] = (tpl_id, tpl_name)
+    return out
+
+
+def list_sessions(
+    db: Session,
+    user_id: str,
+    search: str | None = None,
+    company: str | None = None,
+    staff_id: str | None = None,
+    status: str | None = None,
+    sort_by: str = "date_desc",
+    limit: int = 50,
+    offset: int = 0,
+    type_filter: str | None = None,
+) -> tuple[list[SessionModel], int]:
+    base = _base_visible_sessions_query()
     if search:
         like = f"%{search.strip()}%"
         base = base.where(
@@ -125,21 +227,31 @@ def list_sessions(
         base = base.where(or_(SessionModel.owner_id == staff_id, SessionModel.last_edited_by_id == staff_id))
     if status and status.lower() != "all":
         base = base.where(func.lower(QuotationDraft.status) == status.strip().lower())
-    if type_filter and type_filter.lower() == "live":
+    tf = (type_filter or "").strip().lower()
+    if tf == "live":
         base = base.where(SessionModel.is_test.is_(False))
-    elif type_filter and type_filter.lower() == "test":
+    elif tf == "test":
         base = base.where(SessionModel.is_test.is_(True))
+    elif tf in ("quotation", "quotations", "comparison"):
+        base = base.where(
+            SessionModel.is_test.is_(False),
+            or_(SessionModel.document_type.is_(None), SessionModel.document_type != "covernote"),
+        )
+    elif tf in ("covernote", "covernotes", "policy"):
+        base = base.where(
+            SessionModel.is_test.is_(False),
+            SessionModel.document_type == "covernote",
+        )
 
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
 
     bind = getattr(db, "bind", None)
     is_pg = bind is not None and getattr(bind, "dialect", None) is not None and bind.dialect.name == "postgresql"
 
-    # Sorting
+    # Sorting (default: newest uploaded first)
     if sort_by in ("vehicle", "plate_asc"):
         if is_pg:
             plate_expr = func.coalesce(func.jsonb_extract_path_text(QuotationDraft.fields, "vehicle_no", "value"), "")
-            # Empty plates sort to the bottom, non-empty plates sort alphabetically, and within each plate newest first
             base = base.order_by(
                 (plate_expr == "").asc(),
                 plate_expr.asc(),
@@ -147,6 +259,11 @@ def list_sessions(
             )
         else:
             base = base.order_by(SessionModel.created_at.desc())
+    elif sort_by == "edited_desc":
+        base = base.order_by(
+            SessionModel.last_edited_at.desc().nullslast(),
+            SessionModel.created_at.desc(),
+        )
     elif sort_by == "date_asc":
         base = base.order_by(SessionModel.created_at.asc())
     elif sort_by == "ref_desc":
@@ -235,25 +352,29 @@ def serialize_session(
     quotation_ref = session.quotation_ref or _safe_field_val(fields, "quotation_reference")
 
     # Resolve bound or default template name
-    template_id = None
-    template_name = None
-    db_inst = kwargs.get("db") or (object_session(session) if session else None)
-    if session.draft:
-        template_id = session.draft.layout_override_template_id
-        if not template_id and session.draft.template_revision_id:
-            if db_inst and _is_valid_uuid_for_db(db_inst, session.draft.template_revision_id):
-                rev = db_inst.get(TemplateRevision, session.draft.template_revision_id)
-                if rev:
-                    template_id = rev.template_id
-    if not template_id and session.uploaded_file:
-        template_id = session.uploaded_file.template_id
+    preloaded_templates: dict[str, tuple[str | None, str]] | None = kwargs.get("preloaded_templates")
+    if preloaded_templates and session.id in preloaded_templates:
+        template_id, template_name = preloaded_templates[session.id]
+    else:
+        template_id = None
+        template_name = None
+        db_inst = kwargs.get("db") or (object_session(session) if session else None)
+        if session.draft:
+            template_id = session.draft.layout_override_template_id
+            if not template_id and session.draft.template_revision_id:
+                if db_inst and _is_valid_uuid_for_db(db_inst, session.draft.template_revision_id):
+                    rev = db_inst.get(TemplateRevision, session.draft.template_revision_id)
+                    if rev:
+                        template_id = rev.template_id
+        if not template_id and session.uploaded_file:
+            template_id = session.uploaded_file.template_id
 
-    if template_id and db_inst and _is_valid_uuid_for_db(db_inst, template_id):
-        tpl = db_inst.get(OutputTemplateConfig, template_id)
-        if tpl:
-            template_name = tpl.name
-    if not template_name:
-        template_name = "Agency Motor (Bilingual)"
+        if template_id and db_inst and _is_valid_uuid_for_db(db_inst, template_id):
+            tpl = db_inst.get(OutputTemplateConfig, template_id)
+            if tpl:
+                template_name = tpl.name
+        if not template_name:
+            template_name = "Agency Motor (Bilingual)"
 
     return {
         "id": session.id,

@@ -205,7 +205,12 @@ export interface PolicyFieldsCardProps {
   setSyncHighlight: React.Dispatch<React.SetStateAction<{ field: "vehicle_type" | "product_package"; prev: string; next: string; timestamp: number } | null>>;
   companyWorkspace: any | null;
   categorizedProducts: { cars: any[]; motorcycles: any[]; lorries: any[] };
-  pinCatalog: (companyId: string, productId: string) => void;
+  pinCatalog: (
+    companyId: string,
+    productId: string,
+    tierId?: string | null,
+    options?: { stageOnly?: boolean }
+  ) => void;
 }
 
 export function PolicyFieldsCard({
@@ -385,7 +390,7 @@ export function PolicyFieldsCard({
                           /commercial.*car|company.*car|corporate/i.test(p.name || "")
                         );
                         if (commProd && workspace?.pinned.company_id) {
-                          pinCatalog(workspace.pinned.company_id as string, commProd.id);
+                          pinCatalog(workspace.pinned.company_id as string, commProd.id, null, { stageOnly: true });
                           setSyncHighlight({
                             field: "product_package",
                             prev: "Private Package",
@@ -412,7 +417,7 @@ export function PolicyFieldsCard({
                             ) && !/commercial|company/i.test(p.name || "")
                         );
                         if (privProd && workspace?.pinned.company_id) {
-                          pinCatalog(workspace.pinned.company_id as string, privProd.id);
+                          pinCatalog(workspace.pinned.company_id as string, privProd.id, null, { stageOnly: true });
                           setSyncHighlight({
                             field: "product_package",
                             prev: "Commercial Package",
@@ -470,7 +475,7 @@ export function PolicyFieldsCard({
                           return !/motor|lorry|commercial/i.test(nm);
                         });
                         if (matchingEv && workspace?.pinned.company_id) {
-                          pinCatalog(workspace.pinned.company_id as string, matchingEv.id);
+                          pinCatalog(workspace.pinned.company_id as string, matchingEv.id, null, { stageOnly: true });
                           setSyncHighlight({
                             field: "product_package",
                             prev: currentProd ? formatProductLabel(currentProd.name) : "ICE Package",
@@ -503,7 +508,7 @@ export function PolicyFieldsCard({
                           return !/motor|lorry|commercial/i.test(nm);
                         });
                         if (matchingIce && workspace?.pinned.company_id) {
-                          pinCatalog(workspace.pinned.company_id as string, matchingIce.id);
+                          pinCatalog(workspace.pinned.company_id as string, matchingIce.id, null, { stageOnly: true });
                           setSyncHighlight({
                             field: "product_package",
                             prev: currentProd ? formatProductLabel(currentProd.name) : "EV Package",
@@ -573,7 +578,7 @@ export function PolicyFieldsCard({
                     ) || targetPool[0];
 
                   if (bestMatching) {
-                    pinCatalog(workspace.pinned.company_id, bestMatching.id);
+                    pinCatalog(workspace.pinned.company_id, bestMatching.id, null, { stageOnly: true });
                     setSyncHighlight({
                       field: "product_package",
                       prev: currentProd ? formatProductLabel(currentProd.name) : "Previous Package",
@@ -678,20 +683,37 @@ export function PolicyFieldsCard({
                   commitFieldDirectly("insured_name", val);
                 }
 
-                // Format engine CC when modified
+                // Format engine CC when modified (skip EV kW and Commercial Lorry KG capacities)
                 if (field.name === "engine_cc" || field.name === "car_model") {
-                  const currentCCStr =
-                    formValues["engine_cc"] ||
-                    (field.name === "car_model" ? inferCCFromCarModel(val)?.toString() : null);
-                  const rawParsed = currentCCStr
-                    ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, ""))
-                    : null;
-                  if (rawParsed && rawParsed > 0 && rawParsed <= 7000) {
-                    const parsedCC = Math.round(rawParsed);
-                    if (!formValues["engine_cc"] || !formValues["engine_cc"].includes("CC")) {
-                      const formatted = `${parsedCC} CC`;
-                      setFormValues((values) => ({ ...values, engine_cc: formatted }));
-                      commitFieldDirectly("engine_cc", formatted);
+                  const vtypeVal = String(
+                    formValues["vehicle_type"] ||
+                      (workspace.fields?.vehicle_type as WorkspaceField | undefined)?.value ||
+                      ""
+                  );
+                  const currentModel = field.name === "car_model" ? val : formValues["car_model"] || "";
+                  const currentCCInput = field.name === "engine_cc" ? val : formValues["engine_cc"] || "";
+                  const isEvVehicle =
+                    isCurrentEV ||
+                    Boolean(detectEVCategory(formValues["car_brand"] || "", currentModel, currentCCInput));
+                  const isLorryVehicle =
+                    /lorry|truck|commercial|haulage|trailer/i.test(vtypeVal) ||
+                    /\bkg\b/i.test(currentCCInput);
+                  const hasExplicitNonCCUnit = /\b(?:kw|kwh|kg|ton|hp|bhp|ps)\b/i.test(currentCCInput);
+
+                  if (!isEvVehicle && !isLorryVehicle && !hasExplicitNonCCUnit) {
+                    const currentCCStr =
+                      currentCCInput ||
+                      (field.name === "car_model" ? inferCCFromCarModel(val)?.toString() : null);
+                    const rawParsed = currentCCStr
+                      ? parseFloat(String(currentCCStr).replace(/[^0-9.]/g, ""))
+                      : null;
+                    if (rawParsed && rawParsed > 0 && rawParsed <= 7000) {
+                      const parsedCC = Math.round(rawParsed);
+                      if (!currentCCInput || !currentCCInput.toUpperCase().includes("CC")) {
+                        const formatted = `${parsedCC} CC`;
+                        setFormValues((values) => ({ ...values, engine_cc: formatted }));
+                        commitFieldDirectly("engine_cc", formatted);
+                      }
                     }
                   }
                 }

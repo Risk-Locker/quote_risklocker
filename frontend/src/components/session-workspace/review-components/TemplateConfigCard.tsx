@@ -356,21 +356,8 @@ export function TemplateConfigCard({
             </div>
           ) : null}
 
-          {/* Design 2 Dedicated Layout Controls */}
-          {isDesign2 ? (
-            <div className="grid gap-2.5 pt-2 border-t border-[var(--rl-border)]">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
-                  <Sparkle size={13} className="text-[var(--rl-red)]" weight="fill" />
-                  Design 2 Document Controls
-                </label>
-                <span className="rounded-full bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                  Modern 4-Column Matrix
-                </span>
-              </div>
-            </div>
-          ) : (
-            /* Legacy Benefits Card Template Switcher (Bilingual v4 only) */
+          {/* Legacy Benefits Card Template Switcher (Bilingual v4 only) */}
+          {!isDesign2 ? (
             <div className="grid gap-2 pt-2 border-t border-[var(--rl-border)]">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-[var(--rl-text-strong)] flex items-center gap-1.5">
@@ -407,7 +394,7 @@ export function TemplateConfigCard({
                 })}
               </div>
             </div>
-          )}
+          ) : null}
         </>
       )}
     </Card>

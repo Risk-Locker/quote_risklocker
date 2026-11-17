@@ -8,6 +8,7 @@ import {
   CheckCircle,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import type { TenureRow, PicItem } from "./tenure-timeline-ledger";
 import { STAGE_ORDER } from "./tenure-timeline-ledger";
 
@@ -26,6 +27,7 @@ export function EditVehicleDealModal({
   pics = [],
   onSave,
 }: EditVehicleDealModalProps) {
+  const { toast } = useToast();
   const [customerName, setCustomerName] = useState("");
   const [customerIcNo, setCustomerIcNo] = useState("");
   const [vehicleNo, setVehicleNo] = useState("");
@@ -70,7 +72,7 @@ export function EditVehicleDealModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerName.trim() || !vehicleNo.trim()) {
-      alert("Customer Name and Vehicle Plate are required.");
+      toast("Customer Name and Vehicle Plate are required.", "error");
       return;
     }
 
@@ -95,11 +97,12 @@ export function EditVehicleDealModal({
         comment: comment.trim(),
         client_preference_notes: clientPreferenceNotes.trim(),
       });
+      toast("Deal details updated.", "success");
       onClose();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       console.error("Failed to update deal:", err);
-      alert("Failed to update deal: " + msg);
+      toast("Failed to update deal: " + msg, "error");
     } finally {
       setSaving(false);
     }

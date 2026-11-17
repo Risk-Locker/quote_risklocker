@@ -178,7 +178,22 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
     return extras
 
 
-def adjusted_total_text(fields: dict, extras: list[dict], round_total: bool = False) -> str:
+def _is_field_flag_enabled(fields: dict, key: str) -> bool:
+    raw = (fields or {}).get(key)
+    val = raw.get("value") if isinstance(raw, dict) else raw
+    if val is None:
+        return True
+    return str(val).strip().lower() not in {"false", "0", "no"}
+
+
+def adjusted_total_text(
+    fields: dict,
+    extras: list[dict],
+    round_total: bool = False,
+    *,
+    include_road_tax: bool | None = None,
+    include_runner_fee: bool | None = None,
+) -> str:
     """Total premium including staff-added extras; deterministic from extracted values."""
     extras_total = Decimal("0")
     for extra in extras:
@@ -203,17 +218,20 @@ def adjusted_total_text(fields: dict, extras: list[dict], round_total: bool = Fa
         except (InvalidOperation, TypeError, ValueError):
             base_prem = None
 
+    inc_rt = _is_field_flag_enabled(fields, "include_road_tax") if include_road_tax is None else bool(include_road_tax)
+    inc_rf = _is_field_flag_enabled(fields, "include_runner_fee") if include_runner_fee is None else bool(include_runner_fee)
+
     rt_raw = (fields or {}).get("roadtax")
     rt_val = rt_raw.get("value") if isinstance(rt_raw, dict) else rt_raw
     rt_num = Decimal("0")
-    if rt_val:
+    if inc_rt and rt_val:
         try:
             clean_rt = re.sub(r"[^\d.]", "", str(rt_val))
             if clean_rt:
                 rt_num = Decimal(clean_rt)
         except Exception:
             pass
-    if rt_num == Decimal("0") and (fields or {}).get("engine_cc"):
+    if inc_rt and rt_num == Decimal("0") and (fields or {}).get("engine_cc"):
         from app.services.road_tax_service import calculate_road_tax
         cc_raw = (fields or {}).get("engine_cc")
         cc_val = cc_raw.get("value") if isinstance(cc_raw, dict) else cc_raw
@@ -252,7 +270,7 @@ def adjusted_total_text(fields: dict, extras: list[dict], round_total: bool = Fa
     sf_raw = (fields or {}).get("service_fee") or (fields or {}).get("runner_fee")
     sf_val = sf_raw.get("value") if isinstance(sf_raw, dict) else sf_raw
     sf_num = Decimal("0")
-    if sf_val:
+    if inc_rf and sf_val:
         try:
             clean_sf = re.sub(r"[^\d.]", "", str(sf_val))
             if clean_sf:

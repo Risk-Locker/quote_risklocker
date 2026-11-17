@@ -653,17 +653,18 @@ def rerank_deal_entries(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Re-rank visible comparison entries using the 4-tier Best Deal criteria."""
+    """Re-rank visible comparison entries using Underwriter Value & Logical Risk Analysis."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.domain.motor.winner_ranking_rules import evaluate_logical_value_rerank
+
     entries = list(db.scalars(select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure_id)).all())
-    tenure = db.get(InsuranceTenure, tenure_id)
-    ranked = rank_comparison_entries(
-        entries,
-        explicit_winning_company_id=tenure.winning_company_id if tenure else None,
-        explicit_winning_ref=tenure.winning_quotation_ref if tenure else None,
-        auto_recommend_rank1=False,
-    )
+    ranked = evaluate_logical_value_rerank(entries)
     db.commit()
-    return {"status": "success", "ranked_count": len(ranked)}
+    return {
+        "status": "success",
+        "ranked_count": len(ranked),
+        "explanations": {e.id: e.notes for e in ranked if not getattr(e, "is_hidden", False)},
+    }
 
 
 class ResolveDuplicateRequest(BaseModel):

@@ -64,6 +64,7 @@ export function useLedgerState() {
   const [selectedTenureIds, setSelectedTenureIds] = useState<string[]>([]);
   const [deletingBulk, setDeletingBulk] = useState(false);
   const [confirmingBulk, setConfirmingBulk] = useState(false);
+  const [pendingBulkAction, setPendingBulkAction] = useState<"delete" | "hit" | null>(null);
 
   const [showHidden, setShowHidden] = useState<boolean>(false);
 
@@ -309,7 +310,7 @@ export function useLedgerState() {
         });
       });
 
-      await api(`/tenures/${tenureId}`, {
+      await api(`/tenures/${tenureId}/ledger-fields`, {
         method: "PATCH",
         body: JSON.stringify(updates),
       });
@@ -345,41 +346,43 @@ export function useLedgerState() {
   };
 
   const handleBulkDelete = async () => {
-    const count = selectedTenureIds.length;
-    if (
-      !confirm(
-        `Move ${count} selected deal(s) to Trash? Associated quotation sessions, comparisons, and PDFs will be archived for 30 days.`
-      )
-    ) {
-      return;
-    }
-
-    setDeletingBulk(true);
-    try {
-      await api("/tenures/bulk", {
-        method: "DELETE",
-        body: JSON.stringify({ tenure_ids: selectedTenureIds }),
-      });
-      setSelectedTenureIds([]);
-      loadTenures();
-      loadStageSummary();
-      loadMonths();
-      loadYoyStats();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast("Bulk delete failed: " + msg, "error");
-    } finally {
-      setDeletingBulk(false);
-    }
+    if (selectedTenureIds.length === 0) return;
+    setPendingBulkAction("delete");
   };
 
   const handleBulkConfirmHit = async () => {
+    if (selectedTenureIds.length === 0) return;
+    setPendingBulkAction("hit");
+  };
+
+  const confirmPendingBulkAction = async () => {
+    const action = pendingBulkAction;
+    if (!action || selectedTenureIds.length === 0) {
+      setPendingBulkAction(null);
+      return;
+    }
     const count = selectedTenureIds.length;
-    if (
-      !confirm(
-        `Confirm policy as HIT (Won / Issued Policy) for all ${count} selected deals? This will create upcoming renewal deals for next year where applicable.`
-      )
-    ) {
+    if (action === "delete") {
+      setDeletingBulk(true);
+      try {
+        await api("/tenures/bulk", {
+          method: "DELETE",
+          body: JSON.stringify({ tenure_ids: selectedTenureIds }),
+        });
+        setSelectedTenureIds([]);
+        setPendingBulkAction(null);
+        toast(`Moved ${count} deal(s) to Trash.`, "success");
+        loadTenures();
+        loadStageSummary();
+        loadMonths();
+        loadYoyStats();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast("Bulk delete failed: " + msg, "error");
+        setPendingBulkAction(null);
+      } finally {
+        setDeletingBulk(false);
+      }
       return;
     }
 
@@ -390,6 +393,8 @@ export function useLedgerState() {
         body: JSON.stringify({ tenure_ids: selectedTenureIds }),
       });
       setSelectedTenureIds([]);
+      setPendingBulkAction(null);
+      toast(`Confirmed ${count} deal(s) as HIT.`, "success");
       loadTenures();
       loadStageSummary();
       loadMonths();
@@ -397,6 +402,7 @@ export function useLedgerState() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast("Bulk confirm hit failed: " + msg, "error");
+      setPendingBulkAction(null);
     } finally {
       setConfirmingBulk(false);
     }
@@ -795,6 +801,9 @@ export function useLedgerState() {
     handleToggleSelectGroup,
     handleBulkDelete,
     handleBulkConfirmHit,
+    pendingBulkAction,
+    setPendingBulkAction,
+    confirmPendingBulkAction,
     deletingBulk,
     confirmingBulk,
     showHidden,

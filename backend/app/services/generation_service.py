@@ -444,8 +444,17 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     config, assets, asset_hashes = _snapshot_assets(db, config, cards, draft)
     extras = build_extras(selections, concepts, offerings)
     fields = deepcopy(draft.fields or {})
-    round_tot = bool((draft.display_options or {}).get("round_total", True))
-    adjusted_total = adjusted_total_text(fields, extras, round_total=round_tot)
+    disp_opts = draft.display_options or {}
+    round_tot = bool(disp_opts.get("round_total", True))
+    inc_rt = disp_opts.get("include_road_tax") if "include_road_tax" in disp_opts else None
+    inc_rf = disp_opts.get("include_runner_fee") if "include_runner_fee" in disp_opts else None
+    adjusted_total = adjusted_total_text(
+        fields,
+        extras,
+        round_total=round_tot,
+        include_road_tax=inc_rt,
+        include_runner_fee=inc_rf,
+    )
     fields["total_premium_adjusted"] = {
         "value": adjusted_total if adjusted_total else _field_text(fields, "total_amount"),
         "status": "ready",

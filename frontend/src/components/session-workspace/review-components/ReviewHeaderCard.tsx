@@ -3,12 +3,12 @@
 import React, { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { StatusBadge } from "@/components/status-badge";
 import { GuidedTour } from "@/components/guided-tour";
 import {
   ArrowsClockwise,
-  ArrowSquareOut,
   CaretLeft,
   Eye,
   FilePdf,
@@ -16,7 +16,7 @@ import {
   PencilSimple,
   Sparkle,
 } from "@phosphor-icons/react";
-import { api, fileUrl } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { WorkspaceSnapshot, MutationState } from "../types";
 import { ExportActionsBar } from "./ExportActionsBar";
 
@@ -73,9 +73,11 @@ export function ReviewHeaderCard({
 }: ReviewHeaderCardProps) {
   const { toast } = useToast();
   const [redetecting, setRedetecting] = useState(false);
+  const [redetectDialogOpen, setRedetectDialogOpen] = useState(false);
   const [docType, setDocType] = useState<"quotation" | "covernote">(
     workspace.document_type === "covernote" ? "covernote" : "quotation"
   );
+  const [pendingDocType, setPendingDocType] = useState<"quotation" | "covernote" | null>(null);
   const [togglingDocType, setTogglingDocType] = useState(false);
 
   useEffect(() => {
@@ -84,14 +86,15 @@ export function ReviewHeaderCard({
     }
   }, [workspace.document_type]);
 
-  const handleToggleDocumentType = async (newType: "quotation" | "covernote") => {
+  const handleToggleDocumentType = (newType: "quotation" | "covernote") => {
     if (newType === docType || togglingDocType) return;
-    const confirmMsg =
-      newType === "covernote"
-        ? "Designate this document as the official Cover Note (Issued Policy)? This will anchor it as the active policy for this renewal and advance the stage to Issue Policy."
-        : "Revert this document to a Quotation? This will unbind it as the active Cover Note and return the tenure stage to Quotations.";
-    if (!window.confirm(confirmMsg)) return;
+    setPendingDocType(newType);
+  };
 
+  const confirmToggleDocumentType = async () => {
+    if (!pendingDocType || togglingDocType) return;
+    const newType = pendingDocType;
+    setPendingDocType(null);
     setTogglingDocType(true);
     try {
       const res = await api<{ status: string; document_type: string }>(`/sessions/${workspace.session_id}`, {
@@ -101,6 +104,12 @@ export function ReviewHeaderCard({
       if (res?.status === "success") {
         setDocType(newType);
         workspace.document_type = newType;
+        toast(
+          newType === "covernote"
+            ? "Designated as official Cover Note (Issued Policy)."
+            : "Reverted document to Quotation.",
+          "success"
+        );
       }
     } catch (err: any) {
       toast("Failed to update document type: " + (err?.message || "Server error"), "error");
@@ -109,24 +118,22 @@ export function ReviewHeaderCard({
     }
   };
 
-  const handleRedetect = async () => {
-    if (!window.confirm("Re-detect this quotation? This will re-analyze the original PDF to pick up any missing fields or benefit lines.")) {
-      return;
-    }
+  const handleRedetect = () => {
+    setRedetectDialogOpen(true);
+  };
+
+  const confirmRedetect = async () => {
+    setRedetectDialogOpen(false);
     setRedetecting(true);
     try {
       const res = await api<{ success: boolean; message?: string }>(`/sessions/${workspace.session_id}/rescan`, {
         method: "POST",
         body: JSON.stringify({ mode: "in_place", engine: "auto" }),
       });
-      if (res?.success) {
-        window.location.reload();
-      } else {
-        alert(res?.message || "Re-detection completed.");
-        window.location.reload();
-      }
+      toast(res?.message || "Re-detection completed.", "success");
+      window.location.reload();
     } catch (err: any) {
-      alert("Failed to re-detect: " + (err?.message || "Server error"));
+      toast("Failed to re-detect: " + (err?.message || "Server error"), "error");
       setRedetecting(false);
     }
   };
@@ -198,7 +205,11 @@ export function ReviewHeaderCard({
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={workspace.status} />
               {mutation.dirty ? (
-                <Badge variant="warning">Unsaved changes</Badge>
+                <Badge variant="warning">
+                  {mutation.dirtyPaths.length} unsaved change{mutation.dirtyPaths.length === 1 ? "" : "s"}
+                </Badge>
+              ) : mutation.saveError ? (
+                <Badge variant="danger">Save failed</Badge>
               ) : (
                 <Badge variant="success">All changes saved</Badge>
               )}
@@ -254,21 +265,8 @@ export function ReviewHeaderCard({
               aria-label={pdfOpen ? "Hide PDF" : "Show source PDF"}
             >
               <FilePdf size={14} weight={pdfOpen ? "fill" : "bold"} className={pdfOpen ? "text-[var(--rl-red)]" : ""} />
-              <span>PDF</span>
+              <span>Source PDF</span>
             </button>
-            {workspace.uploaded_file_id ? (
-              <a
-                href={fileUrl(`/uploaded-files/${workspace.uploaded_file_id}/content`)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-semibold text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/80 transition-all cursor-pointer"
-                title="Open uploaded quotation PDF in new browser tab (Foxit / Acrobat viewer)"
-                aria-label="Open uploaded PDF in new tab"
-              >
-                <ArrowSquareOut size={13} weight="bold" />
-                <span className="hidden xl:inline text-[11px]">Tab</span>
-              </a>
-            ) : null}
             <button
               type="button"
               onClick={() => setFormCollapsed((v) => !v)}
@@ -321,7 +319,7 @@ export function ReviewHeaderCard({
               icon={<FloppyDisk weight="bold" />}
               onClick={() => saveAndCheckLearning()}
             >
-              {mutation.saving ? "Saving..." : mutation.dirty ? "Save Changes" : "Saved"}
+              {mutation.saving ? "Saving..." : mutation.dirty ? "Save & Sync" : "Saved"}
             </Button>
           </div>
 
@@ -344,6 +342,38 @@ export function ReviewHeaderCard({
           />
         </div>
       </div>
+
+      <Dialog
+        open={Boolean(pendingDocType)}
+        onOpenChange={(open) => {
+          if (!open) setPendingDocType(null);
+        }}
+        title={
+          pendingDocType === "covernote"
+            ? "Designate as Official Cover Note?"
+            : "Revert Document to Quotation?"
+        }
+        description={
+          pendingDocType === "covernote"
+            ? "This will anchor this document as the active Issued Policy for this renewal and advance the tenure stage to Issue Policy."
+            : "This will unbind this document as the active Cover Note and return the tenure stage to Quotations."
+        }
+        onConfirm={confirmToggleDocumentType}
+        confirmLabel="Confirm"
+        confirmVariant="primary"
+        loading={togglingDocType}
+      />
+
+      <Dialog
+        open={redetectDialogOpen}
+        onOpenChange={setRedetectDialogOpen}
+        title="Re-detect Quotation from Source PDF?"
+        description="This will re-analyze the original PDF to refresh extracted fields and benefit lines."
+        onConfirm={confirmRedetect}
+        confirmLabel="Re-detect Now"
+        confirmVariant="primary"
+        loading={redetecting}
+      />
     </header>
   );
 }

@@ -426,7 +426,16 @@ def readiness(db: Session = Depends(get_db)) -> JSONResponse:
 def system_checks(db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
     if user.role not in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}:
         raise AppError("You do not have permission to view system checks.", 403)
-    return {"checks": get_system_checks(settings, db)}
+    from app.services.system_checks import get_deep_system_diagnostics
+
+    base_checks = get_system_checks(settings, db)
+    deep = get_deep_system_diagnostics(settings, db)
+    return {
+        "checks": base_checks,
+        "domain_logic_checks": deep["domain_logic_checks"],
+        "sitemap_routes": deep["sitemap_routes"],
+        "database_summary": deep["database_summary"],
+    }
 
 
 

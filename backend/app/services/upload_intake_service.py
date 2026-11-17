@@ -162,7 +162,12 @@ async def create_queued_upload(
             storage_etag = None
             storage_sha = hashlib.sha256(data).hexdigest()
 
-        q_ref = generate_quotation_reference(db, when=now)
+        if is_test:
+            from datetime import timedelta
+            kl_now = now.astimezone(timezone(timedelta(hours=8)))
+            q_ref = f"TEST-RL{kl_now:%y}{new_id()[:5].upper()}"
+        else:
+            q_ref = generate_quotation_reference(db, when=now)
 
         batch = Batch(
             id=batch_id,

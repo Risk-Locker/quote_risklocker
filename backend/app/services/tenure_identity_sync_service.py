@@ -305,6 +305,60 @@ def _update_single_draft_fields(
     return f
 
 
+def _sync_customer_identity_draft_fields(
+    fields: dict[str, Any],
+    cust: CustomerAccount | None,
+) -> dict[str, Any]:
+    """Update only policyholder/customer identity keys on a linked sibling draft."""
+    if not cust:
+        return fields
+    f = dict(fields)
+    if cust.canonical_name:
+        _set_draft_field(f, "customer_name", cust.canonical_name)
+        for alias in ("insured_name", "policyholder_name", "client_name"):
+            if alias in f:
+                _set_draft_field(f, alias, cust.canonical_name)
+    if cust.id_number:
+        _set_draft_field(f, "ic_or_brn", cust.id_number)
+        for alias in ("customer_ic_no", "ic_no", "nric_no", "id_number"):
+            if alias in f:
+                _set_draft_field(f, alias, cust.id_number)
+    return f
+
+
+def _sync_vehicle_spec_draft_fields(
+    fields: dict[str, Any],
+    tv: TrackedVehicle | None,
+    *,
+    vehicle_type: str | None,
+    powertrain: str | None,
+) -> dict[str, Any]:
+    """Update only physical vehicle specifications on a draft (never dates/fees)."""
+    f = dict(fields)
+    if tv:
+        if tv.vehicle_no:
+            _set_draft_field(f, "vehicle_no", tv.vehicle_no)
+        if tv.car_brand:
+            _set_draft_field(f, "car_brand", tv.car_brand)
+        if tv.car_model:
+            _set_draft_field(f, "car_model", tv.car_model)
+        if tv.engine_cc:
+            _set_draft_field(f, "engine_cc", tv.engine_cc)
+        if tv.chassis_no:
+            _set_draft_field(f, "chassis_no", tv.chassis_no)
+        if tv.engine_no:
+            _set_draft_field(f, "engine_no", tv.engine_no)
+        if tv.manufacture_year:
+            _set_draft_field(f, "vehicle_year", str(tv.manufacture_year))
+            if "manufacture_year" in f:
+                _set_draft_field(f, "manufacture_year", str(tv.manufacture_year))
+    if vehicle_type:
+        _set_draft_field(f, "vehicle_type", vehicle_type)
+    if powertrain:
+        _set_draft_field(f, "powertrain", powertrain)
+    return f
+
+
 def _propagate_to_session_drafts(
     db: Session,
     tenure: InsuranceTenure,
@@ -318,32 +372,66 @@ def _propagate_to_session_drafts(
     eff_rt: Decimal,
     eff_rf: Decimal,
 ) -> None:
-    """Propagate canonical vehicle, customer, dates, and fees to all linked Session drafts."""
+    """Propagate canonical changes with strict vehicle/tenure vs customer-only isolation."""
     session_conditions = [SessionModel.tenure_id == tenure.id]
-    if cust:
+    if tv is not None:
+        session_conditions.append(SessionModel.tracked_vehicle_id == tv.id)
+    if cust is not None:
         session_conditions.append(SessionModel.customer_id == cust.id)
 
-    linked_sessions = list(db.scalars(select(SessionModel).where(or_(*session_conditions))).all())
-    for s in linked_sessions:
-        if cust and s.customer_id != cust.id:
-            s.customer_id = cust.id
-        if dt_start:
-            s.coverage_start_date = dt_start
-        if dt_end:
-            s.coverage_end_date = dt_end
-        if s.draft and isinstance(s.draft.fields, dict):
-            s.draft.fields = _update_single_draft_fields(
-                s.draft.fields,
-                tenure=tenure,
-                cust=cust,
-                tv=tv,
-                vehicle_type=vehicle_type,
-                powertrain=powertrain,
-                dt_start=dt_start,
-                dt_end=dt_end,
-                eff_rt=eff_rt,
-                eff_rf=eff_rf,
+    linked_sessions = list(
+        db.scalars(
+            select(SessionModel).where(
+                or_(*session_conditions),
+                or_(SessionModel.tenure_id == tenure.id, SessionModel.is_test.is_(False)),
             )
+        ).all()
+    )
+    for s in linked_sessions:
+        if getattr(s, "is_test", False) and s.tenure_id != tenure.id:
+            continue
+
+        same_tenure = s.tenure_id == tenure.id
+        same_vehicle = bool(tv is not None and s.tracked_vehicle_id == tv.id)
+
+        if same_tenure:
+            if cust and s.customer_id != cust.id:
+                s.customer_id = cust.id
+            if tv and s.tracked_vehicle_id != tv.id:
+                s.tracked_vehicle_id = tv.id
+            if dt_start:
+                s.coverage_start_date = dt_start
+            if dt_end:
+                s.coverage_end_date = dt_end
+            if s.draft and isinstance(s.draft.fields, dict):
+                s.draft.fields = _update_single_draft_fields(
+                    s.draft.fields,
+                    tenure=tenure,
+                    cust=cust,
+                    tv=tv,
+                    vehicle_type=vehicle_type,
+                    powertrain=powertrain,
+                    dt_start=dt_start,
+                    dt_end=dt_end,
+                    eff_rt=eff_rt,
+                    eff_rf=eff_rf,
+                )
+                flag_modified(s.draft, "fields")
+            continue
+
+        if not s.draft or not isinstance(s.draft.fields, dict):
+            continue
+
+        if same_vehicle:
+            updated = _sync_customer_identity_draft_fields(s.draft.fields, cust)
+            updated = _sync_vehicle_spec_draft_fields(
+                updated, tv, vehicle_type=vehicle_type, powertrain=powertrain
+            )
+            s.draft.fields = updated
+            flag_modified(s.draft, "fields")
+        elif cust is not None and s.customer_id == cust.id:
+            # Different vehicle/tenure owned by the same customer: sync ONLY customer identity
+            s.draft.fields = _sync_customer_identity_draft_fields(s.draft.fields, cust)
             flag_modified(s.draft, "fields")
 
 

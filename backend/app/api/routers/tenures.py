@@ -1114,18 +1114,25 @@ def update_tenure_ledger_fields(
                 .values(customer_name=cust.canonical_name)
             )
 
-            # Propagate customer name and IC to all quotation drafts under this customer or tenure
+            # Propagate customer name and IC to non-sandbox quotation drafts under this customer or tenure
+            from sqlalchemy.orm.attributes import flag_modified
             sessions_to_sync = list(
                 db.scalars(
                     select(SessionModel).where(
                         or_(
                             SessionModel.customer_id == cust.id,
                             SessionModel.tenure_id == tenure.id,
-                        )
+                        ),
+                        or_(
+                            SessionModel.tenure_id == tenure.id,
+                            SessionModel.is_test.is_(False),
+                        ),
                     )
                 ).all()
             )
             for s in sessions_to_sync:
+                if getattr(s, "is_test", False) and s.tenure_id != tenure.id:
+                    continue
                 if s.customer_id != cust.id:
                     s.customer_id = cust.id
                 if s.draft and isinstance(s.draft.fields, dict):
@@ -1145,6 +1152,7 @@ def update_tenure_ledger_fields(
                                 else:
                                     f[ic_k] = cust.id_number
                     s.draft.fields = f
+                    flag_modified(s.draft, "fields")
 
     if payload.is_discarded is not None:
         tenure.is_discarded = payload.is_discarded

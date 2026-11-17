@@ -355,11 +355,11 @@ export function LedgerFiltersBar({
       </div>
 
       {/* 3. ACTIVE RENEWALS VS LOST CLIENTS PANEL & SEARCH CONTROLS (STICKY HEADER) */}
-      <div className="sticky top-[56px] z-30 bg-[#f5f5f7]/95 backdrop-blur-md py-2.5 px-3 rounded-[var(--rl-radius)] border border-[#e5e5ea] shadow-xs space-y-2.5 transition-all">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+      <div className="sticky top-[56px] z-30 bg-[#f5f5f7]/95 backdrop-blur-md py-2.5 px-3 rounded-[var(--rl-radius)] border border-[#e5e5ea] shadow-xs space-y-2 transition-all">
+        <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-2">
           {/* Category Switcher: Active Renewals vs Issued vs Pending vs Lost Clients */}
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1 bg-white p-1 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] shadow-2xs w-fit flex-wrap">
+            <div className="flex items-center gap-1 bg-white p-1 rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] shadow-2xs w-fit max-w-full flex-wrap">
               <button
                 type="button"
                 onClick={() => {
@@ -369,7 +369,7 @@ export function LedgerFiltersBar({
                     onClearStageFilter();
                   }
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
                   category === "active" && policyFilter === "all"
                     ? "bg-[#1b1717] text-white shadow-2xs font-bold"
                     : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50"
@@ -387,7 +387,7 @@ export function LedgerFiltersBar({
                     onClearStageFilter();
                   }
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
                   category === "active" && policyFilter === "issued"
                     ? "bg-emerald-600 text-white shadow-2xs"
                     : "text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
@@ -407,7 +407,7 @@ export function LedgerFiltersBar({
                     onClearStageFilter();
                   }
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
                   category === "active" && policyFilter === "pending"
                     ? "bg-amber-600 text-white shadow-2xs"
                     : "text-amber-700 hover:text-amber-900 hover:bg-amber-50"
@@ -423,7 +423,7 @@ export function LedgerFiltersBar({
                   onSelectCategory("lost");
                   onSelectPolicyFilter("all");
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--rl-radius-sm)] text-xs font-bold transition-all cursor-pointer ${
                   category === "lost"
                     ? "bg-rose-50 text-rose-900 border border-rose-200 shadow-2xs"
                     : "text-neutral-500 hover:text-neutral-800"

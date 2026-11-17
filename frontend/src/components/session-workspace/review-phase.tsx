@@ -30,10 +30,11 @@ import { ExtractedBenefitsCard } from "./review-components/extracted-benefits-ca
 import { BenefitsManagerPanel } from "./review-components/benefits-manager-panel";
 import { ReviewBanners } from "./review-components/review-banners";
 import { ReviewModals } from "./review-components/review-modals";
+import { UnsavedChangesBar } from "./review-components/UnsavedChangesBar";
 
 export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () => void; onBack?: () => void }) {
   const { workspace, loading, loadError } = useWorkspaceData();
-  const { queueOperation, reload, save, decideField } = useWorkspaceActions();
+  const { queueOperation, reload, save, discard, decideField } = useWorkspaceActions();
   const mutation = useWorkspaceMutation();
 
   const [globalConcepts, setGlobalConcepts] = useState<GlobalConcept[]>([]);
@@ -47,8 +48,8 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
 
   const state = useReviewWorkspaceState({
     id,
-    pinCatalog: async (compId, prodId, tierId) => {
-      await catalog.pinCatalog(compId, prodId, tierId);
+    pinCatalog: async (compId, prodId, tierId, opts) => {
+      await catalog.pinCatalog(compId, prodId, tierId, opts);
     },
   });
 
@@ -345,6 +346,8 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
                 balancedElements={catalog.balancedElements}
                 displayOptions={workspace.display_options}
                 conceptAssets={{}}
+                handleOpenNewQuotationTab={exports.handleOpenNewQuotationTab}
+                openingPreviewTab={exports.openingPreviewTab}
               />
 
               <BenefitsManagerPanel
@@ -413,6 +416,12 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
           pendingExportAction={exports.pendingExportAction}
           setPendingExportAction={exports.setPendingExportAction}
           confirmAndExecuteExport={exports.confirmAndExecuteExport}
+        />
+
+        <UnsavedChangesBar
+          mutation={mutation}
+          onSave={state.saveAndCheckLearning}
+          onDiscard={discard}
         />
       </section>
     </>

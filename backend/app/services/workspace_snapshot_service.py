@@ -369,8 +369,17 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         else []
     )
     extras = build_extras(selections, concepts, offerings)
-    round_tot = bool((draft.display_options or {}).get("round_total", True))
-    adjusted_total = adjusted_total_text(draft.fields or {}, extras, round_total=round_tot)
+    disp_opts = draft.display_options or {}
+    round_tot = bool(disp_opts.get("round_total", True))
+    inc_rt = disp_opts.get("include_road_tax") if "include_road_tax" in disp_opts else None
+    inc_rf = disp_opts.get("include_runner_fee") if "include_runner_fee" in disp_opts else None
+    adjusted_total = adjusted_total_text(
+        draft.fields or {},
+        extras,
+        round_total=round_tot,
+        include_road_tax=inc_rt,
+        include_runner_fee=inc_rf,
+    )
     
     # Extract car model string safely
     raw_car_model = (draft.fields or {}).get("car_model")

@@ -23,24 +23,28 @@ class BenefitEvaluationEngine:
         company_id: str,
         profile_id: Optional[str],
         base_benefits: List[EvaluatedBenefit],
-        plan_name: str
+        plan_name: str,
+        preloaded_conditions: Optional[List[CompanyBenefitCondition]] = None,
     ) -> List[EvaluatedBenefit]:
         """
         Takes a list of base benefits and applies the company's condition rules
         (matching the specific plan) to output the final evaluated list of benefits.
         Enforces strict character length bounds to guarantee constant card layout without overflow.
         """
-        # Load all active conditions for this company/profile
-        query = select(CompanyBenefitCondition).where(
-            CompanyBenefitCondition.company_id == company_id,
-            CompanyBenefitCondition.is_active == True
-        )
-        if profile_id:
-            query = query.where(CompanyBenefitCondition.profile_id == profile_id)
+        if preloaded_conditions is not None:
+            conditions = preloaded_conditions
         else:
-            query = query.where(CompanyBenefitCondition.profile_id.is_(None))
-            
-        conditions = db.execute(query).scalars().all()
+            # Load all active conditions for this company/profile
+            query = select(CompanyBenefitCondition).where(
+                CompanyBenefitCondition.company_id == company_id,
+                CompanyBenefitCondition.is_active == True
+            )
+            if profile_id:
+                query = query.where(CompanyBenefitCondition.profile_id == profile_id)
+            else:
+                query = query.where(CompanyBenefitCondition.profile_id.is_(None))
+                
+            conditions = db.execute(query).scalars().all()
 
         if not conditions:
             for b in base_benefits:

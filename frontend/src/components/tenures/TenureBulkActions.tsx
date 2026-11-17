@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { CheckCircle, Trash, DownloadSimple } from "@phosphor-icons/react";
+import { useToast } from "@/components/ui/toast";
 import type { TenureRow } from "./types";
 import { formatDateSafe } from "./types";
 import { formatBrandAndModel } from "@/lib/vehicle-utils";
@@ -25,6 +26,7 @@ export function TenureBulkActions({
   confirmingBulk = false,
   deletingBulk = false,
 }: TenureBulkActionsProps) {
+  const { toast } = useToast();
   const [exporting, setExporting] = useState(false);
 
   if (selectedTenureIds.length === 0) {
@@ -104,7 +106,7 @@ export function TenureBulkActions({
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Export CSV error:", err);
-      alert("Failed to export CSV");
+      toast("Failed to export CSV", "error");
     } finally {
       setExporting(false);
     }

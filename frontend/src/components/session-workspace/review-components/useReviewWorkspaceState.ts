@@ -62,7 +62,12 @@ export function displayValue(kind: FieldKind, value: string | null | undefined):
 export interface UseReviewWorkspaceStateProps {
   id?: string;
   companies?: Array<{ id: string; name: string }>;
-  pinCatalog?: (companyId: string, productId?: string | null, tierId?: string | null) => Promise<void>;
+  pinCatalog?: (
+    companyId: string,
+    productId?: string | null,
+    tierId?: string | null,
+    options?: { stageOnly?: boolean }
+  ) => Promise<void>;
 }
 
 export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}) {
@@ -99,19 +104,14 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
   });
 
   const previousValuesRef = useRef<Record<string, string>>({});
-  const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSyncedRevisionRef = useRef<number | null>(null);
   const promptedRef = useRef<Set<string>>(new Set());
   const [learnPrompt, setLearnPrompt] = useState<{ field: string; value: string } | null>(null);
 
-  /** Coalesce rapid mutations into a single save after 800ms idle. */
+  /** Staged draft buffer: edits stay local until explicit Save & Sync or pre-flight export. */
   const scheduleSave = useCallback(() => {
-    if (debouncedSaveRef.current !== null) clearTimeout(debouncedSaveRef.current);
-    debouncedSaveRef.current = setTimeout(() => {
-      debouncedSaveRef.current = null;
-      save().catch(() => undefined);
-    }, 800);
-  }, [save]);
+    // Deliberately no silent 800ms auto-PATCH so partial edits never cross-sync mid-editing.
+  }, []);
 
   useEffect(() => {
     if (workspace?.display_options) {
@@ -159,44 +159,16 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
     const nextVal = !roundTotal;
     setRoundTotal(nextVal);
     decideField("total_amount", "clear", "");
-
-    setFormValues((prev) => {
-      const rawStoredPrem = (workspace?.fields?.premium as any)?.detected_value ?? (workspace?.fields?.premium as any)?.value;
-      const baseRaw = nextVal ? (prev["premium"] || rawStoredPrem || "") : (rawStoredPrem || prev["premium"] || "");
-      const pNum = parseFloat(String(baseRaw).replace(/[^0-9.]/g, "")) || 0;
-      const effPremiumNum = nextVal && pNum > 0 ? Math.round(pNum) : pNum;
-      const formattedPremium = pNum > 0 ? effPremiumNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : prev["premium"];
-
-      const rtNum = parseFloat(String(prev["roadtax"] || (workspace?.fields?.roadtax as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
-      const sfNum = parseFloat(String(prev["service_fee"] || (workspace?.fields?.service_fee as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
-      const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
-        const amt = (ex as Record<string, unknown>)?.price;
-        const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
-        const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
-        return acc + (Number.isFinite(num) ? num : 0);
-      }, 0);
-
-      const calcTotal = effPremiumNum + extrasTotal + rtNum + sfNum;
-      if (calcTotal > 0) {
-        const finalTot = nextVal ? Math.round(calcTotal) : calcTotal;
-        const formattedTotal = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        return { ...prev, premium: formattedPremium, total_amount: formattedTotal };
-      }
-      const curTot = parseFloat(String(prev["total_amount"] || (workspace?.fields?.total_amount as any)?.value || "").replace(/[^0-9.]/g, "")) || 0;
-      if (curTot > 0) {
-        const finalTot = nextVal ? Math.round(curTot) : curTot;
-        const formattedTotal = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        return { ...prev, premium: formattedPremium, total_amount: formattedTotal };
-      }
-      return { ...prev, premium: formattedPremium };
-    });
-
     queueOperation(
       { op: "update_display_options", options: { round_total: nextVal } },
       "display_options"
     );
-    scheduleSave();
-  }, [roundTotal, workspace, decideField, queueOperation, scheduleSave]);
+    setToastMessage(
+      nextVal
+        ? "Whole-RM rounding enabled (staged). Click Save & Sync to update total."
+        : "Exact sen display enabled (staged). Click Save & Sync to update total."
+    );
+  }, [roundTotal, decideField, queueOperation]);
 
   const getDetectedValue = useCallback((fieldName: string): string => {
     if (!workspace?.fields) return "";
@@ -347,52 +319,16 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
       fields["runner_fee"] = sfee;
     }
 
-    // Compute live total premium (Insurance Premium + Roadtax + Runner Fee + Extras)
-    const pNum = parseFloat(String(fields["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
-    const isRound = roundTotal;
-    const effPremiumNum = isRound && pNum > 0 ? Math.round(pNum) : pNum;
-    if (isRound && pNum > 0) {
-      const roundedPremStr = effPremiumNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      fields["premium"] = roundedPremStr;
-      fields["coverage_premium"] = roundedPremStr;
-      fields["basic_premium_vehicle"] = roundedPremStr;
-    }
-    const incRT = formValues["include_road_tax"] !== "false" && String((workspace?.fields?.include_road_tax as WorkspaceField | undefined)?.value || "") !== "false";
-    const incRF = formValues["include_runner_fee"] !== "false" && String((workspace?.fields?.include_runner_fee as WorkspaceField | undefined)?.value || "") !== "false";
-    const rtNum = incRT ? (parseFloat(String(fields["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0) : 0;
-    const sfNum = incRF ? (parseFloat(String(fields["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0) : 0;
-    const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
-      const amt = (ex as Record<string, unknown>)?.price;
-      const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
-      const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
-      return acc + (Number.isFinite(num) ? num : 0);
-    }, 0);
-
+    // Authoritative backend totals (zero duplicate client-side rounding or tax arithmetic)
     const totalField = workspace?.fields?.total_amount as WorkspaceField | undefined;
     const isManualTotal = totalField?.decision?.decision === "edit" && totalField?.value;
-    let effTotal = "";
-    if (isManualTotal && formValues["total_amount"]) {
-      effTotal = formValues["total_amount"];
-    } else {
-      const calculatedTotal = effPremiumNum + extrasTotal + rtNum + sfNum;
-      const finalTotalNum = isRound && calculatedTotal > 0 ? Math.round(calculatedTotal) : calculatedTotal;
-      if (finalTotalNum > 0) {
-        effTotal = finalTotalNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      } else {
-        const rawTot = formValues["total_amount"] || fields["total_amount"] || workspace?.total_premium_adjusted || "";
-        const rawNum = parseFloat(String(rawTot).replace(/[^0-9.]/g, ""));
-        if (isRound && rawNum > 0) {
-          effTotal = Math.round(rawNum).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        } else {
-          effTotal = rawTot;
-        }
-      }
-    }
+    const effTotal = isManualTotal && formValues["total_amount"]
+      ? formValues["total_amount"]
+      : (formValues["total_amount"] || workspace?.total_premium_adjusted || fields["total_amount"] || "");
 
-    const calculatedPremium = effPremiumNum + extrasTotal;
-    fields["insurance_premium_total"] = calculatedPremium > 0
-      ? calculatedPremium.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      : "";
+    if (fields["premium"]) {
+      fields["insurance_premium_total"] = fields["premium"];
+    }
 
     // Validity date aliases
     const vUntil = formValues["valid_until"] || fields["valid_until"] || formValues["quotation_validity"] || fields["quotation_validity"] || "";
@@ -445,33 +381,6 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
 
     if (field.name === "premium" || field.name === "roadtax" || field.name === "service_fee") {
       decideField("total_amount", "clear", "");
-      setFormValues((prev) => {
-        const rawP = field.name === "premium" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const p = roundTotal && rawP > 0 ? Math.round(rawP) : rawP;
-        const incRT = prev["include_road_tax"] !== "false";
-        const incRF = prev["include_runner_fee"] !== "false";
-        const rawRT = field.name === "roadtax" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const rawRF = field.name === "service_fee" ? parseFloat(current.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const rt = incRT ? rawRT : 0;
-        const sf = incRF ? rawRF : 0;
-        const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
-          const amt = (ex as Record<string, unknown>)?.price;
-          const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
-          const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
-          return acc + (Number.isFinite(num) ? num : 0);
-        }, 0);
-        const rawTot = p + rt + sf + extrasTotal;
-        if (rawTot > 0) {
-          const finalTot = roundTotal ? Math.round(rawTot) : rawTot;
-          const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          return {
-            ...prev,
-            ...(field.name === "premium" && roundTotal && rawP > 0 ? { premium: p.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) } : {}),
-            total_amount: formatted,
-          };
-        }
-        return prev;
-      });
     }
 
     scheduleSave();
@@ -487,29 +396,10 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
       );
       decideField(name, "edit", value);
       decideField("total_amount", "clear", "");
-      setFormValues((prev) => {
-        const rawP = parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const p = roundTotal && rawP > 0 ? Math.round(rawP) : rawP;
-        const isIncRT = name === "include_road_tax" ? boolVal : prev["include_road_tax"] !== "false";
-        const isIncRF = name === "include_runner_fee" ? boolVal : prev["include_runner_fee"] !== "false";
-        const rawRT = parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const rawRF = parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const rt = isIncRT ? rawRT : 0;
-        const sf = isIncRF ? rawRF : 0;
-        const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
-          const amt = (ex as Record<string, unknown>)?.price;
-          const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
-          const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
-          return acc + (Number.isFinite(num) ? num : 0);
-        }, 0);
-        const rawTot = p + rt + sf + extrasTotal;
-        const finalTot = roundTotal && rawTot > 0 ? Math.round(rawTot) : rawTot;
-        return {
-          ...prev,
-          [name]: value,
-          total_amount: finalTot > 0 ? finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "",
-        };
-      });
+      setFormValues((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
       scheduleSave();
       return;
     }
@@ -539,29 +429,6 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
     }
     if (name === "premium" || name === "roadtax" || name === "service_fee") {
       decideField("total_amount", "clear", "");
-      setFormValues((prev) => {
-        const rawP = name === "premium" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["premium"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const p = roundTotal && rawP > 0 ? Math.round(rawP) : rawP;
-        const rt = name === "roadtax" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["roadtax"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const sf = name === "service_fee" ? parseFloat(value.replace(/[^0-9.]/g, "")) || 0 : parseFloat(String(prev["service_fee"] || "").replace(/[^0-9.]/g, "")) || 0;
-        const extrasTotal = (workspace?.extras || []).reduce((acc, ex) => {
-          const amt = (ex as Record<string, unknown>)?.price;
-          const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
-          const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
-          return acc + (Number.isFinite(num) ? num : 0);
-        }, 0);
-        const rawTot = p + rt + sf + extrasTotal;
-        if (rawTot > 0) {
-          const finalTot = roundTotal ? Math.round(rawTot) : rawTot;
-          const formatted = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          return {
-            ...prev,
-            ...(name === "premium" && roundTotal && rawP > 0 ? { premium: p.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) } : {}),
-            total_amount: formatted,
-          };
-        }
-        return prev;
-      });
     }
     scheduleSave();
   }
@@ -670,40 +537,21 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
       values.roadtax = String(rawStoredRT);
     }
 
-    // Sync Total Premium with roadtax, runner fee, and extras
-    const pNum = parseFloat(String(values.premium || "").replace(/[^0-9.]/g, "")) || 0;
-    const isRound = roundTotal;
-    const effPremiumNum = isRound && pNum > 0 ? Math.round(pNum) : pNum;
-    if (isRound && pNum > 0) {
-      values.premium = effPremiumNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    const incRT = values.include_road_tax !== "false" && String((workspace.fields?.include_road_tax as WorkspaceField | undefined)?.value || "") !== "false";
-    const incRF = values.include_runner_fee !== "false" && String((workspace.fields?.include_runner_fee as WorkspaceField | undefined)?.value || "") !== "false";
-    const rtNum = incRT ? (parseFloat(String(values.roadtax || "").replace(/[^0-9.]/g, "")) || 0) : 0;
-    const sfNum = incRF ? (parseFloat(String(values.service_fee || "").replace(/[^0-9.]/g, "")) || 0) : 0;
-    const extrasTotal = (workspace.extras || []).reduce((acc, ex) => {
-      const amt = (ex as Record<string, unknown>)?.price;
-      const val = typeof amt === "object" && amt !== null ? ((amt as Record<string, unknown>).amount ?? (amt as Record<string, unknown>).value) : amt;
-      const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : (typeof val === "number" ? val : 0);
-      return acc + (Number.isFinite(num) ? num : 0);
-    }, 0);
-
     const totalField = workspace.fields?.total_amount as WorkspaceField | undefined;
     const isManualTotal = totalField?.decision?.decision === "edit" && totalField?.value;
     if (isManualTotal) {
       values.total_amount = displayValue("money", totalField.value);
-    } else if (pNum > 0) {
-      const combinedPremium = effPremiumNum + extrasTotal;
-      values.insurance_premium_total = combinedPremium > 0 ? combinedPremium.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
-      const rawTot = effPremiumNum + rtNum + sfNum + extrasTotal;
-      const finalTot = isRound && rawTot > 0 ? Math.round(rawTot) : rawTot;
-      values.total_amount = finalTot.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     } else if (workspace.total_premium_adjusted) {
       values.total_amount = formatMoney(workspace.total_premium_adjusted);
+    } else if (totalField?.value) {
+      values.total_amount = displayValue("money", totalField.value);
+    }
+    if (values.premium) {
+      values.insurance_premium_total = values.premium;
     }
 
     setFormValues(values);
-  }, [workspace, roundTotal]);
+  }, [workspace]);
 
   useEffect(() => {
     syncForm();

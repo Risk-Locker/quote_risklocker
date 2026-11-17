@@ -135,6 +135,9 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/plans/milestone-3-patch-engine-slicing-and-3eye-wiring.md` | Clean code remediation M3: Workspace patch engine flattening & live 3-Eye referee wiring | Milestone 3 execution |
 | `docs/plans/2026-11-17-principal-fintech-audit-and-master-roadmap.md` | Principal Fintech 7-pillar architectural audit & 6-milestone zero-touch master roadmap | Active sprint tasks change or complete |
 | `docs/plans/milestone-1-sandbox-isolation-and-sessions-redesign.md` | Milestone 1: Test/Sandbox ledger isolation, N+1 session fix & `/sessions` activity command center | Milestone 1 execution |
+| `docs/plans/2026-11-17-ux-saving-ledger-and-sandbox-audit-plan.md` | Full UX/Saving/Ledger/Classifier audit, 5-milestone remediation roadmap & 36 verified test PDFs (`samples/`) | Active sprint tasks change or complete |
+| `docs/plans/milestone-1-save-sync-and-api-repairs.md` | Milestone 1: Cross-vehicle sync isolation (`F-01`), `/ledger` & `/comparison` 405 fixes (`F-02`, `F-03`), EV `kW` guard (`F-04a`), & staged save UX (`F-04b`) | Milestone 1 execution |
+| `docs/plans/milestone-2-ledger-ux-compact-and-dialogs.md` | Milestone 2: `/ledger` Compact <=960px layout, viewport-sticky `LedgerScrollRail`, `TenureRow` cell slicing, & `/ledger` native dialog purge (`F-06a`) | Milestone 2 execution |
 
 ### History & Generated Tooling
 | Document | Purpose | Update when |

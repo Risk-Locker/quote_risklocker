@@ -17,7 +17,7 @@ from typing import Any
 from collections import defaultdict
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, selectinload, joinedload
+from sqlalchemy.orm import Session, selectinload, joinedload, load_only
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.tables import (
@@ -91,6 +91,7 @@ from app.services.marketing_comparison.benefits_extractor import (
     detect_runner_fee_from_id,
     extract_strict_schedule_excess,
     format_canonical_perils,
+    prefetch_comparison_benefit_context,
 )
 from app.services.marketing_comparison.covernote_classifier import (
     is_covernote_document,
@@ -131,13 +132,21 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
 
     needs_commit = False
 
-    # 2. Query all linked sessions under this tenure (with preloaded drafts & uploaded files)
+    # 2. Query all linked sessions under this tenure (with preloaded drafts, files & compact extraction text)
     sessions = list(
         db.scalars(
             select(SessionModel)
             .options(
                 selectinload(SessionModel.draft),
-                selectinload(SessionModel.uploaded_file),
+                selectinload(SessionModel.uploaded_file)
+                .selectinload(UploadedFile.extraction_record)
+                .load_only(
+                    ExtractionRecord.id,
+                    ExtractionRecord.uploaded_file_id,
+                    ExtractionRecord.raw_text,
+                    ExtractionRecord.ocr_text,
+                    ExtractionRecord.benefit_lines,
+                ),
             )
             .where(
                 SessionModel.tenure_id == tenure_id,
@@ -147,6 +156,11 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         ).all()
     )
     session_map = {s.id: s for s in sessions}
+    benefit_prefetch = prefetch_comparison_benefit_context(
+        db,
+        sessions,
+        extra_company_ids=[e.company_id for e in entries if e.company_id],
+    )
 
     # Clean up any comparison entries erroneously created for Cover Note sessions or pointing to trashed/missing sessions
     valid_entries = []
@@ -349,7 +363,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             tot_pay = motor_prem + float(tenure.road_tax) + float(tenure.runner_fee)
 
             b_res = _resolve_comparison_benefits(
-                db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+                db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
             )
             raw_w = _extract_val(f.get("waiver_of_betterment"))
             has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
@@ -423,7 +437,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 tot_pay = motor_prem + float(tenure.road_tax) + float(tenure.runner_fee)
 
                 b_res = _resolve_comparison_benefits(
-                    db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+                    db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
                 )
                 raw_w = _extract_val(f.get("waiver_of_betterment"))
                 has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
@@ -552,6 +566,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         getattr(s_cand, "company_id", None) or e.company_id,
                         s_cand_fields,
                         float(tenure.windscreen_target) if tenure.windscreen_target else None,
+                        prefetched=benefit_prefetch,
                     )
                     cand_tow = b_cand.get("towing_km")
                     if cand_tow:
@@ -603,7 +618,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     ws_invalid = e.windscreen_sum_insured is not None and not _is_valid_windscreen_amt(float(e.windscreen_sum_insured))
                     if ws_invalid:
                         b_cand = _resolve_comparison_benefits(
-                            db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+                            db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
                         )
                         cand_ws = b_cand.get("windscreen_sum_insured")
                         if cand_ws and _is_valid_windscreen_amt(cand_ws):
@@ -616,12 +631,20 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         needs_commit = True
 
     # 5. Apply 4-tier Best Deal ranking
+    from app.domain.motor.winner_ranking_rules import build_underwriter_ranking_explanation
+
     rank_comparison_entries(
         entries,
         explicit_winning_company_id=tenure.winning_company_id,
         explicit_winning_ref=tenure.winning_quotation_ref,
         auto_recommend_rank1=False,
     )
+    visible_for_reason = [e for e in entries if not getattr(e, "is_hidden", False)]
+    ranking_explanations_map: dict[str, str] = {}
+    for e in visible_for_reason:
+        ranking_explanations_map[e.id] = build_underwriter_ranking_explanation(
+            e, visible_for_reason, int(e.rank or 1)
+        )
 
     # 6. Assign stable version numbers for same-insurer revisions
     company_counts: dict[str, int] = defaultdict(int)
@@ -1012,16 +1035,22 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "message": f"Quotes from multiple calendar years detected ({', '.join(str(y) for y in sorted(set(session_years)))}).",
         }
 
-    # 8. Query generated quotations for this vehicle/deal
+    # 8. Query generated quotations for this vehicle/deal (batched version lookup)
+    rl_draft_ids = sorted({s.draft_id for s in sessions if s.quotation_ref and s.quotation_ref.startswith("RL") and s.draft_id})
+    latest_pdf_by_draft: dict[str, GeneratedPdfVersion] = {}
+    if rl_draft_ids:
+        for pv in db.scalars(
+            select(GeneratedPdfVersion)
+            .where(GeneratedPdfVersion.draft_id.in_(rl_draft_ids))
+            .order_by(GeneratedPdfVersion.version_number.desc())
+        ).all():
+            if pv.draft_id not in latest_pdf_by_draft:
+                latest_pdf_by_draft[pv.draft_id] = pv
+
     gen_quotes = []
     for s in sessions:
         if s.quotation_ref and s.quotation_ref.startswith("RL"):
-            pdf_ver = db.scalar(
-                select(GeneratedPdfVersion)
-                .where(GeneratedPdfVersion.draft_id == s.draft_id)
-                .order_by(GeneratedPdfVersion.version_number.desc())
-                .limit(1)
-            ) if s.draft_id else None
+            pdf_ver = latest_pdf_by_draft.get(s.draft_id) if s.draft_id else None
 
             tot_p = 0.0
             if s.draft and isinstance(s.draft.fields, dict):
@@ -1066,7 +1095,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         entry_detailed_perils = []
         if s_obj:
             entry_b_res = _resolve_comparison_benefits(
-                db, s_obj, getattr(s_obj, "company_id", None), f_obj, float(tenure.windscreen_target) if tenure.windscreen_target else None
+                db, s_obj, getattr(s_obj, "company_id", None), f_obj, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
             )
             entry_perils = entry_b_res.get("canonical_perils") or []
             entry_detailed_perils = entry_b_res.get("detailed_perils") or []
@@ -1163,6 +1192,11 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "is_manual": e.is_manual,
             "sort_order": e.sort_order,
             "notes": e.notes,
+            "ranking_explanation": (
+                e.notes
+                if (e.notes and e.notes.startswith(("Ranked #", "Manual Rank #", "Best Value:")))
+                else ranking_explanations_map.get(e.id)
+            ),
             "customer_name": (
                 (f_obj.get("customer_name", {}).get("value") if isinstance(f_obj.get("customer_name"), dict) else f_obj.get("customer_name"))
                 if f_obj else None
@@ -1333,7 +1367,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         cn_val_type, cn_agreed = _extract_valuation_type(cn_f, s_obj=cn_session)
         cn_tot_pay = float(tenure.won_premium) if tenure.won_premium is not None else (cn_prem + float(tenure.road_tax) + float(tenure.runner_fee))
         cn_b_res = _resolve_comparison_benefits(
-            db, cn_session, getattr(cn_session, "company_id", None), cn_f, float(tenure.windscreen_target) if tenure.windscreen_target else None
+            db, cn_session, getattr(cn_session, "company_id", None), cn_f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
         )
         s_date = cn_session.coverage_start_date or tenure.coverage_start_date
         e_date = cn_session.coverage_end_date or tenure.coverage_end_date

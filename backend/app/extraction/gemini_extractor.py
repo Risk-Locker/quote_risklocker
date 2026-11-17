@@ -291,18 +291,41 @@ def build_rag_system_prompt(
         if isinstance(bc, dict):
             k = bc.get("concept_key") or bc.get("key") or ""
             lbl = bc.get("label") or bc.get("name") or ""
+            raw_aliases = bc.get("aliases") or []
+            alias_phrases: list[str] = []
+            for a in raw_aliases:
+                p = a.get("phrase") if isinstance(a, dict) else str(a)
+                if p and str(p).strip() and str(p).strip().lower() != lbl.lower():
+                    alias_phrases.append(str(p).strip())
+            for m_item in (bc.get("match_dataset") or []):
+                if isinstance(m_item, str) and m_item.strip() and m_item.strip().lower() not in {x.lower() for x in alias_phrases}:
+                    alias_phrases.append(m_item.strip())
         else:
             k = ""
             lbl = bc
+            alias_phrases = []
         if k or lbl:
-            concepts_list.append(f"- {lbl} (concept_key: '{k}')" if k and lbl else f"- {lbl or k}")
+            alias_suffix = f" [Aliases: {', '.join(alias_phrases[:10])}]" if alias_phrases else ""
+            concepts_list.append((f"- {lbl} (concept_key: '{k}')" if k and lbl else f"- {lbl or k}") + alias_suffix)
     concepts_str = "\n".join(concepts_list) if concepts_list else "- Standard Malaysian Motor Benefit Library"
 
-    aliases_list = []
+    endorsement_mappings = [
+        "- Endorsement 57 / 57A / 57B / Inclusion of Special Perils / Convulsions of Nature / Flood MUST map to 'special-perils'",
+        "- Endorsement 89 / 89A / 97 / Breakage of Glass in Windscreen / Cermin Berlapis MUST map to 'windscreen'",
+        "- Endorsement 72 / Legal Liability of Passengers for Negligent Acts (LLOP) MUST map to 'legal-liability-of-passengers'",
+        "- Endorsement 100 / Legal Liability to Passengers / Passenger Liability Cover (LLP) MUST map to 'legal-liability-to-passengers'",
+        "- Endorsement 101 / 106A / 25 / Strike, Riot & Civil Commotion (SRCC) MUST map to 'strike-riot-civil-commotion'",
+        "- Endorsement 108 / All Drivers / Any Authorised Driver / All Rider / Semua Penunggang MUST map to 'all-drivers'",
+        "- Endorsement 111 / Current Year NCD Relief / NCD Protector MUST map to 'ncd-relief'",
+        "- Endorsement 112 / Compensation for Assessed Repair Time (CART) MUST map to 'repair-allowance'",
+        "- Endorsement 113 / 030 / Waiver of Betterment / Make Vehicle (Aged 6-10) MUST map to 'betterment-protection'",
+        "- Endorsement 02 / Vehicle Accessories Cover MUST map to 'vehicle-accessories'",
+    ]
     if db_aliases:
-        for alias, concept in db_aliases.items():
-            aliases_list.append(f"- Code/Alias '{alias}' MUST map to '{concept}'")
-    aliases_str = "\n".join(aliases_list) if aliases_list else "- No custom aliases."
+        for alias, target in db_aliases.items():
+            if isinstance(target, str):
+                endorsement_mappings.append(f"- Code/Alias '{alias}' MUST map to '{target}'")
+    aliases_str = "\n".join(endorsement_mappings)
 
     packs_list = []
     for pk in (db_packs or []):

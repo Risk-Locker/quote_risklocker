@@ -12,10 +12,11 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from app.models.tables import (
     BenefitConcept,
     CatalogOffering,
+    CompanyBenefitCondition,
     DraftBenefitSelection,
     ExtractionBenefitLine,
     ExtractionRecord,
@@ -637,12 +638,111 @@ def _extract_windscreen_from_draft(f: dict[str, Any]) -> float | None:
     return None
 
 
+def prefetch_comparison_benefit_context(
+    db: Session,
+    sessions: list[SessionModel],
+    extra_company_ids: list[str | None] | None = None,
+) -> dict[str, Any]:
+    """Batch-load all benefit selections, concepts, extraction lines, records, companies, and towing offerings."""
+    draft_ids = sorted({s.draft_id for s in sessions if getattr(s, "draft_id", None)})
+    file_ids = sorted({s.uploaded_file_id for s in sessions if getattr(s, "uploaded_file_id", None)})
+    cat_rev_ids = sorted({
+        s.draft.catalog_revision_id
+        for s in sessions
+        if getattr(s, "draft", None) and getattr(s.draft, "catalog_revision_id", None)
+    })
+    comp_ids: set[str] = {c for c in (extra_company_ids or []) if c}
+    for s in sessions:
+        if getattr(s, "company_id", None):
+            comp_ids.add(s.company_id)
+        if getattr(s, "draft", None) and getattr(s.draft, "company_id", None):
+            comp_ids.add(s.draft.company_id)
+
+    selections_by_draft: dict[str, list[DraftBenefitSelection]] = {}
+    concept_ids: set[str] = set()
+    if draft_ids:
+        for sel in db.scalars(
+            select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id.in_(draft_ids))
+        ).all():
+            selections_by_draft.setdefault(sel.draft_id, []).append(sel)
+            if sel.concept_id:
+                concept_ids.add(sel.concept_id)
+
+    concepts_by_id: dict[str, BenefitConcept] = {}
+    if concept_ids:
+        for c in db.scalars(select(BenefitConcept).where(BenefitConcept.id.in_(list(concept_ids)))).all():
+            concepts_by_id[c.id] = c
+
+    ext_records_by_file: dict[str, ExtractionRecord] = {}
+    ext_lines_by_file: dict[str, list[ExtractionBenefitLine]] = {}
+    if file_ids:
+        for rec in db.scalars(
+            select(ExtractionRecord)
+            .options(
+                load_only(
+                    ExtractionRecord.id,
+                    ExtractionRecord.uploaded_file_id,
+                    ExtractionRecord.raw_text,
+                    ExtractionRecord.ocr_text,
+                    ExtractionRecord.benefit_lines,
+                )
+            )
+            .where(ExtractionRecord.uploaded_file_id.in_(file_ids))
+        ).all():
+            ext_records_by_file[rec.uploaded_file_id] = rec
+
+        for el, f_id in db.execute(
+            select(ExtractionBenefitLine, ExtractionRecord.uploaded_file_id)
+            .join(ExtractionRecord, ExtractionBenefitLine.extraction_record_id == ExtractionRecord.id)
+            .where(ExtractionRecord.uploaded_file_id.in_(file_ids))
+        ).all():
+            ext_lines_by_file.setdefault(f_id, []).append(el)
+
+    companies_by_id: dict[str, InsuranceCompany] = {}
+    conditions_by_company: dict[str, list[CompanyBenefitCondition]] = {}
+    if comp_ids:
+        comp_id_list = list(comp_ids)
+        for comp in db.scalars(select(InsuranceCompany).where(InsuranceCompany.id.in_(comp_id_list))).all():
+            companies_by_id[comp.id] = comp
+        for cond in db.scalars(
+            select(CompanyBenefitCondition).where(
+                CompanyBenefitCondition.company_id.in_(comp_id_list),
+                CompanyBenefitCondition.is_active == True,
+                CompanyBenefitCondition.profile_id.is_(None),
+            )
+        ).all():
+            conditions_by_company.setdefault(cond.company_id, []).append(cond)
+
+    towing_by_rev: dict[str, CatalogOffering] = {}
+    if cat_rev_ids:
+        for off in db.scalars(
+            select(CatalogOffering)
+            .join(BenefitConcept, CatalogOffering.concept_id == BenefitConcept.id)
+            .where(
+                CatalogOffering.catalog_revision_id.in_(cat_rev_ids),
+                BenefitConcept.concept_key.in_(["towing", "emergency-towing", "towing-assistance"]),
+            )
+        ).all():
+            towing_by_rev.setdefault(off.catalog_revision_id, off)
+
+    return {
+        "selections_by_draft": selections_by_draft,
+        "concepts_by_id": concepts_by_id,
+        "ext_records_by_file": ext_records_by_file,
+        "ext_lines_by_file": ext_lines_by_file,
+        "companies_by_id": companies_by_id,
+        "conditions_by_company": conditions_by_company,
+        "towing_by_rev": towing_by_rev,
+    }
+
+
 def _resolve_comparison_benefits(
     db: Session,
     session: SessionModel | None,
     company_id: str | None,
     f: dict[str, Any],
     windscreen_target: float | None = None,
+    prefetched: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Single source of truth for extracting Special Perils, Windscreen, LLP, and Towing.
     
@@ -658,17 +758,23 @@ def _resolve_comparison_benefits(
     draft_id = session.draft_id if session else None
     selections: list[DraftBenefitSelection] = []
     if draft_id:
-        selections = list(
-            db.scalars(
-                select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft_id)
-            ).all()
-        )
+        if prefetched is not None:
+            selections = list(prefetched["selections_by_draft"].get(draft_id, ()))
+        else:
+            selections = list(
+                db.scalars(
+                    select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft_id)
+                ).all()
+            )
     
     concept_ids = {s.concept_id for s in selections if s.concept_id}
     concepts: dict[str, BenefitConcept] = {}
     if concept_ids:
-        c_list = list(db.scalars(select(BenefitConcept).where(BenefitConcept.id.in_(concept_ids))).all())
-        concepts = {c.id: c for c in c_list}
+        if prefetched is not None:
+            concepts = {cid: prefetched["concepts_by_id"][cid] for cid in concept_ids if cid in prefetched["concepts_by_id"]}
+        else:
+            c_list = list(db.scalars(select(BenefitConcept).where(BenefitConcept.id.in_(concept_ids))).all())
+            concepts = {c.id: c for c in c_list}
         
     for s in selections:
         if s.label_override:
@@ -684,23 +790,38 @@ def _resolve_comparison_benefits(
                 
     # 2. Extraction Benefit Lines & Extraction Record text
     ext_rec = None
+    ext_lines: list[ExtractionBenefitLine] = []
     if session and session.uploaded_file_id:
-        ext_lines = list(
-            db.scalars(
-                select(ExtractionBenefitLine)
-                .join(ExtractionRecord, ExtractionBenefitLine.extraction_record_id == ExtractionRecord.id)
+        if prefetched is not None:
+            ext_lines = list(prefetched["ext_lines_by_file"].get(session.uploaded_file_id, ()))
+            ext_rec = prefetched["ext_records_by_file"].get(session.uploaded_file_id)
+        else:
+            ext_lines = list(
+                db.scalars(
+                    select(ExtractionBenefitLine)
+                    .join(ExtractionRecord, ExtractionBenefitLine.extraction_record_id == ExtractionRecord.id)
+                    .where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
+                ).all()
+            )
+            ext_rec = db.scalar(
+                select(ExtractionRecord)
+                .options(
+                    load_only(
+                        ExtractionRecord.id,
+                        ExtractionRecord.uploaded_file_id,
+                        ExtractionRecord.raw_text,
+                        ExtractionRecord.ocr_text,
+                        ExtractionRecord.benefit_lines,
+                    )
+                )
                 .where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
-            ).all()
-        )
+            )
         for el in ext_lines:
             if el.raw_label:
                 tokens.append(el.raw_label)
             if el.normalized_label:
                 tokens.append(el.normalized_label)
 
-        ext_rec = db.scalar(
-            select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
-        )
         if ext_rec:
             if ext_rec.raw_text:
                 tokens.append(ext_rec.raw_text)
@@ -774,14 +895,7 @@ def _resolve_comparison_benefits(
     windscreen_amount: float | None = None
 
     # Priority 1: Check ExtractionBenefitLine records for explicit extracted limit
-    if session and session.uploaded_file_id:
-        ext_lines = list(
-            db.scalars(
-                select(ExtractionBenefitLine)
-                .join(ExtractionRecord, ExtractionBenefitLine.extraction_record_id == ExtractionRecord.id)
-                .where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
-            ).all()
-        )
+    if ext_lines:
         for el in ext_lines:
             el_text = f"{el.raw_label or ''} {el.normalized_label or ''}".lower()
             if any(w in el_text for w in ("windscreen", "w/screen", "cermin")):
@@ -900,11 +1014,12 @@ def _resolve_comparison_benefits(
     target_comp_id = company_id or getattr(session, "company_id", None)
     comp_name_str = ""
     if target_comp_id:
-        comp_obj = db.get(InsuranceCompany, target_comp_id)
+        comp_obj = prefetched["companies_by_id"].get(target_comp_id) if prefetched is not None else db.get(InsuranceCompany, target_comp_id)
         if comp_obj and comp_obj.name:
             comp_name_str = comp_obj.name
     if not comp_name_str and session and getattr(session, "draft", None) and getattr(session.draft, "company_id", None):
-        comp_obj = db.get(InsuranceCompany, session.draft.company_id)
+        d_cid = session.draft.company_id
+        comp_obj = prefetched["companies_by_id"].get(d_cid) if prefetched is not None else db.get(InsuranceCompany, d_cid)
         if comp_obj and comp_obj.name:
             comp_name_str = comp_obj.name
     if not comp_name_str:
@@ -913,14 +1028,18 @@ def _resolve_comparison_benefits(
     towing_limit_val: str | None = None
     # Grounding from CatalogOfferings in draft catalog revision
     if session and getattr(session, "draft", None) and getattr(session.draft, "catalog_revision_id", None):
-        tow_offering = db.scalar(
-            select(CatalogOffering)
-            .join(BenefitConcept, CatalogOffering.concept_id == BenefitConcept.id)
-            .where(
-                CatalogOffering.catalog_revision_id == session.draft.catalog_revision_id,
-                BenefitConcept.concept_key.in_(["towing", "emergency-towing", "towing-assistance"]),
+        cat_rev_id = session.draft.catalog_revision_id
+        if prefetched is not None:
+            tow_offering = prefetched["towing_by_rev"].get(cat_rev_id)
+        else:
+            tow_offering = db.scalar(
+                select(CatalogOffering)
+                .join(BenefitConcept, CatalogOffering.concept_id == BenefitConcept.id)
+                .where(
+                    CatalogOffering.catalog_revision_id == cat_rev_id,
+                    BenefitConcept.concept_key.in_(["towing", "emergency-towing", "towing-assistance"]),
+                )
             )
-        )
         if tow_offering:
             if tow_offering.display_value and any(c.isdigit() for c in tow_offering.display_value):
                 towing_limit_val = tow_offering.display_value
@@ -944,15 +1063,8 @@ def _resolve_comparison_benefits(
     detailed_perils: list[dict[str, Any]] = []
     seen_peril_names: set[str] = set()
 
-    # 1. From ExtractionBenefitLine records
-    if session and session.uploaded_file_id:
-        ext_lines = list(
-            db.scalars(
-                select(ExtractionBenefitLine)
-                .join(ExtractionRecord, ExtractionBenefitLine.extraction_record_id == ExtractionRecord.id)
-                .where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
-            ).all()
-        )
+    # 1. From ExtractionBenefitLine records (reusing already-loaded ext_lines)
+    if ext_lines or (session and session.uploaded_file_id):
         for el in ext_lines:
             lbl = el.raw_label or el.normalized_label
             if not lbl:
@@ -1154,12 +1266,18 @@ def _resolve_comparison_benefits(
     target_comp_id = company_id or getattr(session, "company_id", None)
     
     if target_comp_id and base_benefits:
+        preloaded_conds = (
+            prefetched["conditions_by_company"].get(target_comp_id, [])
+            if prefetched is not None
+            else None
+        )
         evaluated = BenefitEvaluationEngine.evaluate_benefits_for_plan(
             db=db,
             company_id=target_comp_id,
             profile_id=None,
             base_benefits=base_benefits,
-            plan_name=plan_name
+            plan_name=plan_name,
+            preloaded_conditions=preloaded_conds,
         )
         
         # Apply the evaluated results back to scalars

@@ -99,6 +99,7 @@ export interface ComparisonEntry {
   version?: number;
   uploaded_at?: string;
   notes: string | null;
+  ranking_explanation?: string | null;
   quotation_ref?: string | null;
   source_quotation_no?: string | null;
   is_takaful?: boolean;

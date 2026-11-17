@@ -47,6 +47,7 @@ from app.services.marketing_comparison.benefits_extractor import (
     detect_runner_fee_from_id,
     extract_strict_schedule_excess,
     format_canonical_perils,
+    prefetch_comparison_benefit_context,
 )
 
 __all__ = [
@@ -84,4 +85,5 @@ __all__ = [
     "detect_runner_fee_from_id",
     "extract_strict_schedule_excess",
     "format_canonical_perils",
+    "prefetch_comparison_benefit_context",
 ]

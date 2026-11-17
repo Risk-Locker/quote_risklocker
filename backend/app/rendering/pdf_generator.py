@@ -44,7 +44,7 @@ def html_to_pdf(
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(
                 viewport={"width": max(1, round(width)), "height": max(1, round(height))},
-                device_scale_factor=2,
+                device_scale_factor=4,
             )
             page.set_default_timeout(timeout_ms)
             try:

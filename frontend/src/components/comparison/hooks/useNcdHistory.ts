@@ -45,7 +45,7 @@ export function useNcdHistory({
       const nextVal = editNextNcd.trim() !== "" ? parseFloat(editNextNcd) : null;
 
       await api(`/comparison/${tenureId}/fixed-costs`, {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           road_tax: roadTax ?? 0,

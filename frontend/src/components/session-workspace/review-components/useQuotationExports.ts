@@ -40,6 +40,7 @@ export function useQuotationExports({
   const [copiedInfo, setCopiedInfo] = useState(false);
   const [downloadingPng, setDownloadingPng] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [openingPreviewTab, setOpeningPreviewTab] = useState(false);
   const [pendingExportAction, setPendingExportAction] = useState<"copy_png" | "download_png" | "download_pdf" | null>(null);
 
   function dataUrlToBlob(dataUrl: string): Blob {
@@ -66,7 +67,7 @@ export function useQuotationExports({
       backgroundColor: "#ffffff",
       width,
       height,
-      pixelRatio: 4, // Ultra-high-definition 4K rendering (~3176px wide)
+      pixelRatio: 6, // Ultra-HD 8K-class rendering (4764x6738px)
       skipFonts: false,
       style: {
         transform: "none",
@@ -77,6 +78,36 @@ export function useQuotationExports({
         position: "static",
       },
     });
+  }
+
+  async function ensureWorkspaceSavedBeforeExport(): Promise<WorkspaceSnapshot> {
+    await flushActiveInput();
+    if (!workspace) {
+      throw new Error("The quotation workspace is not loaded.");
+    }
+    if (!mutation.dirty) return workspace;
+    const saved = await save();
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    return saved;
+  }
+
+  async function handleOpenNewQuotationTab() {
+    setOpeningPreviewTab(true);
+    setActionError(null);
+    try {
+      const currentWorkspace = await ensureWorkspaceSavedBeforeExport();
+      const result = await api<{ preview_url: string }>(`/sessions/${id}/preview-render`, {
+        method: "POST",
+        body: JSON.stringify({ draft_revision: currentWorkspace.revision }),
+      });
+      if (result?.preview_url) {
+        window.open(fileUrl(result.preview_url), "_blank", "noopener,noreferrer");
+      }
+    } catch (err: unknown) {
+      setActionError("Could not open new quotation preview: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setOpeningPreviewTab(false);
+    }
   }
 
   function triggerDownload(url: string, filename: string) {
@@ -96,17 +127,10 @@ export function useQuotationExports({
   }
 
   async function executeCopyPng() {
-    await flushActiveInput();
-    if (mutation.dirty) {
-      try {
-        await save();
-      } catch (err) {
-        console.warn("Could not save workspace before copying PNG, proceeding with live canvas:", err);
-      }
-    }
     setCopyingPng(true);
     setActionError(null);
     try {
+      await ensureWorkspaceSavedBeforeExport();
       const dataUrl = await generateCanvasPngDataUrl();
       if (!dataUrl) throw new Error("Could not capture quotation template canvas.");
       const blob = dataUrlToBlob(dataUrl);
@@ -132,17 +156,10 @@ export function useQuotationExports({
   }
 
   async function executeDownloadPng() {
-    await flushActiveInput();
-    if (mutation.dirty) {
-      try {
-        await save();
-      } catch (err) {
-        console.warn("Could not save workspace before downloading PNG, proceeding with live canvas:", err);
-      }
-    }
     setDownloadingPng(true);
     setActionError(null);
     try {
+      await ensureWorkspaceSavedBeforeExport();
       const dataUrl = await generateCanvasPngDataUrl();
       if (!dataUrl) throw new Error("Could not generate quotation image");
       triggerDownload(dataUrl, `quotation_${formValues.vehicle_no || id}.png`);
@@ -212,20 +229,12 @@ export function useQuotationExports({
   }, [formValues, previewFields, workspace, setToastMessage]);
 
   async function executeDownloadPdf() {
-    await flushActiveInput();
     if (!workspace) return;
     setPdfLoading(true);
     setActionError(null);
 
-    if (mutation.dirty) {
-      try {
-        await save();
-      } catch (err) {
-        console.warn("Could not save workspace before exporting PDF:", err);
-      }
-    }
-
     try {
+      const activeWorkspace = await ensureWorkspaceSavedBeforeExport();
       const conflict = await api<{ has_conflict: boolean; resolved: boolean }>(`/sessions/${id}/ownership-conflict`).catch(() => null);
       if (conflict?.has_conflict && !conflict?.resolved) {
         throw new Error("Action Required: Vehicle ownership conflict detected. Please resolve it on the Review step before generating the PDF.");
@@ -236,7 +245,7 @@ export function useQuotationExports({
         {
           method: "POST",
           headers: { "Idempotency-Key": crypto.randomUUID() },
-          body: JSON.stringify({ draft_revision: workspace.revision }),
+          body: JSON.stringify({ draft_revision: activeWorkspace.revision }),
         }
       );
 
@@ -280,6 +289,13 @@ export function useQuotationExports({
     const action = pendingExportAction;
     setPendingExportAction(null);
     if (!action) return;
+
+    try {
+      await ensureWorkspaceSavedBeforeExport();
+    } catch (err: unknown) {
+      setActionError("Could not save pending edits before export: " + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
 
     if (!workspace?.is_test) {
       api(`/insights/sessions/${id}/activity`, {
@@ -337,11 +353,13 @@ export function useQuotationExports({
     copiedInfo,
     downloadingPng,
     pdfLoading,
+    openingPreviewTab,
     pendingExportAction,
     setPendingExportAction,
     handleCopyPng,
     handleDownloadPng,
     handleDownloadPdf,
+    handleOpenNewQuotationTab,
     handleCopyExtractedInfo,
     confirmAndExecuteExport,
     triggerDownload,

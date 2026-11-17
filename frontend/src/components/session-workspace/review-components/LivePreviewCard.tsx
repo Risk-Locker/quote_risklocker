@@ -6,6 +6,7 @@ import {
   ArrowCounterClockwise,
   ArrowsInSimple,
   ArrowsOutSimple,
+  ArrowSquareOut,
   CaretDown,
   CaretUp,
   MagnifyingGlassMinus,
@@ -47,6 +48,8 @@ export interface LivePreviewCardProps {
   balancedElements: CanvasElement[];
   displayOptions: any;
   conceptAssets: Record<string, string>;
+  handleOpenNewQuotationTab?: () => void;
+  openingPreviewTab?: boolean;
 }
 
 export function LivePreviewCard({
@@ -79,6 +82,8 @@ export function LivePreviewCard({
   balancedElements,
   displayOptions,
   conceptAssets,
+  handleOpenNewQuotationTab,
+  openingPreviewTab = false,
 }: LivePreviewCardProps) {
   return (
     <Card className="rl-tour-preview grid gap-2.5 p-3.5 overflow-hidden">
@@ -163,20 +168,7 @@ export function LivePreviewCard({
                   </button>
                 </div>
               </div>
-              {isDesign2 ? (
-                <button
-                  type="button"
-                  onClick={toggleDesign2Schedule}
-                  className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold border transition-colors cursor-pointer ${
-                    showDesign2Schedule
-                      ? "bg-red-50 border-red-300 text-red-700"
-                      : "bg-gray-100/90 border-gray-200 text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                  }`}
-                  title="Include Page 2 Benefits & Endorsements Schedule in preview & generated PDF"
-                >
-                  <span>{showDesign2Schedule ? "Sheet 2: ON" : "+ Sheet 2 Schedule"}</span>
-                </button>
-              ) : (
+              {!isDesign2 ? (
                 <div className="flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
                   <span className="font-bold text-[var(--rl-text-muted)]">Style:</span>
                   <select
@@ -191,7 +183,19 @@ export function LivePreviewCard({
                     ))}
                   </select>
                 </div>
-              )}
+              ) : null}
+              {handleOpenNewQuotationTab ? (
+                <button
+                  type="button"
+                  onClick={handleOpenNewQuotationTab}
+                  disabled={openingPreviewTab}
+                  className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold bg-[var(--rl-black)] text-white hover:bg-black transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+                  title="Open this new rendered quotation in a full browser tab"
+                >
+                  <ArrowSquareOut size={13} weight="bold" />
+                  <span>{openingPreviewTab ? "Opening..." : "Open in New Tab"}</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setPreviewExpanded((v) => !v)}
@@ -279,7 +283,7 @@ export function LivePreviewCard({
                               c.id === workspace?.pinned.company_id ||
                               (companyName && c.name.toLowerCase() === companyName.toLowerCase())
                           )?.logo_asset_id;
-                        return logoId ? `/business/assets/${logoId}/content?profile=ui` : undefined;
+                        return logoId ? `/business/assets/${logoId}/content?profile=print` : undefined;
                       })()}
                     />
                   ) : (

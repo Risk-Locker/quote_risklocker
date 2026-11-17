@@ -211,6 +211,20 @@ export function UnderwriterQuoteCard({
             )}
           </div>
 
+          {/* Row 2.5: Logical Underwriter Ranking Explanation Callout */}
+          {(entry.ranking_explanation || entry.notes) ? (
+            <div
+              className={`mt-2 rounded-md px-2 py-1.5 text-[10px] leading-snug border ${
+                (visibleRanksMap[entry.id] ?? entry.rank ?? 1) === 1
+                  ? "bg-amber-50/90 border-amber-200 text-amber-950 font-semibold"
+                  : "bg-neutral-50 border-neutral-200/80 text-[#454545]"
+              }`}
+              title={entry.ranking_explanation || entry.notes || undefined}
+            >
+              <span className="line-clamp-2">{entry.ranking_explanation || entry.notes}</span>
+            </div>
+          ) : null}
+
           {/* Row 3: Dedicated Version Row with Clean Inline Switcher */}
           <div className="mt-2 min-h-[28px] flex items-center justify-between gap-1.5">
             {group.entries.length > 1 ? (

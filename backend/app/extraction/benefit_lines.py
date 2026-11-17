@@ -171,6 +171,30 @@ NON_BENEFIT_PREFIXES = (
     "s.o.s emergency",
     "s.o.s emergency",
     "instant claim notification",
+    "akses",
+    "ekses",
+    "sum covered",
+    "jumlah kecil",
+    "jumlah perlindungan",
+    "berkuatkuasa dari",
+    "nil 0.00",
+    "1st driver",
+    "2nd driver",
+    "driver's",
+    "proposer declaration",
+    "signature of proposer",
+    "anti-theft devices",
+    "type of certificate",
+    "class : motor",
+    "replacing cover note",
+    "lam pek foong",
+    "anda boleh mendapatkan",
+    "by accepting this quotation",
+    "i confirm that i have read",
+    "i understand that it is my duty",
+    "i agree that the information",
+    "so may result in avoidance",
+    "contract of insurance in accordance",
 )
 NARRATIVE_PREFIXES = ("example:", "example ", "note:", "important:", "disclaimer :", "disclaimer:")
 NARRATIVE_INDICATORS = (
@@ -261,6 +285,8 @@ def is_spurious_benefit_line(raw: str) -> bool:
     if VEHICLE_SPEC_ROW_RE.search(norm):
         return True
     if DISCLAIMER_AND_DISCLOSURE_RE.search(norm):
+        return True
+    if norm.startswith(NON_BENEFIT_PREFIXES):
         return True
     if "?" in s:
         return True
@@ -552,22 +578,27 @@ def _heading_scope(line: str) -> tuple[str, str] | None:
 
 
 MALAYSIAN_TARIFF_ENDORSEMENTS = {
-    "57": ("Special Perils (Flood & Storm)", "special-perils"),
-    "57a": ("Inclusion of Special Perils (Full SI)", "special-perils"),
-    "57b": ("Inclusion of Special Perils", "special-perils"),
-    "72": ("Legal Liability of Passengers (LLOP)", "legal-liability-of-passengers"),
-    "89": ("Breakdown Towing & Roadside Assistance", "towing"),
-    "97": ("Windscreen Damage", "windscreen"),
-    "100": ("Legal Liability to Passengers (LLP)", "legal-liability-to-passengers"),
-    "101": ("Strike, Riot & Civil Commotion (SRCC)", "strike-riot"),
-    "108": ("All Drivers / Unnamed Drivers", "all-drivers"),
-    "111": ("Current Year NCD Relief", "ncd-relief"),
-    "112": ("Compensation for Assessed Repair Time (CART)", "cart"),
-    "113": ("Waiver of Betterment", "waiver-of-betterment"),
-    "25": ("Strike, Riot & Civil Commotion", "strike-riot"),
-    "02": ("Electrical and Electronic Equipment", "accessories"),
-    "2": ("Electrical and Electronic Equipment", "accessories"),
-    "n4": ("Driver and Passenger Protection (DPA/DPP)", "dpa"),
+    "57": ("Special Perils", "special-perils"),
+    "57a": ("Special Perils", "special-perils"),
+    "57b": ("Special Perils", "special-perils"),
+    "72": ("Legal Liability of Passengers", "legal-liability-of-passengers"),
+    "89": ("Windscreen Coverage", "windscreen"),
+    "89a": ("Windscreen Coverage", "windscreen"),
+    "97": ("Windscreen Coverage", "windscreen"),
+    "100": ("Legal Liability to Passengers", "legal-liability-to-passengers"),
+    "101": ("Strike, Riot & Civil Commotion", "strike-riot-civil-commotion"),
+    "106": ("Strike, Riot & Civil Commotion", "strike-riot-civil-commotion"),
+    "106a": ("Strike, Riot & Civil Commotion", "strike-riot-civil-commotion"),
+    "108": ("All Drivers Excess Waiver", "all-drivers"),
+    "111": ("NCD Relief", "ncd-relief"),
+    "112": ("CART", "repair-allowance"),
+    "113": ("Betterment Waiver", "betterment-protection"),
+    "030": ("Betterment Waiver", "betterment-protection"),
+    "30": ("Betterment Waiver", "betterment-protection"),
+    "25": ("Strike, Riot & Civil Commotion", "strike-riot-civil-commotion"),
+    "02": ("Vehicle Accessories Cover", "vehicle-accessories"),
+    "2": ("Vehicle Accessories Cover", "vehicle-accessories"),
+    "n4": ("Driver Passenger Protector", "driver-passenger-protector"),
 }
 
 
@@ -637,7 +668,11 @@ def _stitch_lines(raw_lines: list[str]) -> list[str]:
                     is_continuation = True
             elif s.startswith(":"):
                 is_continuation = True
-            elif prev_lower.endswith((" in", " of", " for", " with", " and", " or", ":")):
+            elif s.lower().startswith(("cost)", "buruh)", "labour cost)")):
+                is_continuation = True
+            elif prev.count("(") > prev.count(")") and ")" in s and not _heading_scope(prev):
+                is_continuation = True
+            elif prev_lower.endswith((" in", " of", " for", " with", " and", " or", ":", "labour", "termasuk kos")):
                 if not _heading_scope(prev):
                     is_continuation = True
 

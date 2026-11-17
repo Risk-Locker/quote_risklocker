@@ -349,7 +349,12 @@ def process_extraction_job(
     # Strictly preserve internal system quotation reference (never overwrite from PDF)
     existing_qref = (draft.fields or {}).get("quotation_reference") or session.quotation_ref
     qref_val = existing_qref.get("value") if isinstance(existing_qref, dict) else existing_qref
-    if not qref_val or not str(qref_val).startswith("RL"):
+    if getattr(session, "is_test", False):
+        if not qref_val or not str(qref_val).startswith("TEST-RL"):
+            now_kl = datetime.now(timezone(timedelta(hours=8)))
+            qref_val = f"TEST-RL{now_kl:%y}{new_id()[:5].upper()}"
+            session.quotation_ref = qref_val
+    elif not qref_val or not str(qref_val).startswith("RL"):
         from app.services.quotation_reference_service import generate_quotation_reference
         qref_val = session.quotation_ref if session.quotation_ref and str(session.quotation_ref).startswith("RL") else generate_quotation_reference(db)
         session.quotation_ref = qref_val
@@ -517,21 +522,6 @@ def process_extraction_job(
     else:
         effective_veh_no = clean_plate or (f"CHASSIS: {clean_chassis}" if clean_chassis else "UNPLATED")
 
-    # Customer account resolution
-    cust_account = None
-    if customer or raw_id:
-        cust_account, discrepancies = resolve_or_create_customer(
-            db=db,
-            raw_name=customer or "Valued Client",
-            raw_id=raw_id or None,
-        )
-        if cust_account:
-            session.customer_id = cust_account.id
-            if discrepancies:
-                curr_opts = draft.display_options or {}
-                curr_opts["customer_discrepancies"] = discrepancies
-                draft.display_options = curr_opts
-
     # AI Vehicle Brand & Model Simplification Job
     from app.services.vehicle_simplifier_service import simplify_vehicle_name_with_ai
     simp_brand, simp_model, simp_combined = simplify_vehicle_name_with_ai(raw_brand, raw_model)
@@ -556,67 +546,6 @@ def process_extraction_job(
             else:
                 draft.fields["vehicle_model"] = simp_combined
 
-    # Vehicle Tracking & Full Spec Persistence
-    veh, owner_alert = get_or_create_vehicle_tracking(
-        db=db,
-        vehicle_no=effective_veh_no,
-        customer_name=customer or "Valued Client",
-        validity_date=cover_end or cover_start or None,
-        session_id=session.id,
-        brand=effective_brand,
-        model=effective_model,
-        chassis_no=raw_chassis or None,
-        engine_no=raw_engine or None,
-        customer_id=cust_account.id if cust_account else None,
-    )
-    if veh:
-        session.tracked_vehicle_id = veh.id
-        # Adopt known registration plate if document was unplated/chassis but vehicle already has a registered plate
-        if is_valid_malaysian_plate(veh.vehicle_no) and not is_valid_malaysian_plate(clean_plate):
-            effective_veh_no = veh.vehicle_no
-            if isinstance(draft.fields, dict):
-                draft.fields["vehicle_no"] = {"value": veh.vehicle_no, "status": "ready", "source": "chassis_match"}
-        if veh_yom_val and not veh.manufacture_year:
-            veh.manufacture_year = veh_yom_val
-        if raw_cc and not veh.engine_cc:
-            veh.engine_cc = raw_cc
-        if raw_chassis and not veh.chassis_no:
-            veh.chassis_no = raw_chassis
-        if raw_engine and not veh.engine_no:
-            veh.engine_no = raw_engine
-        if effective_brand:
-            veh.car_brand = effective_brand
-        if effective_model:
-            veh.car_model = effective_model
-        if owner_alert:
-            curr_opts = draft.display_options or {}
-            curr_opts["owner_change_alert"] = owner_alert
-            draft.display_options = curr_opts
-
-    # Insurance Tenure (100% Guaranteed Anchor with Any Date or Today)
-    tenure: InsuranceTenure | None = None
-    if session.tenure_id:
-        tenure = db.get(InsuranceTenure, session.tenure_id)
-        if tenure:
-            if veh and not tenure.tracked_vehicle_id:
-                tenure.tracked_vehicle_id = veh.id
-            if cust_account and not tenure.customer_id:
-                tenure.customer_id = cust_account.id
-
-    if not tenure:
-        tenure = resolve_or_create_tenure(
-            db=db,
-            vehicle_no=effective_veh_no,
-            customer_name=customer or "Valued Client",
-            start_date=cover_start or None,
-            end_date=cover_end or None,
-            tracked_vehicle_id=veh.id if veh else None,
-            customer_id=cust_account.id if cust_account else None,
-            chassis_no=raw_chassis or None,
-            engine_no=raw_engine or None,
-            created_by_id=getattr(session, "created_by_id", None) or getattr(session, "owner_id", None),
-        )
-    # Universal Session & Tenure Date Synchronization from Extracted PDF
     parsed_s_start = parse_date_safe(cover_start) if cover_start else None
     parsed_s_end = parse_date_safe(cover_end) if cover_end else None
     if parsed_s_start and parsed_s_start.tzinfo is None:
@@ -626,37 +555,12 @@ def process_extraction_job(
     elif parsed_s_start:
         parsed_s_end = (parsed_s_start + timedelta(days=364)).replace(tzinfo=timezone.utc)
 
-    session.tenure_id = tenure.id
-    if parsed_s_start:
-        session.coverage_start_date = parsed_s_start
-        session.coverage_end_date = parsed_s_end
-        # Quotation Ingestion Firewall: Quotations are tentative proposals and do NOT re-anchor an established tenure's year across calendar boundaries
-        is_same_year = (parsed_s_start.year == tenure.coverage_start_date.year)
-        if is_same_year and not tenure.covernote_session_id:
-            tenure.coverage_start_date = parsed_s_start
-            if parsed_s_end:
-                tenure.coverage_end_date = parsed_s_end
-                tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
-    else:
-        session.coverage_start_date = tenure.coverage_start_date
-        session.coverage_end_date = tenure.coverage_end_date
-    tenure.last_activity_at = datetime.now(timezone.utc)
-
-    # Propagate detected NCD into tenure if not initialized
-    if tenure and tenure.ncd_percentage is None and isinstance(draft.fields, dict):
-        from app.services.marketing_comparison_service import _extract_ncd_from_draft
-        ext_ncd = _extract_ncd_from_draft(draft.fields)
-        if ext_ncd is not None:
-            tenure.ncd_percentage = ext_ncd
-
-    # Compute content hash & evaluate tenure ingestion
     content_hash = compute_quotation_content_hash(
         fields=draft.fields,
         benefits=draft_data.get("benefits"),
     )
     session.content_hash = content_hash
 
-    # Detect whether this uploaded document is a Cover Note / Policy Schedule vs a Quotation
     raw_doc_text = str(full.get("raw_text") or full.get("ocr_text") or "")
     doc_page_count = len(full.get("page_text") or [])
     from app.extraction.candidate_finder import detect_is_covernote
@@ -667,139 +571,247 @@ def process_extraction_job(
     )
 
     curr_opts = draft.display_options or {}
+    is_sandbox_test = bool(getattr(session, "is_test", False))
 
-    if is_cn:
-        session.document_type = "covernote"
-        session.is_tenure_active = True
-        session.tenure_version = 1
-        curr_opts["document_type"] = "covernote"
-
-        # Extract and persist policy number
-        cand_pno = str((draft.fields.get("policy_number") or {}).get("value") or "").strip()
-        if not cand_pno:
-            cand_qno = str((draft.fields.get("quotation_no") or {}).get("value") or "").strip()
-            if cand_qno and any(ch in cand_qno for ch in ["/", "-", "."]):
-                cand_pno = cand_qno
-        if cand_pno:
-            session.policy_number = cand_pno
-            tenure.policy_number = cand_pno
-
-        # Cleanly replace previous cover note if duplicate/revised covernote uploaded for this tenure
-        if tenure.covernote_session_id and tenure.covernote_session_id != session.id:
-            old_cn_sess = db.get(Session, tenure.covernote_session_id)
-            if old_cn_sess:
-                old_cn_sess.status = "trash"
-                old_cn_sess.document_type = "unlinked_covernote"
-                old_cn_sess.tenure_id = None
-
-        # Anchor Cover Note directly into tenure
-        tenure.covernote_session_id = session.id
+    if is_sandbox_test:
+        # Strict Sandbox Firewall: Never write test sessions into live CustomerAccount, TrackedVehicle, or InsuranceTenure
+        session.customer_id = None
+        session.tracked_vehicle_id = None
+        session.tenure_id = None
         if parsed_s_start:
-            tenure.coverage_start_date = parsed_s_start
-            if parsed_s_end:
-                tenure.coverage_end_date = parsed_s_end
-                tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
-
-        if company_id:
-            tenure.winning_company_id = company_id
-        elif session.detected_company:
-            matching_comp = db.scalar(
-                select(InsuranceCompany).where(
-                    InsuranceCompany.status == AccountStatus.ACTIVE.value,
-                    InsuranceCompany.name.ilike(f"%{session.detected_company.strip()}%"),
-                )
-            )
-            if matching_comp:
-                tenure.winning_company_id = matching_comp.id
-
-        tot_val = (draft.fields.get("total_amount") or {}).get("value") or (draft.fields.get("total_payable") or {}).get("value")
-        if tot_val:
-            try:
-                tenure.won_premium = float(str(tot_val).replace(",", "").replace("RM", "").strip())
-            except (ValueError, TypeError):
-                pass
-
-        # Advance stage to "Issue Policy" ready for 1-click HIT sealing
-        if tenure.stage in ("Quotations", "Material to Client", None, "draft"):
-            tenure.stage = "Issue Policy"
-            stage_hist = dict(tenure.stage_history or {})
-            stage_hist["Issue Policy"] = datetime.now(timezone.utc).isoformat()
-            tenure.stage_history = stage_hist
-            tenure.stage_updated_at = datetime.now(timezone.utc)
-
-        # Autonomous Next-Year Renewal Invariant:
-        # Once policy is issued/bound, immediately create the clean Y+1 renewal tenure (empty marketing comparison)
-        try:
-            from app.services.insurance_tenure_service import create_next_year_renewal_tenure
-            create_next_year_renewal_tenure(db=db, tenure=tenure, user_id=session.created_by_id)
-        except Exception as exc:
-            logger.warning("Could not auto-create next year renewal tenure for tenure %s: %s", tenure.id, exc)
+            session.coverage_start_date = parsed_s_start
+            session.coverage_end_date = parsed_s_end
+        session.document_type = "covernote" if is_cn else "quotation"
+        curr_opts["document_type"] = session.document_type
+        curr_opts["is_sandbox"] = True
+        draft.display_options = curr_opts
+        tenure_id_out = None
     else:
-        session.document_type = "quotation"
-        curr_opts["document_type"] = "quotation"
+        # Customer account resolution
+        cust_account = None
+        if customer or raw_id:
+            cust_account, discrepancies = resolve_or_create_customer(
+                db=db,
+                raw_name=customer or "Valued Client",
+                raw_id=raw_id or None,
+            )
+            if cust_account:
+                session.customer_id = cust_account.id
+                if discrepancies:
+                    curr_opts = draft.display_options or {}
+                    curr_opts["customer_discrepancies"] = discrepancies
+                    draft.display_options = curr_opts
 
-        action, existing_sess, version = evaluate_tenure_ingestion(
+        # Vehicle Tracking & Full Spec Persistence
+        veh, owner_alert = get_or_create_vehicle_tracking(
             db=db,
-            tenure_id=tenure.id,
-            company_name=session.detected_company,
-            company_id=draft.company_id,
-            content_hash=content_hash,
-            current_session_id=session.id,
+            vehicle_no=effective_veh_no,
+            customer_name=customer or "Valued Client",
+            validity_date=cover_end or cover_start or None,
+            session_id=session.id,
+            brand=effective_brand,
+            model=effective_model,
+            chassis_no=raw_chassis or None,
+            engine_no=raw_engine or None,
+            customer_id=cust_account.id if cust_account else None,
         )
-        if action == "SKIP_IDENTICAL" and existing_sess and existing_sess.id != session.id:
-            from app.models.tables import Session as SessionModel
-            existing_company_sessions = list(
-                db.scalars(
-                    select(SessionModel).where(
-                        SessionModel.tenure_id == tenure.id,
-                        SessionModel.status != "trash",
-                    )
-                ).all()
-            )
-            clean_comp = (session.detected_company or "").strip().lower()
-            same_comp_sessions = [
-                s for s in existing_company_sessions
-                if s.detected_company and s.detected_company.strip().lower() == clean_comp
-            ]
-            max_v = max((s.tenure_version for s in same_comp_sessions), default=existing_sess.tenure_version)
-            new_version = max_v + 1
+        if veh:
+            session.tracked_vehicle_id = veh.id
+            if is_valid_malaysian_plate(veh.vehicle_no) and not is_valid_malaysian_plate(clean_plate):
+                effective_veh_no = veh.vehicle_no
+                if isinstance(draft.fields, dict):
+                    draft.fields["vehicle_no"] = {"value": veh.vehicle_no, "status": "ready", "source": "chassis_match"}
+            if veh_yom_val and not veh.manufacture_year:
+                veh.manufacture_year = veh_yom_val
+            if raw_cc and not veh.engine_cc:
+                veh.engine_cc = raw_cc
+            if raw_chassis and not veh.chassis_no:
+                veh.chassis_no = raw_chassis
+            if raw_engine and not veh.engine_no:
+                veh.engine_no = raw_engine
+            if effective_brand:
+                veh.car_brand = effective_brand
+            if effective_model:
+                veh.car_model = effective_model
+            if owner_alert:
+                curr_opts = draft.display_options or {}
+                curr_opts["owner_change_alert"] = owner_alert
+                draft.display_options = curr_opts
 
-            session.status = "active"
-            session.is_tenure_active = False
-            session.tenure_version = new_version
-            session.duplicate_of_session_id = existing_sess.id
-            session.duplicate_resolution = "pending"
+        # Insurance Tenure (100% Guaranteed Anchor with Any Date or Today)
+        tenure: InsuranceTenure | None = None
+        if session.tenure_id:
+            tenure = db.get(InsuranceTenure, session.tenure_id)
+            if tenure:
+                if veh and not tenure.tracked_vehicle_id:
+                    tenure.tracked_vehicle_id = veh.id
+                if cust_account and not tenure.customer_id:
+                    tenure.customer_id = cust_account.id
 
-            curr_opts["duplicate_detected"] = True
-            curr_opts["original_session_id"] = existing_sess.id
-            curr_opts["original_version"] = existing_sess.tenure_version
-            curr_opts["new_version"] = new_version
-            curr_opts["duplicate_message"] = (
-                f"Uploaded quote for {session.detected_company or 'this insurer'} is identical to v{existing_sess.tenure_version}."
+        if not tenure:
+            tenure = resolve_or_create_tenure(
+                db=db,
+                vehicle_no=effective_veh_no,
+                customer_name=customer or "Valued Client",
+                start_date=cover_start or None,
+                end_date=cover_end or None,
+                tracked_vehicle_id=veh.id if veh else None,
+                customer_id=cust_account.id if cust_account else None,
+                chassis_no=raw_chassis or None,
+                engine_no=raw_engine or None,
+                created_by_id=getattr(session, "created_by_id", None) or getattr(session, "owner_id", None),
             )
+
+        session.tenure_id = tenure.id
+        if parsed_s_start:
+            session.coverage_start_date = parsed_s_start
+            session.coverage_end_date = parsed_s_end
+            is_same_year = (parsed_s_start.year == tenure.coverage_start_date.year)
+            if is_same_year and not tenure.covernote_session_id:
+                tenure.coverage_start_date = parsed_s_start
+                if parsed_s_end:
+                    tenure.coverage_end_date = parsed_s_end
+                    tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
         else:
-            session.tenure_version = version
+            session.coverage_start_date = tenure.coverage_start_date
+            session.coverage_end_date = tenure.coverage_end_date
+        tenure.last_activity_at = datetime.now(timezone.utc)
+
+        if tenure and tenure.ncd_percentage is None and isinstance(draft.fields, dict):
+            from app.services.marketing_comparison_service import _extract_ncd_from_draft
+            ext_ncd = _extract_ncd_from_draft(draft.fields)
+            if ext_ncd is not None:
+                tenure.ncd_percentage = ext_ncd
+
+        curr_opts = draft.display_options or {}
+
+        if is_cn:
+            session.document_type = "covernote"
             session.is_tenure_active = True
-            if version > 1:
-                curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
-                from app.services.session_service import archive_superseded_company_sessions
-                archive_superseded_company_sessions(
-                    db=db,
-                    tenure_id=tenure.id,
-                    company_id=getattr(session, "company_id", None),
-                    detected_company=session.detected_company,
-                    current_session_id=session.id,
+            session.tenure_version = 1
+            curr_opts["document_type"] = "covernote"
+
+            cand_pno = str((draft.fields.get("policy_number") or {}).get("value") or "").strip()
+            if not cand_pno:
+                cand_qno = str((draft.fields.get("quotation_no") or {}).get("value") or "").strip()
+                if cand_qno and any(ch in cand_qno for ch in ["/", "-", "."]):
+                    cand_pno = cand_qno
+            if cand_pno:
+                session.policy_number = cand_pno
+                tenure.policy_number = cand_pno
+
+            if tenure.covernote_session_id and tenure.covernote_session_id != session.id:
+                old_cn_sess = db.get(Session, tenure.covernote_session_id)
+                if old_cn_sess:
+                    old_cn_sess.status = "trash"
+                    old_cn_sess.document_type = "unlinked_covernote"
+                    old_cn_sess.tenure_id = None
+
+            tenure.covernote_session_id = session.id
+            if parsed_s_start:
+                tenure.coverage_start_date = parsed_s_start
+                if parsed_s_end:
+                    tenure.coverage_end_date = parsed_s_end
+                    tenure.expiry_month = parsed_s_end.strftime("%Y-%m")
+
+            if company_id:
+                tenure.winning_company_id = company_id
+            elif session.detected_company:
+                matching_comp = db.scalar(
+                    select(InsuranceCompany).where(
+                        InsuranceCompany.status == AccountStatus.ACTIVE.value,
+                        InsuranceCompany.name.ilike(f"%{session.detected_company.strip()}%"),
+                    )
                 )
-    draft.display_options = curr_opts
+                if matching_comp:
+                    tenure.winning_company_id = matching_comp.id
+
+            tot_val = (draft.fields.get("total_amount") or {}).get("value") or (draft.fields.get("total_payable") or {}).get("value")
+            if tot_val:
+                try:
+                    tenure.won_premium = float(str(tot_val).replace(",", "").replace("RM", "").strip())
+                except (ValueError, TypeError):
+                    pass
+
+            if tenure.stage in ("Quotations", "Material to Client", None, "draft"):
+                tenure.stage = "Issue Policy"
+                stage_hist = dict(tenure.stage_history or {})
+                stage_hist["Issue Policy"] = datetime.now(timezone.utc).isoformat()
+                tenure.stage_history = stage_hist
+                tenure.stage_updated_at = datetime.now(timezone.utc)
+
+            try:
+                from app.services.insurance_tenure_service import create_next_year_renewal_tenure
+                create_next_year_renewal_tenure(db=db, tenure=tenure, user_id=session.created_by_id)
+            except Exception as exc:
+                logger.warning("Could not auto-create next year renewal tenure for tenure %s: %s", tenure.id, exc)
+        else:
+            session.document_type = "quotation"
+            curr_opts["document_type"] = "quotation"
+
+            action, existing_sess, version = evaluate_tenure_ingestion(
+                db=db,
+                tenure_id=tenure.id,
+                company_name=session.detected_company,
+                company_id=draft.company_id,
+                content_hash=content_hash,
+                current_session_id=session.id,
+            )
+            if action == "SKIP_IDENTICAL" and existing_sess and existing_sess.id != session.id:
+                from app.models.tables import Session as SessionModel
+                existing_company_sessions = list(
+                    db.scalars(
+                        select(SessionModel).where(
+                            SessionModel.tenure_id == tenure.id,
+                            SessionModel.status != "trash",
+                        )
+                    ).all()
+                )
+                clean_comp = (session.detected_company or "").strip().lower()
+                same_comp_sessions = [
+                    s for s in existing_company_sessions
+                    if s.detected_company and s.detected_company.strip().lower() == clean_comp
+                ]
+                max_v = max((s.tenure_version for s in same_comp_sessions), default=existing_sess.tenure_version)
+                new_version = max_v + 1
+
+                session.status = "active"
+                session.is_tenure_active = False
+                session.tenure_version = new_version
+                session.duplicate_of_session_id = existing_sess.id
+                session.duplicate_resolution = "pending"
+
+                curr_opts["duplicate_detected"] = True
+                curr_opts["original_session_id"] = existing_sess.id
+                curr_opts["original_version"] = existing_sess.tenure_version
+                curr_opts["new_version"] = new_version
+                curr_opts["duplicate_message"] = (
+                    f"Uploaded quote for {session.detected_company or 'this insurer'} is identical to v{existing_sess.tenure_version}."
+                )
+            else:
+                session.tenure_version = version
+                session.is_tenure_active = True
+                if version > 1:
+                    curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
+                    from app.services.session_service import archive_superseded_company_sessions
+                    archive_superseded_company_sessions(
+                        db=db,
+                        tenure_id=tenure.id,
+                        company_id=getattr(session, "company_id", None),
+                        detected_company=session.detected_company,
+                        current_session_id=session.id,
+                    )
+        draft.display_options = curr_opts
+        tenure_id_out = tenure.id
 
     complete_job(
         db,
         job,
         worker_id,
-        {"session_id": session.id, "draft_id": draft.id, "tenure_id": tenure.id},
+        {"session_id": session.id, "draft_id": draft.id, "tenure_id": tenure_id_out},
     )
 
-    logger.info("Job %s: review saved and job marked complete (session=%s, draft=%s, tenure=%s)", job.id, session.id, draft.id, tenure.id)
+    logger.info("Job %s: review saved and job marked complete (session=%s, draft=%s, tenure=%s)", job.id, session.id, draft.id, tenure_id_out)
 
     # Deferred Supabase promotion: runs AFTER the job is marked complete so the
     # user sees results immediately. Uses a fresh httpx.Client (not the shared

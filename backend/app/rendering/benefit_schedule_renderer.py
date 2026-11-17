@@ -117,10 +117,16 @@ def get_design2_asset_uris(
     resolved_assets = resolved_assets or {}
     cfg_assets = template_config.get("assets") or {}
 
-    # 1. Risklocker Horizontal Black Logo (matches DESIGN 2.pdf top-left)
+    # 1. Risklocker Horizontal Black Logo (2765px ultra-HD master with auto-padding trim)
     rl_logo_uri = _local_file_data_uri(
-        "assets/RL Logo/risklocker logo horizontal square with black text good for white bg.png"
+        "assets/RL Logo/RISKLOCKER LOGO-02 horizontal square with black text good for white bg.png"
     )
+    if rl_logo_uri:
+        rl_logo_uri = _trim_image_padding_data_uri(rl_logo_uri)
+    if not rl_logo_uri:
+        rl_logo_uri = _local_file_data_uri(
+            "assets/RL Logo/risklocker logo horizontal square with black text good for white bg.png"
+        )
     if not rl_logo_uri:
         rl_logo_uri = _local_file_data_uri("frontend/public/assets/brand/logo-horizontal-black.png")
     if not rl_logo_uri:

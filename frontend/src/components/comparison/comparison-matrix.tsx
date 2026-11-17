@@ -218,6 +218,7 @@ interface ComparisonEntry {
   version?: number;
   uploaded_at?: string;
   notes: string | null;
+  ranking_explanation?: string | null;
   quotation_ref?: string | null;
   source_quotation_no?: string | null;
   is_takaful?: boolean;
@@ -747,18 +748,32 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     }
   };
 
+  const inFlightComparisonRef = useRef<Promise<void> | null>(null);
+
   const fetchComparison = async (silent = false) => {
-    try {
-      if (!silent) setLoading(true);
-      setError(null);
-      const json = await api<any>(`/comparison/${tenureId}`);
-      setData(json);
-      populateEditInputs(json.tenure);
-    } catch (err: any) {
-      setError(err.message || "Failed to load comparison");
-    } finally {
-      if (!silent) setLoading(false);
+    if (inFlightComparisonRef.current) {
+      return inFlightComparisonRef.current;
     }
+    const task = (async () => {
+      try {
+        if (!silent) setLoading(true);
+        setError(null);
+        const json = await api<any>(`/comparison/${tenureId}`, {
+          signal: AbortSignal.timeout(25000),
+        });
+        setData(json);
+        populateEditInputs(json.tenure);
+      } catch (err: any) {
+        if (!silent) {
+          setError(err.message || "Failed to load comparison");
+        }
+      } finally {
+        if (!silent) setLoading(false);
+        inFlightComparisonRef.current = null;
+      }
+    })();
+    inFlightComparisonRef.current = task;
+    return task;
   };
 
   // NCD Entitlement & Previous Policy Edit State
@@ -785,7 +800,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       const nextVal = editNextNcd.trim() !== "" ? parseFloat(editNextNcd) : null;
 
       await api(`/comparison/${data.tenure.id}/fixed-costs`, {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           road_tax: data.tenure.road_tax,
@@ -815,24 +830,39 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     fetchComparison();
   }, [tenureId]);
 
-  // Live polling for remaining background batch extractions
+  // Non-overlapping sequential polling for remaining background batch extractions
   useEffect(() => {
     if (!tenureId) return;
-    const shouldPoll = isFromUpload || (data?.pending_jobs_count !== undefined && data.pending_jobs_count > 0);
-    if (!shouldPoll) return;
+    const pendingJobs = data?.pending_jobs_count ?? 0;
+    const shouldPoll = (isFromUpload && isCompilingBatch) || pendingJobs > 0;
+    if (!shouldPoll) {
+      if (isCompilingBatch && pendingJobs === 0) setIsCompilingBatch(false);
+      return;
+    }
 
+    let cancelled = false;
     let count = 0;
-    const interval = setInterval(() => {
-      count++;
-      fetchComparison(true);
-      if (count >= 12) {
-        clearInterval(interval);
-        setIsCompilingBatch(false);
-      }
-    }, 3000);
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    return () => clearInterval(interval);
-  }, [tenureId, isFromUpload, data?.pending_jobs_count]);
+    const scheduleNext = () => {
+      if (cancelled || count >= 12) {
+        if (!cancelled) setIsCompilingBatch(false);
+        return;
+      }
+      timer = setTimeout(async () => {
+        count++;
+        await fetchComparison(true);
+        scheduleNext();
+      }, 4000);
+    };
+
+    scheduleNext();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [tenureId, isFromUpload, isCompilingBatch, data?.pending_jobs_count]);
 
   const handleSaveFixedCosts = async () => {
     try {
@@ -1040,10 +1070,10 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
       await api<any>(`/comparison/${tenureId}/winner`, {
         method: "POST",
+        signal: AbortSignal.timeout(25000),
         body: JSON.stringify({ entry_id: entryId }),
       });
 
-      await fetchComparison(true);
       triggerStatus(
         "success",
         isNowRecommended ? "Winner Selected" : "Winner Cleared",
@@ -1051,8 +1081,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           ? `${target?.company_name || "Underwriter"} designated as the recommended focus policy.`
           : "Winner designation cleared. Natural comparison preserved."
       );
+      await fetchComparison(true);
     } catch (err: any) {
-      alert("Error updating winner selection: " + err.message);
+      triggerStatus("error", "Winner Update Failed", err.message || "Could not update winner selection.");
       await fetchComparison(true);
     } finally {
       setSelectingWinnerId(null);
@@ -1246,13 +1277,14 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     return list;
   }, [companyGroups, activeVersionsByCompany, splitModeByCompany, showHiddenCards]);
 
-  // Strict dynamic ranking computed ONLY among cards currently visible in the UI
-  // Decoupled from winner selection: Natural price sorting or manual rank determines order
+  // Strict dynamic ranking computed among cards currently visible in the UI
+  // Honors manual_rank overrides first, then authoritative backend/AI rank, then total_payable
   const visibleRanksMap = useMemo(() => {
     const sorted = [...visibleDisplayEntries].sort((a, b) => {
       if (a.manual_rank != null && b.manual_rank != null) return a.manual_rank - b.manual_rank;
       if (a.manual_rank != null) return -1;
       if (b.manual_rank != null) return 1;
+      if (a.rank != null && b.rank != null && a.rank !== b.rank) return a.rank - b.rank;
       return (a.total_payable || 0) - (b.total_payable || 0);
     });
 
@@ -2292,7 +2324,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                   <div className="flex items-baseline justify-between text-xs pt-1 border-t border-[#e5e5ea]/80">
                     <span className="text-[#6e6e73]">Total Payable:</span>
                     <span className="font-mono font-bold text-sm text-[#1b1717]">
-                      RM {Math.round(gq.total_payable).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                      RM {Number(gq.total_payable || 0).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
 

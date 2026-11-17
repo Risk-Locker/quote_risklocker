@@ -14,6 +14,8 @@ import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import type {
   BenefitCardSummary,
   MutationState,
@@ -21,50 +23,6 @@ import type {
   WorkspaceOperation,
   WorkspaceSnapshot,
 } from "./types";
-
-/** Recalculate the adjusted final price from base premium + roadtax + runner fee + extras prices. */
-function _recalcAdjustedTotal(snapshot: WorkspaceSnapshot, nextExtras: WorkspaceSnapshot["extras"]): string {
-  const pRaw = snapshot.fields?.premium;
-  const pVal = typeof pRaw === "object" && pRaw !== null ? (pRaw as Record<string, unknown>).value : pRaw;
-  const rawBasePremium = parseFloat(String(pVal ?? "").replace(/[^0-9.]/g, "")) || 0;
-  const dispOpts = snapshot.display_options as Record<string, unknown> | undefined;
-  const shouldRound = dispOpts?.round_total !== false;
-  const basePremium = shouldRound && rawBasePremium > 0 ? Math.round(rawBasePremium) : rawBasePremium;
-
-  const rtRaw = snapshot.fields?.roadtax;
-  const rtVal = typeof rtRaw === "object" && rtRaw !== null ? (rtRaw as Record<string, unknown>).value : rtRaw;
-  let rt = parseFloat(String(rtVal ?? "").replace(/[^0-9.]/g, "")) || 0;
-
-  if (dispOpts?.include_road_tax === false) {
-    rt = 0;
-  }
-
-  const sfRaw = snapshot.fields?.service_fee;
-  const sfVal = typeof sfRaw === "object" && sfRaw !== null ? (sfRaw as Record<string, unknown>).value : sfRaw;
-  let sf = parseFloat(String(sfVal ?? "").replace(/[^0-9.]/g, "")) || 0;
-  if (dispOpts?.include_runner_fee === false) {
-    sf = 0;
-  }
-
-  const extrasSum = nextExtras.reduce((acc, ex) => {
-    const p = ex.price;
-    const amt = p ? (p.amount ?? (p as any).value ?? 0) : 0;
-    const num = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : (typeof amt === "number" ? amt : 0);
-    return acc + (Number.isFinite(num) ? num : 0);
-  }, 0);
-
-  let total = 0;
-  if (basePremium > 0) {
-    const rawTot = basePremium + rt + sf + extrasSum;
-    total = shouldRound ? Math.round(rawTot) : rawTot;
-  } else {
-    const raw = snapshot.fields?.total_amount;
-    const baseVal = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).value : raw;
-    const base = parseFloat(String(baseVal ?? "").replace(/[^0-9.]/g, "")) || 0;
-    total = shouldRound && base > 0 ? Math.round(base) : base;
-  }
-  return total > 0 ? total.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
-}
 
 type DataContextValue = {
   workspace: WorkspaceSnapshot | null;
@@ -140,8 +98,6 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
         price: { amount: price.amount, currency: price.currency || "MYR" },
       });
     }
-    const nextAdjusted = _recalcAdjustedTotal(snapshot, nextExtras);
-
     return {
       ...snapshot,
       benefits: [...snapshot.benefits, {
@@ -163,7 +119,6 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
           : snapshot.benefit_cards.available_addons,
       },
       extras: nextExtras,
-      total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
     };
   }
   if (operation.op === "select_catalog_offering") {
@@ -242,10 +197,6 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       });
     }
 
-    const nextAdjusted = nextExtras !== snapshot.extras
-      ? _recalcAdjustedTotal(snapshot, nextExtras)
-      : snapshot.total_premium_adjusted;
-
     return {
       ...snapshot,
       benefits: nextBenefits,
@@ -254,7 +205,6 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
         available_addons: nextAddons,
       },
       extras: nextExtras,
-      total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
     };
   }
   if (operation.op === "benefit_update") {
@@ -359,10 +309,6 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     if (state === "removed" || state === "available_addon") {
       nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
     }
-    const nextAdjusted = nextExtras !== snapshot.extras
-      ? _recalcAdjustedTotal(snapshot, nextExtras)
-      : snapshot.total_premium_adjusted;
-
     return {
       ...snapshot,
       benefits: nextBenefits,
@@ -371,7 +317,6 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
         available_addons: nextAddons,
       },
       extras: nextExtras,
-      total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
     };
   }
   if (operation.op === "update_display_options") {
@@ -379,14 +324,9 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       ...(snapshot.display_options || {}),
       ...(operation.options || {}),
     };
-    const nextSnapshot = {
+    return {
       ...snapshot,
       display_options: nextOptions,
-    };
-    const nextAdjusted = _recalcAdjustedTotal(nextSnapshot, snapshot.extras);
-    return {
-      ...nextSnapshot,
-      total_premium_adjusted: nextAdjusted || snapshot.total_premium_adjusted,
     };
   }
   if (operation.op === "layout_override") {
@@ -453,6 +393,8 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [dirtyPaths, setDirtyPaths] = useState<string[]>([]);
+  const [pendingNavHref, setPendingNavHref] = useState<string | null>(null);
+  const [navSaving, setNavSaving] = useState(false);
   const operationsRef = useRef<Map<string, WorkspaceOperation>>(new Map());
   const operationVersionsRef = useRef<Map<string, number>>(new Map());
   const operationSequenceRef = useRef(0);
@@ -568,14 +510,7 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
     } catch (error) {
       const message = apiErrorMessage(error);
       setSaveError(message);
-      // Unjam the queue if the operations failed with an unrecoverable validation error
-      // so the workspace queue is never permanently blocked from saving future edits
-      for (const [path, version] of sentVersions) {
-        if (operationVersionsRef.current.get(path) === version) {
-          operationsRef.current.delete(path);
-          operationVersionsRef.current.delete(path);
-        }
-      }
+      // Retain failed operations so `dirty` never resets to false or silently drops edits
       setDirtyPaths([...operationsRef.current.keys()]);
       throw error;
     } finally {
@@ -605,16 +540,31 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
       router.push(href as Route);
       return;
     }
-    const choice = window.confirm("Save your quotation changes before leaving this step?");
-    if (choice) {
-      save().then(() => router.push(href as Route)).catch(() => undefined);
-      return;
+    setPendingNavHref(href);
+  }, [router]);
+
+  const handleSaveAndNavigate = useCallback(async () => {
+    const targetHref = pendingNavHref;
+    if (!targetHref) return;
+    setNavSaving(true);
+    try {
+      await save();
+      setPendingNavHref(null);
+      router.push(targetHref as Route);
+    } catch {
+      // Save error is retained in saveError & surfaced inside the dialog
+    } finally {
+      setNavSaving(false);
     }
-    const discardChanges = window.confirm("Discard unsaved quotation changes?");
-    if (discardChanges) {
-      discard().then(() => router.push(href as Route));
-    }
-  }, [discard, router, save]);
+  }, [pendingNavHref, router, save]);
+
+  const handleDiscardAndNavigate = useCallback(async () => {
+    const targetHref = pendingNavHref;
+    if (!targetHref) return;
+    await discard();
+    setPendingNavHref(null);
+    router.push(targetHref as Route);
+  }, [discard, pendingNavHref, router]);
 
   useEffect(() => {
     function beforeUnload(event: BeforeUnloadEvent) {
@@ -639,7 +589,55 @@ export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: s
   return (
     <DataContext.Provider value={data}>
       <ActionsContext.Provider value={actions}>
-        <MutationContext.Provider value={mutation}>{children}</MutationContext.Provider>
+        <MutationContext.Provider value={mutation}>
+          {children}
+          <Dialog
+            open={Boolean(pendingNavHref)}
+            onOpenChange={(open) => {
+              if (!open && !navSaving) setPendingNavHref(null);
+            }}
+            title="Unsaved Quotation Changes"
+            description="You have unsaved changes staged in this quotation. Save and sync them to the ledger before leaving?"
+          >
+            {saveError ? (
+              <div
+                role="alert"
+                className="mb-3 rounded-[var(--rl-radius-sm)] border border-[var(--rl-red)]/30 bg-[var(--rl-red-light)] px-3 py-2 text-xs font-semibold text-[var(--rl-red)]"
+              >
+                {saveError}
+              </div>
+            ) : null}
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={navSaving}
+                onClick={() => setPendingNavHref(null)}
+              >
+                Stay Here
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={navSaving}
+                onClick={handleDiscardAndNavigate}
+              >
+                Discard &amp; Leave
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                loading={navSaving}
+                onClick={handleSaveAndNavigate}
+              >
+                {navSaving ? "Saving..." : "Save & Leave"}
+              </Button>
+            </div>
+          </Dialog>
+        </MutationContext.Provider>
       </ActionsContext.Provider>
     </DataContext.Provider>
   );

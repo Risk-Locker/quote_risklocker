@@ -9,6 +9,7 @@ import { LedgerFiltersBar } from "./LedgerFiltersBar";
 import { LedgerTable } from "./LedgerTable";
 import { LedgerCalendarView } from "./LedgerCalendarView";
 import { LedgerModalsContainer } from "./LedgerModals";
+import { Dialog } from "@/components/ui/dialog";
 import type {
   LedgerSortColumn,
   YoYStatItem,
@@ -216,6 +217,34 @@ export function TenureTimelineLedger() {
 
       {/* 5. DRAWERS & MODALS CONTAINER */}
       <LedgerModalsContainer modals={modals} state={state} />
+
+      {/* 6. ACCESSIBLE BULK ACTION CONFIRMATION DIALOG */}
+      <Dialog
+        open={Boolean(state.pendingBulkAction)}
+        onOpenChange={(open) => {
+          if (!open && !state.deletingBulk && !state.confirmingBulk) {
+            state.setPendingBulkAction(null);
+          }
+        }}
+        title={
+          state.pendingBulkAction === "delete"
+            ? `Move ${state.selectedTenureIds.length} deal(s) to Trash?`
+            : `Confirm HIT for ${state.selectedTenureIds.length} deal(s)?`
+        }
+        description={
+          state.pendingBulkAction === "delete"
+            ? "Associated quotation sessions, comparisons, and PDFs will be archived for 30 days."
+            : "This marks all selected deals as Won / Issued Policy and creates upcoming renewal tenures for next year where applicable."
+        }
+        onConfirm={state.confirmPendingBulkAction}
+        confirmLabel={
+          state.pendingBulkAction === "delete"
+            ? "Move to Trash"
+            : `Confirm Hit (${state.selectedTenureIds.length})`
+        }
+        confirmVariant={state.pendingBulkAction === "delete" ? "danger" : "primary"}
+        loading={state.deletingBulk || state.confirmingBulk}
+      />
     </div>
   );
 }

@@ -193,7 +193,12 @@ export function useReviewCatalogAndTemplate({
     return list;
   }, [previewTemplate]);
 
-  async function pinCatalog(companyId: string, productId?: string | null, tierId?: string | null) {
+  async function pinCatalog(
+    companyId: string,
+    productId?: string | null,
+    tierId?: string | null,
+    options?: { stageOnly?: boolean },
+  ) {
     setPinLoading(true);
     const company = companies.find((c) => c.id === companyId);
     const product = productId ? productOptions.find((p: any) => p.id === productId) : null;
@@ -208,6 +213,10 @@ export function useReviewCatalogAndTemplate({
       ...(product ? { product_name: product.name } : {}),
       ...(tier ? { tier_name: tier.name } : {}),
     }, "catalog");
+    if (options?.stageOnly) {
+      setPinLoading(false);
+      return;
+    }
     try { await save(); } catch {} finally { setPinLoading(false); }
   }
 

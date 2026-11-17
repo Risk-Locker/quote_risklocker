@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.domain.benefits import BenefitValue
 from app.models.tables import (
+    BenefitAlias,
     BenefitCatalog,
     BenefitCatalogRevision,
     BenefitConcept,
@@ -700,6 +701,39 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
     concepts_by_key = {c.concept_key: c for c in all_concepts.values()}
     concepts_by_norm = {_norm(c.label): c for c in all_concepts.values()}
 
+    # Load all active BenefitAlias phrases and match_dataset tokens for deterministic alias resolution
+    alias_norm_to_concept: dict[str, BenefitConcept] = {}
+    for c in all_concepts.values():
+        for m_tok in (c.match_dataset or []):
+            n_tok = _norm(m_tok)
+            if len(n_tok) >= 4:
+                alias_norm_to_concept.setdefault(n_tok, c)
+    for ba in db.scalars(select(BenefitAlias).where(BenefitAlias.status == "active")).all():
+        c_obj = all_concepts.get(str(ba.benefit_id))
+        if c_obj:
+            for p_raw in (ba.phrase, ba.normalized_phrase):
+                n_p = _norm(p_raw)
+                if len(n_p) >= 3:
+                    alias_norm_to_concept[n_p] = c_obj
+
+    real_quotation_phrase_map: tuple[tuple[tuple[str, ...], str], ...] = (
+        (("windscreen", "wndscrn", "w screen", "cermin", "cermin berlapis", "endorsement 89", "endt 89", "endorsement 97"), "windscreen"),
+        (("any authorised driver", "any authorized driver", "all rider", "semua penunggang", "authorised driver", "pemandu yang diberi kuasa", "all driver", "endorsement 108"), "all-drivers"),
+        (("make vehicle aged", "vehicle aged 6", "endorsement 113", "endt 113", "endorsement 030", "endorsement 30", "waiver of betterment", "betterment"), "betterment-protection"),
+        (("legal liab of passenger", "legal liability of passenger", "negligent acts", "endorsement 72", "endt 72", "llop"), "legal-liability-of-passengers"),
+        (("legal liability to passenger", "passenger liability cover", "endorsement 100", "endt 100", "lltp", "llp"), "legal-liability-to-passengers"),
+        (("convulsions of nature", "inclusion of special perils", "special perils", "endorsement 57", "endt 57"), "special-perils"),
+        (("strike riot", "civil commotion", "endorsement 101", "endorsement 106", "106 a", "srcc"), "strike-riot-civil-commotion"),
+        (("unlimited towing", "24 hour auto assist", "e assist smart driver", "emergency towing", "roadside assistance"), "towing"),
+        (("repair warranty", "workmanship warranty", "panel workmanship"), "repair-workmanship-warranty"),
+        (("assessed repair time", "endorsement 112", "endt 112", "cart"), "repair-allowance"),
+        (("ncd relief", "ncd protector", "endorsement 111", "endt 111"), "ncd-relief"),
+        (("drive less save more", "pay as you drive"), "payd-telematics"),
+        (("motor pa plus", "smart driver pa"), "motor-pa-plus"),
+        (("private car 365", "auto365"), "private-car-365"),
+        (("oto 360",), "oto-360"),
+    )
+
     for line in sorted(lines, key=lambda item: int(item.page_number or 0)):
         decision = decisions.get(line.id)
         if decision is None:
@@ -765,13 +799,22 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
 
         if not target_concept_id:
             line_norm = _norm(line.raw_label or line.normalized_label)
-            if "windscreen" in line_norm or "wndscrn" in line_norm:
-                c = concepts_by_key.get("windscreen")
-                target_concept_id = c.id if c else None
-            elif "legal liability" in line_norm and "passenger" in line_norm:
-                c1 = concepts_by_key.get("legal-liability-of-passengers")
-                c2 = concepts_by_key.get("legal-liability-to-passengers")
-                target_concept_id = c1.id if c1 else (c2.id if c2 else None)
+            # 1. Exact or phrase match against real quotation phrase table
+            for phrases, target_ckey in real_quotation_phrase_map:
+                if any(p in line_norm for p in phrases):
+                    c_match = concepts_by_key.get(target_ckey)
+                    if c_match:
+                        target_concept_id = c_match.id
+                        break
+            # 2. Exact or word-bounded match against 534 BenefitAlias rows & match_dataset
+            if not target_concept_id and line_norm in alias_norm_to_concept:
+                target_concept_id = alias_norm_to_concept[line_norm].id
+            if not target_concept_id:
+                for alias_k, c_obj in alias_norm_to_concept.items():
+                    if len(alias_k) >= 5 and f" {alias_k} " in f" {line_norm} ":
+                        target_concept_id = c_obj.id
+                        break
+            # 3. Concept label fallback
             if not target_concept_id:
                 for norm_k, c_obj in concepts_by_norm.items():
                     if len(line_norm) >= 6 and (norm_k in line_norm or re.search(r"\b" + re.escape(line_norm) + r"\b", norm_k)):
@@ -786,6 +829,12 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
             continue
 
         extracted = line.extracted_value if isinstance(line.extracted_value, dict) else None
+        if isinstance(extracted, dict):
+            sem_role = str(extracted.get("semantic_role") or "").lower()
+            ext_val_str = str(extracted.get("value") or "").strip().lower()
+            # Never treat a pure premium/fee extraction or 'Included' marker as a coverage limit override
+            if sem_role == "premium" or (sem_role == "amount" and ext_val_str in {"", "0", "0.0", "0.00"}) or ext_val_str in {"included", "selected", "yes", "standard"}:
+                extracted = None
         if extracted is None:
             ev_dict = line.evidence if isinstance(line.evidence, dict) else {}
             ev_str = str(cov_limit or ev_dict.get("coverage_limit") or ev_dict.get("limit") or "")
@@ -807,13 +856,6 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         "value": ev_str.strip(),
                         "display_text": ev_str.strip(),
                     }
-            elif premium_cost:
-                clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
-                is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", str(premium_cost), re.IGNORECASE))
-                if is_pure_money:
-                    extracted = {"type": "money", "value": clean_p, "currency": "MYR", "semantic_role": "premium", "display_text": f"RM {clean_p}"}
-                else:
-                    extracted = {"type": "text", "value": str(premium_cost), "display_text": str(premium_cost)}
 
         concept_offerings = [item for item in offerings if str(item.concept_id) == str(target_concept_id)]
         current = next(
@@ -1014,11 +1056,10 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 if is_line_optional is None and isinstance(line, dict):
                     is_line_optional = line.get("is_optional_cover")
 
-                custom_label = (line.raw_label or "").strip()
-                if not custom_label and target_concept_id and str(target_concept_id) in all_concepts:
+                if target_concept_id and str(target_concept_id) in all_concepts:
                     custom_label = all_concepts[str(target_concept_id)].label
-                if not custom_label:
-                    custom_label = "Custom Benefit"
+                else:
+                    custom_label = (line.raw_label or "").strip() or "Custom Benefit"
 
                 new_selection = DraftBenefitSelection(
                     id=selection_id,

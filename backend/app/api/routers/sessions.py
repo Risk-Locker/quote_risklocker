@@ -212,7 +212,10 @@ from app.services.upload_intake_service import create_queued_upload
 from app.services.session_service import (
     get_session,
     get_session_filter_options,
+    get_session_tab_counts,
     list_sessions,
+    preload_session_templates,
+    purge_test_sessions,
     serialize_session,
 )
 from app.services.quotation_activity_service import (
@@ -545,7 +548,7 @@ def sessions_list(
     staff_id: str | None = None,
     user_id: str | None = None,
     status: str | None = None,
-    sort_by: str = "vehicle",
+    sort_by: str = "date_desc",
     type_filter: str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -566,14 +569,27 @@ def sessions_list(
         offset=max(offset, 0),
     )
     filter_options = get_session_filter_options(db) if offset == 0 else {"companies": [], "users": [], "staff": []}
+    tab_counts = get_session_tab_counts(db)
+    preloaded_templates = preload_session_templates(db, sessions)
 
-    serialized = [serialize_session(s) for s in sessions]
+    serialized = [serialize_session(s, preloaded_templates=preloaded_templates) for s in sessions]
 
     return {
         "sessions": serialized,
         "total": total,
+        "tab_counts": tab_counts,
         "filter_options": filter_options,
     }
+
+
+@router.post("/sessions/test-sandbox/purge")
+def sessions_purge_test_sandbox(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    purged_count = purge_test_sessions(db)
+    return {"status": "success", "purged_count": purged_count}
 
 
 

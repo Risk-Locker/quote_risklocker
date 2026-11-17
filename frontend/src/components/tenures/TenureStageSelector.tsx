@@ -8,6 +8,7 @@ import { formatDateTimeSafe } from "./types";
 
 export interface TenureStageSelectorProps {
   tenure: TenureRow;
+  compact?: boolean;
   onPatchField: (tenureId: string, updates: Partial<TenureRow>) => Promise<void>;
   onOpenCovernoteUpload: (tenure: TenureRow) => void;
   onOpenHitModal: (tenure: TenureRow) => void;
@@ -16,6 +17,7 @@ export interface TenureStageSelectorProps {
 
 export function TenureStageSelector({
   tenure: t,
+  compact = false,
   onPatchField,
   onOpenCovernoteUpload,
   onOpenHitModal,
@@ -27,9 +29,9 @@ export function TenureStageSelector({
   const canHit = t.stage === "Issue Policy";
 
   const linearStages = [
-    { id: "Quotations", label: "Quotations" },
-    { id: "Material to Client", label: "Material to Client" },
-    { id: "Issue Policy", label: "Issue Policy" },
+    { id: "Quotations", label: "Quotations", shortLabel: "Quotes" },
+    { id: "Material to Client", label: "Material to Client", shortLabel: "Sent" },
+    { id: "Issue Policy", label: "Issue Policy", shortLabel: "Policy" },
   ];
 
   const currentIdx = linearStages.findIndex((s) => s.id === t.stage);
@@ -131,7 +133,7 @@ export function TenureStageSelector({
                     onPatchField(t.id, { stage: st.id });
                   }
                 }}
-                className={`px-2 py-0.5 rounded transition-all cursor-pointer flex items-center gap-1 ${
+                className={`${compact ? "px-1.5 py-0.5" : "px-2 py-0.5"} rounded transition-all cursor-pointer flex items-center gap-1 ${
                   isActive
                     ? "bg-white text-neutral-900 shadow-2xs font-bold border border-neutral-300/80"
                     : isCompleted
@@ -148,7 +150,7 @@ export function TenureStageSelector({
                 }
               >
                 {isCompleted && <Check size={10} weight="bold" className="text-emerald-600 shrink-0" />}
-                <span>{st.label}</span>
+                <span>{compact ? st.shortLabel : st.label}</span>
                 {st.id === "Issue Policy" && !Boolean(t.covernote_policy || t.is_covernote_issued) && (
                   <UploadSimple size={10} className="text-amber-600 shrink-0" />
                 )}
