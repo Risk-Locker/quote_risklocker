@@ -59,6 +59,8 @@ company_based/
 !.agents/rules/**
 !.agents/skills/
 !.agents/skills/**
+!.agents/profiles/
+!.agents/profiles/**
 .agents/rules/*.local.md
 .agents/rules/OVH_SSH.md
 .agents/.freeze.lock
