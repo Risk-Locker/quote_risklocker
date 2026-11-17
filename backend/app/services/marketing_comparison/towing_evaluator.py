@@ -245,7 +245,7 @@ def resolve_insurer_towing_limit(
 
     # --- 7. AMASSURANCE / LIBERTY ---
     if any(k in comp for k in ("amassurance", "amgen", "liberty", "kurnia")):
-        if "unlimited" in text:
+        if "amdrive plus" in text or "unlimited" in text:
             return "Unlimited"
         if "premier" in text or "365 km" in text or "365km" in text or "365-km" in text:
             return "365 km"

@@ -1350,10 +1350,10 @@ def test_underwriter_towing_evaluator_rm_and_conditional_upgrades():
     assert resolve_insurer_towing_limit("QBE", "comprehensive private car") == "RM 500"
     # Tariff basic -> RM 200
     assert resolve_insurer_towing_limit("QBE", "tariff basic motor private car") == "RM 200"
-    # Upgrade via DPA / DPP / Endorsement N4 -> Unlimited
-    assert resolve_insurer_towing_limit("QBE", "comprehensive with dpa") == "Unlimited"
-    assert resolve_insurer_towing_limit("QBE", "driver plus plan 2") == "Unlimited"
-    assert resolve_insurer_towing_limit("QBE", "endorsement n4 attached") == "Unlimited"
+    # Upgrade via DPA / DPP / Endorsement N4 -> Unlimited - Plan 1
+    assert resolve_insurer_towing_limit("QBE", "comprehensive with dpa") == "Unlimited - Plan 1"
+    assert resolve_insurer_towing_limit("QBE", "driver plus plan 2") == "Unlimited - Plan 1"
+    assert resolve_insurer_towing_limit("QBE", "endorsement n4 attached") == "Unlimited - Plan 1"
 
     # 2. Lonpac Underwriter Rules
     # Standard base -> RM 400
@@ -1376,18 +1376,17 @@ def test_underwriter_towing_evaluator_rm_and_conditional_upgrades():
     assert resolve_insurer_towing_limit("Berjaya Sompo", "tariff motor with n-hancer pack") == "Unlimited"
 
     # 4. Tune Protect Underwriter Rules
-    # Standard conventional/agent base -> RM 300
+    # Standard base -> RM 300; Upgrade via Motor Easy Bundle / AutoBuddy / Motor Shield -> Unlimited
     assert resolve_insurer_towing_limit("Tune Protect", "private car motor") == "RM 300"
-    # Motor Easy product tier -> 200 km
-    assert resolve_insurer_towing_limit("Tune Protect", "motor easy comprehensive") == "200 km"
-    # Upgrade via AutoBuddy -> Unlimited
+    assert resolve_insurer_towing_limit("Tune Protect", "motor easy comprehensive") == "RM 300"
     assert resolve_insurer_towing_limit("Tune Protect", "private car with autobuddy rider") == "Unlimited"
+    assert resolve_insurer_towing_limit("Tune Protect", "motor easy bundle") == "Unlimited"
 
     # 5. Etiqa Underwriter Rules
     # Standard base -> 200 km
     assert resolve_insurer_towing_limit("Etiqa", "motor takaful comprehensive") == "200 km"
-    # Upgrade via OTO 360 -> Unlimited
-    assert resolve_insurer_towing_limit("Etiqa", "comprehensive with oto 360") == "Unlimited"
+    # Upgrade via OTO 360 -> Unlimited - Driver Plan 1
+    assert resolve_insurer_towing_limit("Etiqa", "comprehensive with oto 360") == "Unlimited - Driver Plan 1"
 
     # 6. STMB / Takaful Malaysia Underwriter Rules
     # Standard base -> 50 km
@@ -1512,8 +1511,8 @@ def test_resolve_comparison_benefits_covernote_full_synthesis(db_session: Sessio
         windscreen_target=1500.0,
     )
 
-    # Check Towing: QBE with Driver Plus Plan -> Unlimited (not 100 km, not RM 500)
-    assert res["towing_limit"] == "Unlimited"
+    # Check Towing: QBE with Driver Plus Plan -> Unlimited - Plan 1 (not 100 km, not RM 500)
+    assert res["towing_limit"] == "Unlimited - Plan 1"
 
     # Check Special Perils (57)
     assert res["special_perils"] == "Included"
@@ -1551,9 +1550,9 @@ def test_underwriter_towing_rules_deterministic():
     assert resolve_insurer_towing_limit("QBE Insurance", "", "", "100 km") == "RM 500"
     assert resolve_insurer_towing_limit("QBE Insurance", "", "", "50 km") == "RM 500"
     assert resolve_insurer_towing_limit("QBE", "basic tariff policy", "", None) == "RM 200"
-    assert resolve_insurer_towing_limit("QBE", "Endorsement N4 Driver Passenger Protector", "", None) == "Unlimited"
-    assert resolve_insurer_towing_limit("QBE", "DPA rider", "", None) == "Unlimited"
-    assert resolve_insurer_towing_limit("QBE", "DPP package", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("QBE", "Endorsement N4 Driver Passenger Protector", "", None) == "Unlimited - Plan 1"
+    assert resolve_insurer_towing_limit("QBE", "DPA rider", "", None) == "Unlimited - Plan 1"
+    assert resolve_insurer_towing_limit("QBE", "DPP package", "", None) == "Unlimited - Plan 1"
 
     # Lonpac (Base RM: default RM 400, tariff RM 200, SDPA Plan 1 -> RM 600, SDPA Plan 2 -> Unlimited)
     assert resolve_insurer_towing_limit("Lonpac Insurance", "", "", None) == "RM 400"
@@ -1568,15 +1567,16 @@ def test_underwriter_towing_rules_deterministic():
     assert resolve_insurer_towing_limit("Berjaya Sompo", "Motor N-hancer Pack", "", None) == "Unlimited"
     assert resolve_insurer_towing_limit("Berjaya Sompo", "basic tariff policy", "", None) == "RM 200"
 
-    # Tune Protect (Conventional base RM 300, AutoBuddy -> Unlimited; Motor Easy online base 200 km)
+    # Tune Protect (Standard RM 300; Motor Easy Bundle / AutoBuddy / Motor Shield -> Unlimited)
     assert resolve_insurer_towing_limit("Tune Protect", "", "", None) == "RM 300"
     assert resolve_insurer_towing_limit("Tune Protect", "AutoBuddy rider", "", None) == "Unlimited"
-    assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy online portal", "", None) == "200 km"
+    assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy online portal", "", None) == "RM 300"
+    assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy Bundle", "", None) == "Unlimited"
     assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy with AutoBuddy", "", None) == "Unlimited"
 
-    # Etiqa (Base KM: default 200 km, OTO 360 -> Unlimited)
+    # Etiqa (Base KM: default 200 km, OTO 360 -> Unlimited - Driver Plan 1)
     assert resolve_insurer_towing_limit("Etiqa", "", "", None) == "200 km"
-    assert resolve_insurer_towing_limit("Etiqa", "OTO 360 PA rider", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("Etiqa", "OTO 360 PA rider", "", None) == "Unlimited - Driver Plan 1"
 
     # Takaful Malaysia / STMB (Base KM: default 50 km, Motor PA Plus Plan 1-4)
     assert resolve_insurer_towing_limit("Takaful Malaysia", "", "", None) == "50 km"

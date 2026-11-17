@@ -17,21 +17,25 @@ WHERE id = 'cc95f8e7-94a7-428a-a283-14e9f8b51439'
   AND status = 'draft';
 
 UPDATE benefit_catalog_revisions
-SET state = 'published'
+SET state = 'published',
+    published_at = COALESCE(published_at, NOW())
 WHERE id = '819026f3-2640-47d4-b0ee-54dd6dc2355f'
   AND catalog_id = 'cc95f8e7-94a7-428a-a283-14e9f8b51439'
-  AND state <> 'published';
+  AND (state <> 'published' OR published_at IS NULL);
 
--- 3. Remove complimentary base Emergency Towing from non-Comprehensive (Third Party / TPFT) private vehicle catalogs
-DELETE FROM catalog_offerings co
-USING benefit_catalog_revisions bcr, benefit_catalogs bc, coverage_types ct
+-- 3. Deactivate complimentary base Emergency Towing from non-Comprehensive (Third Party / TPFT) catalogs
+-- (Use soft status='inactive' rather than DELETE to preserve historical draft_benefit_selections referential integrity)
+UPDATE catalog_offerings co
+SET status = 'inactive'
+FROM benefit_catalog_revisions bcr, benefit_catalogs bc, coverage_types ct
 WHERE co.catalog_revision_id = bcr.id
   AND bcr.catalog_id = bc.id
   AND bc.coverage_type_id = ct.id
   AND co.concept_id = '47e25689-0ef1-4db5-ae8e-251e8cd94af1'
   AND co.offering_kind = 'base'
   AND co.role = 'included'
-  AND ct.coverage_key IN ('third_party', 'third_party_fire_theft');
+  AND ct.coverage_key IN ('third_party', 'third_party_fire_theft')
+  AND co.status <> 'inactive';
 
 -- 4. Seed authoritative Standard Box-1 base towing limits across all 7 insurers' Comprehensive catalogs
 -- 4a. QBE: Standard RM 500
@@ -121,7 +125,8 @@ WHERE co.catalog_revision_id = bcr.id
 
 INSERT INTO catalog_offerings (
     id, catalog_revision_id, concept_id, offering_key, offering_kind, role,
-    display_value, description_override, status, sort_order, metadata_json, presentation_facet_ids, created_at
+    display_value, description_override, status, sort_order,
+    source_citation, source_aliases, presentation_facet_ids, created_at, updated_at
 )
 SELECT
     '9a7d6c5b-4e3f-4a2b-8c1d-4d9e7c2c0001'::uuid,
@@ -136,6 +141,8 @@ SELECT
     10,
     '{}'::jsonb,
     '[]'::jsonb,
+    '[]'::jsonb,
+    NOW(),
     NOW()
 WHERE EXISTS (
     SELECT 1 FROM benefit_catalog_revisions WHERE id = '33b72a49-1ee6-4de4-b043-33cf9f3a52b7'::uuid
