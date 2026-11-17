@@ -725,6 +725,12 @@ export function CustomerVehicleLedgerPane({
                     : tenure.vehicle_type || "Private Car"}
                 </span>
               </div>
+              {tenure.coverage_type && (
+                <div className="flex justify-between">
+                  <span className="text-[#6e6e73]">Coverage Type:</span>
+                  <span className="font-semibold text-[#1b1717]">{tenure.coverage_type}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-[#6e6e73]">Year of Make:</span>
                 <span className="font-semibold text-[#1b1717]">

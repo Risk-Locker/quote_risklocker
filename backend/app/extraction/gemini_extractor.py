@@ -722,6 +722,9 @@ def _parse_grounded_json_response(data: dict[str, Any]) -> dict[str, Any] | None
     return parsed
 
 
+_GROUNDING_COOLDOWN_UNTIL: float = 0.0
+
+
 def call_gemini_grounded_search(
     *,
     query_prompt: str,
@@ -729,24 +732,16 @@ def call_gemini_grounded_search(
     batch_item_index: int = 0,
     timeout_seconds: float = 18.0,
 ) -> dict[str, Any] | None:
-    """Execute Level-2 Gemini web search (`google_search` tool) using PacerSentinel pool."""
+    """Execute Level-2 Gemini web search (`google_search` tool) with bounded failover."""
+    global _GROUNDING_COOLDOWN_UNTIL
+    now_ts = time.time()
+    if _GROUNDING_COOLDOWN_UNTIL > now_ts:
+        logger.info("Level-2 grounding in cooldown (%.0fs remaining); using deterministic tariff fallback.", _GROUNDING_COOLDOWN_UNTIL - now_ts)
+        return None
     pool = get_key_pool()
-    slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index)
-    if not slot_info:
-        api_key = pool.get_next_key()
-        if not api_key:
-            logger.info("Level-2 grounding skipped: no active Gemini key in pool.")
-            return None
-        from app.core.config import get_settings
+    from app.core.config import get_settings
 
-        settings = get_settings()
-        slot_key = api_key
-        slot_model = settings.gemini_model or "gemini-3.1-flash-lite"
-        slot_id = None
-    else:
-        slot_key, slot_model, slot_id = slot_info
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{slot_model}:generateContent?key={slot_key}"
+    settings = get_settings()
     base_payload: dict[str, Any] = {
         "contents": [{"role": "user", "parts": [{"text": query_prompt}]}],
         "tools": [{"google_search": {}}],
@@ -756,60 +751,97 @@ def call_gemini_grounded_search(
             "response_schema": response_schema,
         },
     }
+    fallback_payload: dict[str, Any] = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            f"{query_prompt}\n\nReturn ONLY valid JSON matching keys: "
+                            f"{list((response_schema.get('properties') or {}).keys())}."
+                        )
+                    }
+                ],
+            }
+        ],
+        "tools": [{"google_search": {}}],
+        "generationConfig": {"temperature": 0.0},
+    }
 
-    start_t = time.perf_counter()
-    try:
-        with httpx.Client(timeout=max(timeout_seconds, 12.0), http2=False) as client:
-            response = client.post(url, json=base_payload)
-            if response.status_code == 400:
-                # Some Gemini endpoints disallow response_schema alongside google_search; retry plain JSON prompt.
-                fallback_payload = {
-                    "contents": [
-                        {
-                            "role": "user",
-                            "parts": [
-                                {
-                                    "text": (
-                                        f"{query_prompt}\n\nReturn ONLY valid JSON matching keys: "
-                                        f"{list((response_schema.get('properties') or {}).keys())}."
-                                    )
-                                }
-                            ],
-                        }
-                    ],
-                    "tools": [{"google_search": {}}],
-                    "generationConfig": {"temperature": 0.0},
-                }
-                response = client.post(url, json=fallback_payload)
-
-            latency_ms = int((time.perf_counter() - start_t) * 1000)
-            if response.status_code != 200:
-                err_msg = response.text[:200]
-                if slot_id:
-                    pool.record_slot_failure(slot_id, response.status_code, err_msg, latency_ms=latency_ms)
-                else:
-                    pool.record_failure(response.status_code, err_msg, key=slot_key)
-                logger.warning("Level-2 grounded search failed (%d) on %s: %s", response.status_code, slot_model, err_msg)
-                return None
-
-            data = response.json()
-            parsed = _parse_grounded_json_response(data)
-            usage = data.get("usageMetadata", {})
-            p_tok = int(usage.get("promptTokenCount", 0) or 0)
-            c_tok = int(usage.get("candidatesTokenCount", 0) or 0)
-            t_tok = int(usage.get("totalTokenCount", p_tok + c_tok) or 0)
-            if slot_id:
-                pool.record_slot_success(slot_id, prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, latency_ms=latency_ms)
-            else:
-                pool.record_success(prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, key=slot_key)
-            return parsed
-    except Exception as exc:
-        latency_ms = int((time.perf_counter() - start_t) * 1000)
-        if slot_id:
-            pool.record_slot_failure(slot_id, 500, str(exc)[:200], latency_ms=latency_ms)
+    tried_pairs: set[tuple[str, str]] = set()
+    # Cap at 2 slots so a Google Search 429 burst never starves all parallel PDF-extraction slots.
+    max_attempts = 2
+    hit_quota_count = 0
+    for attempt in range(max_attempts):
+        slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index + attempt)
+        if not slot_info:
+            api_key = pool.get_next_key() if attempt == 0 else None
+            if not api_key:
+                if attempt == 0:
+                    logger.info("Level-2 grounding skipped: no active Gemini key in pool.")
+                break
+            slot_key = api_key
+            slot_model = settings.gemini_model or "gemini-3.5-flash-lite"
+            slot_id = None
         else:
-            pool.record_failure(500, str(exc)[:200], key=slot_key)
-        logger.warning("Level-2 grounded search exception on %s: %s", slot_model, exc)
-        return None
+            slot_key, slot_model, slot_id = slot_info
+
+        pair = (slot_key, slot_model)
+        if pair in tried_pairs:
+            continue
+        tried_pairs.add(pair)
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{slot_model}:generateContent?key={slot_key}"
+        start_t = time.perf_counter()
+        try:
+            with httpx.Client(timeout=max(timeout_seconds, 12.0), http2=False) as client:
+                response = client.post(url, json=base_payload)
+                if response.status_code == 400:
+                    # Some Gemini endpoints disallow response_schema alongside google_search; retry plain JSON prompt.
+                    response = client.post(url, json=fallback_payload)
+
+                latency_ms = int((time.perf_counter() - start_t) * 1000)
+                if response.status_code != 200:
+                    err_msg = response.text[:350]
+                    if response.status_code == 429:
+                        hit_quota_count += 1
+                    if slot_id:
+                        pool.record_slot_failure(slot_id, response.status_code, err_msg, latency_ms=latency_ms)
+                    else:
+                        pool.record_failure(response.status_code, err_msg, key=slot_key)
+                    logger.warning(
+                        "Level-2 grounded search failed (%d) on %s (attempt %d/%d): %s",
+                        response.status_code,
+                        slot_model,
+                        attempt + 1,
+                        max_attempts,
+                        err_msg,
+                    )
+                    continue
+
+                data = response.json()
+                parsed = _parse_grounded_json_response(data)
+                usage = data.get("usageMetadata", {})
+                p_tok = int(usage.get("promptTokenCount", 0) or 0)
+                c_tok = int(usage.get("candidatesTokenCount", 0) or 0)
+                t_tok = int(usage.get("totalTokenCount", p_tok + c_tok) or 0)
+                if slot_id:
+                    pool.record_slot_success(slot_id, prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, latency_ms=latency_ms)
+                else:
+                    pool.record_success(prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, key=slot_key)
+                return parsed
+        except Exception as exc:
+            latency_ms = int((time.perf_counter() - start_t) * 1000)
+            if slot_id:
+                pool.record_slot_failure(slot_id, 500, str(exc)[:200], latency_ms=latency_ms)
+            else:
+                pool.record_failure(500, str(exc)[:200], key=slot_key)
+            logger.warning("Level-2 grounded search exception on %s: %s", slot_model, exc)
+            continue
+
+    if hit_quota_count >= max_attempts:
+        _GROUNDING_COOLDOWN_UNTIL = time.time() + 180.0
+    return None
 
 

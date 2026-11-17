@@ -167,6 +167,7 @@ def apply_gemini_result(
         if clean_tot:
             try:
                 tot_num = Decimal(clean_tot)
+                fields["total_payable"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
                 fields["total_amount"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
                 if extras_cost > 0:
                     base_p = tot_num - extras_cost
@@ -352,6 +353,7 @@ def apply_gemini_result(
             source_line_id=line.id,
             disposition="unresolved",
         ))
+    db.flush()
 
     finalize_catalog_and_3eye_gate(
         db=db,
@@ -716,6 +718,7 @@ def rescan_session(
                 source_line_id=line.id,
                 disposition="unresolved",
             ))
+        db.flush()
 
         auto_apply_extracted_benefits(db, target_draft)
         engine_used = "native"

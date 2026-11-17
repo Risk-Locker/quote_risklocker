@@ -299,3 +299,109 @@ def test_db_condition_replacement_value_and_manual_edit_flow_to_design2(m2_db: S
         fields={"coverage_type": {"value": "Third Party"}, "vehicle_type": {"value": "Car"}},
     )
     assert not any("towing" in item["title"].lower() for item in complimentary_tp)
+
+
+def test_auto_apply_flushes_last_source_decision_when_autoflush_disabled():
+    """auto_apply_extracted_benefits must see pending DraftSourceLineDecision rows even with autoflush=False."""
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.models.tables import (
+        Base,
+        BenefitCatalog,
+        BenefitCatalogRevision,
+        BenefitConcept,
+        DraftSourceLineDecision,
+        ExtractionBenefitLine,
+        ExtractionRecord,
+        InsuranceCompany,
+        QuotationDraft,
+    )
+    from app.services.catalog_review_service import auto_apply_extracted_benefits
+
+    eng = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(eng)
+    LocalSession = sessionmaker(bind=eng, autocommit=False, autoflush=False)
+    with LocalSession() as db:
+        owner = User(id=new_id(), email="autoflush@risklocker.test", name="Tester", password_hash="x", role="admin")
+        comp = InsuranceCompany(id=new_id(), slug="takaful-malaysia", name="Takaful Malaysia", category="Motor", status="active")
+        cat = BenefitCatalog(id=new_id(), company_id=comp.id, name="Takaful myMotor", status="published")
+        rev = BenefitCatalogRevision(id=new_id(), catalog_id=cat.id, revision_number=1, state="published", content_hash="m2-autoflush")
+        concept = BenefitConcept(id=new_id(), concept_key="all-drivers", label="All Drivers", status="active", match_dataset=["all drivers"])
+        batch = Batch(id=new_id(), owner_id=owner.id, name="Autoflush Batch")
+        uploaded = UploadedFile(
+            id=new_id(),
+            batch_id=batch.id,
+            owner_id=owner.id,
+            original_filename="stmb.pdf",
+            content_type="application/pdf",
+            storage_path="s/stmb.pdf",
+        )
+        draft = QuotationDraft(
+            id=new_id(),
+            uploaded_file_id=uploaded.id,
+            owner_id=owner.id,
+            company_id=comp.id,
+            catalog_revision_id=rev.id,
+            fields={},
+            scalar_decisions={},
+            warnings=[],
+        )
+        rec = ExtractionRecord(
+            id=new_id(),
+            uploaded_file_id=uploaded.id,
+            raw_text="ALL DRIVERS RM 0.00",
+            ocr_text="",
+            words=[],
+            blocks=[],
+            tables=[],
+            images=[],
+            regions=[],
+            candidates={},
+            benefit_lines=[],
+            company_resolution={},
+            warnings=[],
+            reading_quality="ready",
+        )
+        db.add_all([owner, comp, cat, rev, concept, batch, uploaded, draft, rec])
+        db.flush()
+
+        line = ExtractionBenefitLine(
+            id=new_id(),
+            extraction_record_id=rec.id,
+            line_id="line_last_all_drivers",
+            raw_label="ALL DRIVERS",
+            normalized_label="all drivers",
+            page_number=1,
+            section="Optional Covers",
+            source_scope="selected",
+            line_kind="benefit_candidate",
+            inclusion_state="selected",
+            evidence={"value": "RM 0.00", "premium_cost": "0.00"},
+            candidate_mappings=[{"concept_id": concept.id, "concept_key": "all-drivers"}],
+            extracted_value={"type": "money", "value": "0.00", "currency": "MYR"},
+        )
+        db.add(line)
+        db.flush()
+
+        # Deliberately omit db.flush() after DraftSourceLineDecision to reproduce autoflush=False last-item skip
+        pending_decision = DraftSourceLineDecision(
+            id=new_id(),
+            draft_id=draft.id,
+            source_line_id=line.id,
+            disposition="unresolved",
+        )
+        db.add(pending_decision)
+
+        auto_apply_extracted_benefits(db, draft)
+        db.commit()
+
+        saved = db.scalars(select(DraftSourceLineDecision).where(DraftSourceLineDecision.draft_id == draft.id)).all()
+        assert len(saved) == 1
+        assert saved[0].disposition != "unresolved"
+
+

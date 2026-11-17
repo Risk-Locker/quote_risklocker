@@ -39,6 +39,7 @@ export interface TenureSpec {
   car_brand?: string | null;
   vehicle_model: string;
   vehicle_type: string;
+  coverage_type?: string | null;
   winning_file_id?: string | null;
   winning_file_name?: string | null;
   policy_number?: string | null;

@@ -726,6 +726,8 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
 
     if not draft.catalog_revision_id:
         return {"applied": 0}
+    if hasattr(db, "flush"):
+        db.flush()
     extraction = db.scalar(
         select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id)
     )

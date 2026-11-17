@@ -458,3 +458,114 @@ def test_resolve_tenure_coverage_label_preserves_third_party_and_tpft():
         "Comprehensive"
     )
 
+
+def test_extract_vehicle_motor_premium_does_not_double_count_road_tax(monkeypatch):
+    """Comparison motor_premium must reflect underwriter payable, excluding roadtax rolled into draft total_amount."""
+    from app.services.marketing_comparison.benefits_extractor import _extract_vehicle_motor_premium
+
+    # Case 1: legacy rescan draft where total_amount rolled in roadtax (1883.65 + 723.20 = 2606.85)
+    rescan_rolled_fields = {
+        "gross_premium": {"value": "1,734.85", "status": "ready"},
+        "service_tax": {"value": "138.79", "status": "ready"},
+        "roadtax": {"value": "723.20", "status": "ready"},
+        "service_fee": {"value": "0.00", "status": "manual_override"},
+        "include_road_tax": {"value": "true", "status": "ready"},
+        "include_runner_fee": {"value": "true", "status": "ready"},
+        "total_amount": {"value": "2606.85", "status": "ready"},
+    }
+    assert _extract_vehicle_motor_premium(rescan_rolled_fields) == 1883.65
+
+    # Case 2: fresh rescan stores raw underwriter total_payable alongside customer grand total_amount
+    explicit_payable_fields = {
+        **rescan_rolled_fields,
+        "total_payable": {"value": "1883.65", "status": "ready"},
+    }
+    assert _extract_vehicle_motor_premium(explicit_payable_fields) == 1883.65
+
+    # Case 3: direct underwriter PDF extraction where roadtax is not rolled into total_amount
+    direct_uw_fields = {
+        "gross_premium": {"value": "1,734.85", "status": "ready"},
+        "service_tax": {"value": "138.79", "status": "ready"},
+        "roadtax": {"value": "723.20", "status": "ready"},
+        "include_road_tax": {"value": "true", "status": "ready"},
+        "total_amount": {"value": "1883.65", "status": "ready"},
+    }
+    assert _extract_vehicle_motor_premium(direct_uw_fields) == 1883.65
+
+
+def test_call_gemini_grounded_search_rotates_slots_after_429(monkeypatch):
+    """Level-2 google_search must fall back to healthy slots when an earlier slot returns HTTP 429."""
+    from types import SimpleNamespace
+    import httpx
+    from app.extraction import gemini_extractor
+
+    gemini_extractor._GROUNDING_COOLDOWN_UNTIL = 0.0
+    recorded_failures: list[str] = []
+    recorded_successes: list[str] = []
+    slots = [
+        ("key-a", "gemini-3.1-flash-lite", "slot-1"),
+        ("key-b", "gemini-3.5-flash-lite", "slot-2"),
+    ]
+
+    class FakePool:
+        def acquire_parallel_slot(self, batch_item_index=0, requested_model=None):
+            return slots[batch_item_index % len(slots)]
+
+        def record_slot_failure(self, slot_id, status_code, err_msg, latency_ms=0):
+            recorded_failures.append(f"{slot_id}:{status_code}")
+
+        def record_slot_success(self, slot_id, prompt_tokens=0, candidate_tokens=0, total_tokens=0, latency_ms=0):
+            recorded_successes.append(slot_id)
+
+        def record_failure(self, *args, **kwargs):
+            pass
+
+        def record_success(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(gemini_extractor, "get_key_pool", lambda: FakePool())
+
+    calls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, json=None):
+            calls.append(url)
+            if "key-a" in url:
+                return SimpleNamespace(status_code=429, text='{"error":{"code":429,"message":"quota exceeded"}}')
+            return SimpleNamespace(
+                status_code=200,
+                text="",
+                json=lambda: {
+                    "candidates": [
+                        {
+                            "content": {"parts": [{"text": '{"vehicle_category":"NonSaloonCar","powertrain":"ICE","confidence":0.97}'}]},
+                            "groundingMetadata": {"groundingChunks": [{"web": {"uri": "https://honda.com.my/cr-v"}}]},
+                        }
+                    ],
+                    "usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 20, "totalTokenCount": 70},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+
+    result = gemini_extractor.call_gemini_grounded_search(
+        query_prompt="Honda CR-V 2354 CC",
+        response_schema={"type": "object", "properties": {"vehicle_category": {"type": "string"}}},
+        batch_item_index=0,
+    )
+    assert result is not None
+    assert result["vehicle_category"] == "NonSaloonCar"
+    assert len(calls) == 2
+    assert recorded_failures == ["slot-1:429"]
+    assert recorded_successes == ["slot-2"]
+
+

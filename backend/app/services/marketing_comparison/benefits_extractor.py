@@ -502,11 +502,40 @@ def _extract_vehicle_sum_insured(f: dict[str, Any], s_obj: Any = None) -> float:
     return max(all_candidates) if all_candidates else 0.0
 
 
+def _is_truthy_field(raw: Any) -> bool:
+    """Return True when an extracted boolean-like draft field indicates enabled."""
+    return str(_extract_val(raw) or "").strip().lower() in ("1", "true", "yes")
+
+
 def _extract_vehicle_motor_premium(f: dict[str, Any]) -> float:
     """Extract motor insurance premium payable to underwriter (including SST and stamp duty)."""
-    total_amt = _to_float(f.get("total_amount") or f.get("total_payable"))
+    explicit = _to_float(f.get("motor_premium") or f.get("total_payable"))
+    if explicit > 0.0:
+        return round(explicit, 2)
+
+    total_amt = _to_float(f.get("total_amount"))
     if total_amt > 0.0:
-        return total_amt
+        rt_inc = _to_float(f.get("roadtax") or f.get("road_tax_amount")) if _is_truthy_field(f.get("include_road_tax")) else 0.0
+        rf_inc = _to_float(f.get("service_fee") or f.get("runner_fee")) if _is_truthy_field(f.get("include_runner_fee")) else 0.0
+        fee_added = Decimal(str(rt_inc)) + Decimal(str(rf_inc))
+        total_dec = Decimal(str(total_amt))
+        if fee_added > Decimal("0") and total_dec > fee_added:
+            uw_candidate = total_dec - fee_added
+            gross = _to_float(f.get("gross_premium"))
+            prem = _to_float(f.get("premium"))
+            expected_uw: Decimal | None = None
+            if gross > 0.0:
+                sst = Decimal(str(_to_float(f.get("service_tax"))))
+                stamp_raw = _to_float(f.get("stamp_duty"))
+                stamp = Decimal(str(stamp_raw)) if stamp_raw > 0.0 else Decimal("10.00")
+                expected_uw = Decimal(str(gross)) + sst + stamp
+            elif prem > 0.0:
+                extras = Decimal(str(_to_float(f.get("total_optional_cover_amount"))))
+                expected_uw = Decimal(str(prem)) + extras
+            if expected_uw is not None and abs(uw_candidate - expected_uw) < abs(total_dec - expected_uw):
+                return float(round(uw_candidate, 2))
+        return round(total_amt, 2)
+
     gross = _to_float(f.get("gross_premium"))
     if gross > 0.0:
         return gross
