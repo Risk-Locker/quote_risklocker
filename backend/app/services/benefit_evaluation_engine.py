@@ -11,6 +11,7 @@ class EvaluatedBenefit(BaseModel):
     concept_id: str
     display_title: str
     display_description: str
+    display_value: Optional[str] = None
     is_hidden: bool = False
     is_modified: bool = False
     source_condition_id: Optional[str] = None
@@ -166,6 +167,12 @@ class BenefitEvaluationEngine:
                     replacement_title = getattr(condition, "replacement_title", None)
                     if replacement_title:
                         target_benefit.display_title = str(replacement_title)[:MAX_TITLE_LENGTH].strip()
+                        target_benefit.is_modified = True
+                        target_benefit.source_condition_id = condition.id
+                        target_benefit.trigger_plan_filter_matched = condition.trigger_plan_filter
+                    replacement_value = getattr(condition, "replacement_value", None)
+                    if replacement_value:
+                        target_benefit.display_value = str(replacement_value)[:120].strip()
                         target_benefit.is_modified = True
                         target_benefit.source_condition_id = condition.id
                         target_benefit.trigger_plan_filter_matched = condition.trigger_plan_filter

@@ -25,7 +25,7 @@ def test_towing_upgrade_etiqa_oto_360():
     )
 
     assert towing_item is not None
-    assert towing_item["title"] == "Unlimited Towing Assistance"
+    assert towing_item["title"] == "Unlimited Towing Assistance (Unlimited - Driver Plan 1)"
     assert "Upgraded via OTO 360" in towing_item["description"]
 
     # In bottom matrix cards:
@@ -107,7 +107,7 @@ def test_towing_standard_without_rider():
     )
 
     assert towing_item is not None
-    assert towing_item["title"] == "Emergency Towing Assistance (RM 200.00)"
+    assert towing_item["title"] == "Emergency Towing Assistance (200 km)"
     assert "Upgraded via" not in towing_item["description"]
 
 

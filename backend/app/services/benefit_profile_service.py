@@ -276,6 +276,8 @@ def clone_benefit_profile(db, user, profile_id: str, payload: dict) -> dict:
                 target_concept_id=cond.target_concept_id,
                 action_type=getattr(cond, "action_type", "replace_description") or "replace_description",
                 replacement_description=cond.replacement_description,
+                replacement_title=getattr(cond, "replacement_title", None),
+                replacement_value=getattr(cond, "replacement_value", None),
                 is_active=cond.is_active,
                 created_at=utcnow(),
                 updated_at=utcnow(),

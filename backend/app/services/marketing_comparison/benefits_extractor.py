@@ -1069,6 +1069,8 @@ def _resolve_comparison_benefits(
         extracted_towing=raw_towing,
         catalog_display_value=towing_limit_val,
     )
+    if clean_towing == "-":
+        clean_towing = None
 
     canonical_perils_list = format_canonical_perils(combined_text, tokens)
 
@@ -1328,7 +1330,7 @@ def _resolve_comparison_benefits(
             clean_towing = None
         else:
             if eval_map["towing"].is_modified:
-                clean_towing = eval_map["towing"].display_description
+                clean_towing = getattr(eval_map["towing"], "display_value", None) or eval_map["towing"].display_description
                 
         # Update detailed_perils based on engine overrides
         for dp in detailed_perils:
@@ -1338,7 +1340,7 @@ def _resolve_comparison_benefits(
                     dp["name"] = "HIDDEN"
                 elif eval_map["towing"].is_modified:
                     dp["name"] = eval_map["towing"].display_title if eval_map["towing"].display_title != "Roadside Towing" else dp["name"]
-                    dp["coverage_limit"] = eval_map["towing"].display_description
+                    dp["coverage_limit"] = getattr(eval_map["towing"], "display_value", None) or eval_map["towing"].display_description
             elif "special peril" in n_lower or "flood" in n_lower:
                 if "special_perils" not in eval_map:
                     dp["name"] = "HIDDEN"

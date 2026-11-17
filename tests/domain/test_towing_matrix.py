@@ -1,13 +1,13 @@
 """100% hermetic unit tests for the Malaysian Motor Insurance Towing Resolver.
 
 Validates exact entitlements for:
-  - QBE (RM500 standard vs Unlimited with Passenger Protector N4)
+  - QBE (RM500 standard vs Unlimited - Plan 1 with Passenger Protector N4)
   - STMB / Takaful Malaysia (50km base; Motor PA Plus P1=100km, P2=200km, P3=300km, P4=Unlimited)
-  - Etiqa (200km base vs Unlimited with OTO 360)
-  - Lonpac (RM400 base; E-Assist Smart Driver P1=RM1,000, P2/EV=Unlimited)
-  - Berjaya Sompo (Rakan Auto/Standard=RM300 vs SOMPO Motor/MotorSafe=Unlimited)
-  - Tune Protect (200km base vs Unlimited with Motor Easy / AutoBuddy / Motor Shield)
-  - AmAssurance / Amgen (auto365 Lite=RM200 or 150km with breakdown, Plus=100km, Premier=365km)
+  - Etiqa (200km base vs Unlimited - Driver Plan 1 with OTO 360)
+  - Lonpac (RM400 base; E-Assist Smart Driver P1=RM600, P2/EV=Unlimited)
+  - Berjaya Sompo (Unlimited by default — no upgrade required)
+  - Tune Protect (RM300 base vs Unlimited with Motor Easy Bundle / AutoBuddy / Motor Shield)
+  - AmAssurance / Amgen (auto365 Lite=50km or 150km with breakdown, Plus=100km, Premier=365km)
   - Kurnia (RM200 base vs Unlimited with Auto Assist Plus/Premier)
 """
 
@@ -23,8 +23,8 @@ from app.domain.motor.towing_matrix import resolve_towing_entitlement, TowingEnt
     [
         # QBE
         ("QBE", None, None, "", "RM500"),
-        ("QBE Insurance", "Comprehensive", "Driver Protector", "N4 Unlimited Auto Assistance", "Unlimited"),
-        ("QBE", None, "Passenger Protector", "Unlimited Auto Assistance", "Unlimited"),
+        ("QBE Insurance", "Comprehensive", "Driver Protector", "N4 Unlimited Auto Assistance", "Unlimited - Plan 1"),
+        ("QBE", None, "Passenger Protector", "Unlimited Auto Assistance", "Unlimited - Plan 1"),
 
         # STMB / Takaful Malaysia
         ("STMB", None, None, "", "50km"),
@@ -38,29 +38,29 @@ from app.domain.motor.towing_matrix import resolve_towing_entitlement, TowingEnt
 
         # Etiqa
         ("Etiqa", None, None, "", "200km"),
-        ("Etiqa General Insurance", "Motor", "OTO 360", "", "Unlimited"),
-        ("Etiqa", None, None, "Includes OTO 360 personal accident", "Unlimited"),
+        ("Etiqa General Insurance", "Motor", "OTO 360", "", "Unlimited - Driver Plan 1"),
+        ("Etiqa", None, None, "Includes OTO 360 personal accident", "Unlimited - Driver Plan 1"),
 
         # Lonpac
         ("Lonpac", None, None, "", "RM400"),
-        ("Lonpac Insurance Bhd", "Comprehensive", "E-Assist Smart Driver - Plan 1", "", "RM1,000"),
+        ("Lonpac Insurance Bhd", "Comprehensive", "E-Assist Smart Driver - Plan 1", "", "RM600"),
         ("Lonpac", None, "E-Assist Smart Driver - Plan 2", "", "Unlimited"),
         ("Lonpac", None, "E-Assist EV Plan", "", "Unlimited"),
 
-        # Berjaya Sompo
-        ("Berjaya Sompo", "Rakan Auto", None, "", "RM300"),
-        ("Berjaya Sompo", "Standard", None, "", "RM300"),
+        # Berjaya Sompo (Unlimited by default; no upgrade required)
+        ("Berjaya Sompo", "Rakan Auto", None, "", "Unlimited"),
+        ("Berjaya Sompo", "Standard", None, "", "Unlimited"),
         ("Berjaya Sompo", "SOMPO Motor", None, "", "Unlimited"),
         ("Berjaya Sompo", "MotorSafe", None, "", "Unlimited"),
 
         # Tune Protect
-        ("Tune Protect", None, None, "", "200km"),
-        ("Tune Protect", "Motor Easy", None, "", "Unlimited"),
+        ("Tune Protect", None, None, "", "RM300"),
+        ("Tune Protect", "Motor Easy Bundle", None, "", "Unlimited"),
         ("Tune Protect", None, "AutoBuddy", "", "Unlimited"),
         ("Tune Protect", None, "Motor Shield", "", "Unlimited"),
 
         # AmAssurance (Amgen)
-        ("AmAssurance", "auto365 Lite", None, "", "RM200"),
+        ("AmAssurance", "auto365 Lite", None, "", "50km"),
         ("AmAssurance", "auto365 Lite", "Breakdown Towing Assistance", "", "150km"),
         ("AmAssurance", "auto365 Plus", None, "", "100km"),
         ("AmAssurance", "auto365 Premier", None, "", "365km"),

@@ -18,11 +18,14 @@ export function formatBenefitCoverage(
     comp.includes("qbe") ||
     comp.includes("lonpac") ||
     comp.includes("sompo") ||
-    (comp.includes("tune") && !comp.includes("easy") && !comp.includes("online"));
+    comp.includes("tune");
 
   // Universal Unlimited check
   if (/^unlimited(?:\s*(?:km|distance|mileage|towing|costs?))?$/i.test(str) || /tanpa had/i.test(str)) {
     return "Unlimited";
+  }
+  if (/^unlimited\s*[-–]\s*(?:driver\s*)?plan\s*\d+/i.test(str)) {
+    return str;
   }
 
   // No towing check

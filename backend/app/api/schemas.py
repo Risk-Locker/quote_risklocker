@@ -381,6 +381,7 @@ class CompanyBenefitConditionSaveRequest(StrictRequest):
     action_type: str = Field(default="replace_description", max_length=50)
     replacement_description: str | None = Field(default=None, max_length=1000)
     replacement_title: str | None = Field(default=None, max_length=255)
+    replacement_value: str | None = Field(default=None, max_length=120)
     is_active: bool = True
 
 

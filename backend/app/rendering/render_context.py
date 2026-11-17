@@ -395,6 +395,7 @@ def _card(
     insurer_catalog: list[dict] | None = None,
     active_conditional_descriptions: dict[str, str] | None = None,
     active_conditional_titles: dict[str, str] | None = None,
+    active_conditional_values: dict[str, str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
@@ -510,10 +511,21 @@ def _card(
         else:
             card_val = ""
 
+    # Tiered Display Value Resolution:
+    # 1. Manual Workspace Selection override (`selection.typed_value_override`)
+    # 2. Dynamic CompanyBenefitCondition (`replacement_value`)
+    # 3. CatalogOffering (`display_value`) fallback
+    concept_id_key = str(getattr(concept, "id", None) or "")
+    cond_val = (active_conditional_values or {}).get(concept_id_key)
+    if not has_selection_typed and cond_val and str(cond_val).strip():
+        card_val = str(cond_val).strip()
+    elif not card_val and offering is not None and getattr(offering, "display_value", None):
+        card_val = str(offering.display_value).strip()
+
     # Strict check: card_val must contain digits or be 'unlimited'
     if card_val:
         has_digits = any(c.isdigit() for c in card_val)
-        is_unlimited = card_val.strip().lower() == "unlimited"
+        is_unlimited = "unlimited" in card_val.strip().lower()
         # Plan / Tier suppression: if card_val looks like a plan designation ("Plan 2", "Tier 1", "Pakej 3", or pure standalone 1-2 digit number), suppress it
         is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", card_val.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", card_val.strip()))
         if is_plan_indicator:
@@ -612,7 +624,9 @@ def _card(
         "concept_key": concept.concept_key,
         "facet_id": facet_id,
         "branch_key": branch_key,
-        "label": (active_conditional_titles or {}).get(concept_id_key) or getattr(selection, "label_override", None) or label or getattr(offering, "label_override", None) or concept.label,
+        # Precedence for title/label: Manual Selection override -> Conditional title -> Offering/Concept default
+        "label": getattr(selection, "label_override", None) or (active_conditional_titles or {}).get(concept_id_key) or label or getattr(offering, "label_override", None) or concept.label,
+        "has_manual_override": bool(has_selection_typed or getattr(selection, "label_override", None)),
         "description": final_desc,
         "is_custom_description": is_custom_desc,
         "description_override": offering_desc,
@@ -646,6 +660,7 @@ def _expanded_cards(
     insurer_catalog: list[dict] | None = None,
     active_conditional_descriptions: dict[str, str] | None = None,
     active_conditional_titles: dict[str, str] | None = None,
+    active_conditional_values: dict[str, str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
@@ -662,6 +677,7 @@ def _expanded_cards(
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
             active_conditional_titles=active_conditional_titles,
+            active_conditional_values=active_conditional_values,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -683,6 +699,7 @@ def _expanded_cards(
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
             active_conditional_titles=active_conditional_titles,
+            active_conditional_values=active_conditional_values,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -729,6 +746,7 @@ def resolve_benefit_cards(
     }
     active_conditional_descriptions: dict[str, str] = {}
     active_conditional_titles: dict[str, str] = {}
+    active_conditional_values: dict[str, str] = {}
     hidden_concept_ids: set[str] = set()
     sorted_conditions = sorted(
         company_conditions or [],
@@ -769,10 +787,14 @@ def resolve_benefit_cards(
                 if action == "hide_target" or getattr(cond, "replacement_description", "") == "__HIDE__":
                     hidden_concept_ids.add(target_id)
                 else:
-                    active_conditional_descriptions[target_id] = cond.replacement_description
+                    if cond.replacement_description is not None:
+                        active_conditional_descriptions[target_id] = cond.replacement_description
                     rep_title = getattr(cond, "replacement_title", None)
                     if rep_title and str(rep_title).strip():
                         active_conditional_titles[target_id] = str(rep_title).strip()
+                    rep_val = getattr(cond, "replacement_value", None)
+                    if rep_val and str(rep_val).strip():
+                        active_conditional_values[target_id] = str(rep_val).strip()
 
     company_baseline_descriptions: dict[str, str] = {
         str(cfg.concept_id): cfg.baseline_description
@@ -797,6 +819,7 @@ def resolve_benefit_cards(
         kwargs["insurer_catalog"] = insurer_catalog
         kwargs["active_conditional_descriptions"] = active_conditional_descriptions
         kwargs["active_conditional_titles"] = active_conditional_titles
+        kwargs["active_conditional_values"] = active_conditional_values
         kwargs["company_baseline_descriptions"] = company_baseline_descriptions
         kwargs["company_baseline_costs"] = company_baseline_costs
         if "visual_profile_assets" not in kwargs:
@@ -815,6 +838,7 @@ def resolve_benefit_cards(
             insurer_catalog=insurer_catalog,
             active_conditional_descriptions=active_conditional_descriptions,
             active_conditional_titles=active_conditional_titles,
+            active_conditional_values=active_conditional_values,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,

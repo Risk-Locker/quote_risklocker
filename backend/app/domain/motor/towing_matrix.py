@@ -31,8 +31,8 @@ class TowingEntitlement:
     sort_weight: float = 0.0
 
     @classmethod
-    def unlimited(cls) -> TowingEntitlement:
-        return cls(limit_type="Unlimited", formatted="Unlimited", sort_weight=999_999.0)
+    def unlimited(cls, formatted: str = "Unlimited") -> TowingEntitlement:
+        return cls(limit_type="Unlimited", formatted=formatted, sort_weight=999_999.0)
 
     @classmethod
     def from_km(cls, km: int) -> TowingEntitlement:
@@ -62,73 +62,62 @@ def resolve_towing_entitlement(
 
     # 1. QBE
     if "QBE" in comp:
-        if any(k in combined for k in ("passenger protector", "driver protector", "n4", "unlimited auto assistance")):
-            return TowingEntitlement.unlimited()
+        if any(k in combined for k in ("passenger protector", "driver protector", "driver & passenger protector", "dpp", "n4", "unlimited auto assistance", "unlimited")):
+            return TowingEntitlement.unlimited("Unlimited - Plan 1")
         return TowingEntitlement.from_rm(500)
 
     # 2. STMB / Takaful Malaysia
     if "STMB" in comp or "TAKAFUL" in comp:
         # Check specific Motor PA Plus plans
-        if "plan 4" in combined or "p4" in combined or "motor pa plus 4" in combined:
+        if any(k in combined for k in ("plan 4", "plan4", "p4", "motor pa 4", "motor pa plus 4", "unlimited", "tanpa had")):
             return TowingEntitlement.unlimited()
-        if "plan 3" in combined or "p3" in combined or "motor pa plus 3" in combined:
+        if any(k in combined for k in ("plan 3", "plan3", "p3", "motor pa 3", "motor pa plus 3")):
             return TowingEntitlement.from_km(300)
-        if "plan 2" in combined or "p2" in combined or "motor pa plus 2" in combined:
+        if any(k in combined for k in ("plan 2", "plan2", "p2", "motor pa 2", "motor pa plus 2")):
             return TowingEntitlement.from_km(200)
-        if "plan 1" in combined or "p1" in combined or "motor pa plus 1" in combined:
+        if any(k in combined for k in ("plan 1", "plan1", "p1", "motor pa 1", "motor pa plus 1")):
             return TowingEntitlement.from_km(100)
-        if "unlimited" in combined or "tanpa had" in combined:
-            return TowingEntitlement.unlimited()
         return TowingEntitlement.from_km(50)
 
     # 3. Etiqa
     if "ETIQA" in comp:
-        if "oto 360" in combined or "oto360" in combined or "unlimited" in combined:
-            return TowingEntitlement.unlimited()
+        if any(k in combined for k in ("oto 360", "oto360", "oto-360", "driver plan", "unlimited")):
+            return TowingEntitlement.unlimited("Unlimited - Driver Plan 1")
         return TowingEntitlement.from_km(200)
 
     # 4. Lonpac
     if "LONPAC" in comp:
-        if any(k in combined for k in ("plan 2", "ev plan", "smart driver 2", "smart driver - plan 2", "smart driver – plan 2")):
+        if any(k in combined for k in ("plan 2", "plan2", "ev plan", "smart driver 2", "smart driver - plan 2", "smart driver – plan 2", "smart driver ev")):
             return TowingEntitlement.unlimited()
-        if any(k in combined for k in ("plan 1", "smart driver 1", "smart driver - plan 1", "smart driver – plan 1", "e-assist")):
-            return TowingEntitlement.from_rm(1000)
+        if any(k in combined for k in ("plan 1", "plan1", "smart driver 1", "smart driver - plan 1", "smart driver – plan 1", "e-assist", "smart driver")):
+            return TowingEntitlement.from_rm(600)
         if "unlimited" in combined:
             return TowingEntitlement.unlimited()
         return TowingEntitlement.from_rm(400)
 
     # 5. Berjaya Sompo
     if "SOMPO" in comp or "BERJAYA" in comp:
-        if any(k in combined for k in ("sompo motor", "motorsafe")):
-            return TowingEntitlement.unlimited()
-        if any(k in combined for k in ("rakan auto", "standard")):
-            return TowingEntitlement.from_rm(300)
-        if "unlimited" in combined:
-            return TowingEntitlement.unlimited()
-        return TowingEntitlement.from_rm(300)
+        return TowingEntitlement.unlimited()
 
     # 6. Tune Protect
     if "TUNE" in comp:
-        if any(k in combined for k in ("motor easy", "autobuddy", "motor shield", "bundle")):
+        if any(k in combined for k in ("motor easy bundle", "autobuddy", "auto buddy", "motor shield", "motorshield", "bundle", "unlimited")):
             return TowingEntitlement.unlimited()
-        if "unlimited" in combined:
-            return TowingEntitlement.unlimited()
-        return TowingEntitlement.from_km(200)
+        return TowingEntitlement.from_rm(300)
 
     # 7. AmAssurance (Amgen)
     if "AMASSURANCE" in comp or "AMGEN" in comp or "AMGENERAL" in comp:
         if "lite" in combined:
             if "breakdown" in combined or "150" in combined:
                 return TowingEntitlement.from_km(150)
-            return TowingEntitlement.from_rm(200)
-        if "plus" in combined or "100km" in combined:
-            return TowingEntitlement.from_km(100)
+            return TowingEntitlement.from_km(50)
         if "premier" in combined or "365km" in combined or "365 km" in combined or "365-km" in combined:
             return TowingEntitlement.from_km(365)
+        if "plus" in combined or "100km" in combined:
+            return TowingEntitlement.from_km(100)
         if "unlimited" in combined:
             return TowingEntitlement.unlimited()
-        # Default AmAssurance tier is auto365 Premier (365km)
-        return TowingEntitlement.from_km(365)
+        return TowingEntitlement.from_km(100)
 
     # 8. Kurnia
     if "KURNIA" in comp:

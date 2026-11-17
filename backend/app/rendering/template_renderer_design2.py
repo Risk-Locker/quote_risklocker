@@ -182,7 +182,7 @@ def render_design2_html(
         else:
             free_items = [
                 {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
-                {"title": "Emergency Towing Assistance", "description": "24/7 accidental towing service to nearest approved repairer up to RM 200."},
+                {"title": "24/7 Roadside Assistance", "description": "24/7 emergency accidental towing service to nearest approved panel workshop."},
             ]
             ins_l = (insurer or "").lower()
             if "takaful" in ins_l or "stmb" in ins_l:
