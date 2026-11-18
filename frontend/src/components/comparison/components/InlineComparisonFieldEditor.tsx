@@ -119,240 +119,240 @@ export function InlineComparisonFieldEditor({
     }
 
     let payloadVal: string | number | null = raw;
-      if (
-        field === "excess" ||
-        field === "windscreen_sum_insured" ||
-        field === "sum_insured" ||
-        field === "motor_premium"
-      ) {
-        if (!raw || raw.toLowerCase() === "not included") {
-          payloadVal = 0;
-        } else {
-          const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
-          if (isNaN(parsed) || parsed < 0) {
-            setError("Enter a valid non-negative amount.");
-            return;
-          }
-          payloadVal = parsed;
-        }
-      }
-
-      try {
-        setSaving(true);
-        await onSave({ [field]: payloadVal });
-        setOpen(false);
-      } catch (err: any) {
-        setError(err?.message || "Failed to save override");
-      } finally {
-        setSaving(false);
-      }
-    };
-
-    const handleRevert = async () => {
-      try {
-        setSaving(true);
-        setError(null);
-        await onSave({ clear_override_field: field });
-        setOpen(false);
-      } catch (err: any) {
-        setError(err?.message || "Failed to revert override");
-      } finally {
-        setSaving(false);
-      }
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-      } else if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleCommit();
-      }
-    };
-
-    const isNumericField =
+    if (
       field === "excess" ||
       field === "windscreen_sum_insured" ||
       field === "sum_insured" ||
-      field === "motor_premium";
-    const isToggleField = field === "special_perils" || field === "llp_llop";
-    const isTowingField = field === "towing_limit";
-    const booleanOptions = BOOLEAN_FIELD_OPTIONS[field];
-
-    const handleBooleanOptionClick = async (patch: Record<string, any>) => {
-      try {
-        setSaving(true);
-        setError(null);
-        await onSave(patch);
-        setOpen(false);
-      } catch (err: any) {
-        setError(err?.message || "Failed to save override");
-      } finally {
-        setSaving(false);
+      field === "motor_premium"
+    ) {
+      if (!raw || raw.toLowerCase() === "not included") {
+        payloadVal = 0;
+      } else {
+        const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+        if (isNaN(parsed) || parsed < 0) {
+          setError("Enter a valid non-negative amount.");
+          return;
+        }
+        payloadVal = parsed;
       }
-    };
+    }
 
-    return (
-      <div className="relative inline-flex items-center gap-1 group max-w-full" ref={popoverRef}>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => setOpen((v) => !v)}
-          title={`Edit ${label}${isOverridden ? " (Manual override active)" : ""}`}
-          className="inline-flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-[#f5f5f7] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#1b1717] transition-colors cursor-pointer text-right"
+    try {
+      setSaving(true);
+      await onSave({ [field]: payloadVal });
+      setOpen(false);
+    } catch (err: any) {
+      setError(err?.message || "Failed to save override");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRevert = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      await onSave({ clear_override_field: field });
+      setOpen(false);
+    } catch (err: any) {
+      setError(err?.message || "Failed to revert override");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+    } else if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleCommit();
+    }
+  };
+
+  const isNumericField =
+    field === "excess" ||
+    field === "windscreen_sum_insured" ||
+    field === "sum_insured" ||
+    field === "motor_premium";
+  const isToggleField = field === "special_perils" || field === "llp_llop";
+  const isTowingField = field === "towing_limit";
+  const booleanOptions = BOOLEAN_FIELD_OPTIONS[field];
+
+  const handleBooleanOptionClick = async (patch: Record<string, any>) => {
+    try {
+      setSaving(true);
+      setError(null);
+      await onSave(patch);
+      setOpen(false);
+    } catch (err: any) {
+      setError(err?.message || "Failed to save override");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="relative inline-flex items-center gap-1 group max-w-full" ref={popoverRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        title={`Edit ${label}${isOverridden ? " (Manual override active)" : ""}`}
+        className="inline-flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-[#f5f5f7] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#1b1717] transition-colors cursor-pointer text-right"
+      >
+        {children}
+        {isOverridden ? (
+          <span className="ml-0.5 rounded-[4px] bg-amber-100 text-amber-900 border border-amber-300 px-1 py-0 text-[9px] font-bold uppercase tracking-tight shrink-0">
+            Manual
+          </span>
+        ) : (
+          <PencilSimple
+            size={11}
+            weight="bold"
+            className="text-[#6e6e73] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0 no-print"
+          />
+        )}
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label={`Edit ${label}`}
+          onKeyDown={handleKeyDown}
+          className="absolute right-0 top-full mt-1 z-50 w-60 rounded-[8px] border border-[#e5e5ea] bg-white p-2.5 shadow-lg text-left space-y-2 no-print"
         >
-          {children}
-          {isOverridden ? (
-            <span className="ml-0.5 rounded-[4px] bg-amber-100 text-amber-900 border border-amber-300 px-1 py-0 text-[9px] font-bold uppercase tracking-tight shrink-0">
-              Manual
-            </span>
-          ) : (
-            <PencilSimple
-              size={11}
-              weight="bold"
-              className="text-[#6e6e73] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0 no-print"
-            />
-          )}
-        </button>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-[#1b1717]">{label}</span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-[#6e6e73] hover:text-[#1b1717] p-0.5 rounded cursor-pointer"
+              aria-label="Close inline editor"
+            >
+              <X size={12} weight="bold" />
+            </button>
+          </div>
 
-        {open && (
-          <div
-            role="dialog"
-            aria-label={`Edit ${label}`}
-            onKeyDown={handleKeyDown}
-            className="absolute right-0 top-full mt-1 z-50 w-60 rounded-[8px] border border-[#e5e5ea] bg-white p-2.5 shadow-lg text-left space-y-2 no-print"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-[#1b1717]">{label}</span>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="text-[#6e6e73] hover:text-[#1b1717] p-0.5 rounded cursor-pointer"
-                aria-label="Close inline editor"
-              >
-                <X size={12} weight="bold" />
-              </button>
-            </div>
-
-            {booleanOptions && (
-              <div className="grid grid-cols-2 gap-1.5">
-                {booleanOptions.map((opt) => {
-                  const active = opt.isActive(draftValue);
-                  return (
-                    <button
-                      key={opt.label}
-                      type="button"
-                      disabled={saving}
-                      onClick={() => handleBooleanOptionClick(opt.patch)}
-                      className={`px-2 py-1.5 rounded-[6px] text-[11px] font-semibold border transition-colors cursor-pointer ${active
-                          ? "bg-[#1b1717] text-white border-[#1b1717]"
-                          : "bg-[#f5f5f7] text-[#1b1717] border-[#e5e5ea] hover:bg-[#e5e5ea]"
-                        }`}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {isToggleField && (
-              <div className="grid grid-cols-2 gap-1">
-                {TOGGLE_PRESETS.map((opt) => {
-                  const active = draftValue.toLowerCase() === opt.toLowerCase();
-                  return (
-                    <button
-                      key={opt}
-                      type="button"
-                      disabled={saving}
-                      onClick={() => handleCommit(opt)}
-                      className={`px-2 py-1 rounded-[6px] text-[11px] font-semibold border transition-colors cursor-pointer ${active
-                          ? "bg-[#1b1717] text-white border-[#1b1717]"
-                          : "bg-[#f5f5f7] text-[#1b1717] border-[#e5e5ea] hover:bg-[#e5e5ea]"
-                        }`}
-                    >
-                      {opt}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {isTowingField && (
-              <div className="flex flex-wrap gap-1">
-                {TOWING_PRESETS.map((preset) => (
+          {booleanOptions && (
+            <div className="grid grid-cols-2 gap-1.5">
+              {booleanOptions.map((opt) => {
+                const active = opt.isActive(draftValue);
+                return (
                   <button
-                    key={preset}
+                    key={opt.label}
                     type="button"
                     disabled={saving}
-                    onClick={() => handleCommit(preset)}
-                    className={`px-1.5 py-0.5 rounded-[6px] text-[10px] font-semibold border transition-colors cursor-pointer ${draftValue.toLowerCase() === preset.toLowerCase()
+                    onClick={() => handleBooleanOptionClick(opt.patch)}
+                    className={`px-2 py-1.5 rounded-[6px] text-[11px] font-semibold border transition-colors cursor-pointer ${active
                         ? "bg-[#1b1717] text-white border-[#1b1717]"
                         : "bg-[#f5f5f7] text-[#1b1717] border-[#e5e5ea] hover:bg-[#e5e5ea]"
                       }`}
                   >
-                    {preset}
+                    {opt.label}
                   </button>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
+          )}
 
-            {!booleanOptions && (
-              <div className="flex items-center gap-1">
-                {field === "notes" ? (
-                  <textarea
-                    ref={(el) => {
-                      inputRef.current = el;
-                    }}
-                    rows={2}
-                    maxLength={160}
-                    value={draftValue}
-                    onChange={(e) => setDraftValue(e.target.value)}
-                    placeholder="Enter note (max 160 chars)..."
-                    className="w-full rounded-[6px] border border-[#e5e5ea] bg-white px-2 py-1 text-xs text-[#1b1717] focus:border-[#1b1717] focus:outline-none"
-                  />
-                ) : (
-                  <input
-                    ref={(el) => {
-                      inputRef.current = el;
-                    }}
-                    type={isNumericField ? "number" : "text"}
-                    step={isNumericField ? "0.01" : undefined}
-                    min={isNumericField ? "0" : undefined}
-                    value={draftValue}
-                    onChange={(e) => setDraftValue(e.target.value)}
-                    placeholder={isNumericField ? "0.00" : `Custom ${label.toLowerCase()}...`}
-                    className="w-full rounded-[6px] border border-[#e5e5ea] bg-white px-2 py-1 text-xs text-[#1b1717] focus:border-[#1b1717] focus:outline-none"
-                  />
-                )}
+          {isToggleField && (
+            <div className="grid grid-cols-2 gap-1">
+              {TOGGLE_PRESETS.map((opt) => {
+                const active = draftValue.toLowerCase() === opt.toLowerCase();
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleCommit(opt)}
+                    className={`px-2 py-1 rounded-[6px] text-[11px] font-semibold border transition-colors cursor-pointer ${active
+                        ? "bg-[#1b1717] text-white border-[#1b1717]"
+                        : "bg-[#f5f5f7] text-[#1b1717] border-[#e5e5ea] hover:bg-[#e5e5ea]"
+                      }`}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {isTowingField && (
+            <div className="flex flex-wrap gap-1">
+              {TOWING_PRESETS.map((preset) => (
                 <button
+                  key={preset}
                   type="button"
                   disabled={saving}
-                  onClick={() => handleCommit()}
-                  title="Save (Enter)"
-                  className="shrink-0 rounded-[6px] bg-[#1b1717] text-white p-1.5 hover:bg-black disabled:opacity-50 cursor-pointer"
+                  onClick={() => handleCommit(preset)}
+                  className={`px-1.5 py-0.5 rounded-[6px] text-[10px] font-semibold border transition-colors cursor-pointer ${draftValue.toLowerCase() === preset.toLowerCase()
+                      ? "bg-[#1b1717] text-white border-[#1b1717]"
+                      : "bg-[#f5f5f7] text-[#1b1717] border-[#e5e5ea] hover:bg-[#e5e5ea]"
+                    }`}
                 >
-                  <Check size={12} weight="bold" />
+                  {preset}
                 </button>
-              </div>
-            )}
+              ))}
+            </div>
+          )}
 
-            {error && <p className="text-[10px] font-semibold text-[#ed1c24]">{error}</p>}
-
-            {isOverridden && (
+          {!booleanOptions && (
+            <div className="flex items-center gap-1">
+              {field === "notes" ? (
+                <textarea
+                  ref={(el) => {
+                    inputRef.current = el;
+                  }}
+                  rows={2}
+                  maxLength={160}
+                  value={draftValue}
+                  onChange={(e) => setDraftValue(e.target.value)}
+                  placeholder="Enter note (max 160 chars)..."
+                  className="w-full rounded-[6px] border border-[#e5e5ea] bg-white px-2 py-1 text-xs text-[#1b1717] focus:border-[#1b1717] focus:outline-none"
+                />
+              ) : (
+                <input
+                  ref={(el) => {
+                    inputRef.current = el;
+                  }}
+                  type={isNumericField ? "number" : "text"}
+                  step={isNumericField ? "0.01" : undefined}
+                  min={isNumericField ? "0" : undefined}
+                  value={draftValue}
+                  onChange={(e) => setDraftValue(e.target.value)}
+                  placeholder={isNumericField ? "0.00" : `Custom ${label.toLowerCase()}...`}
+                  className="w-full rounded-[6px] border border-[#e5e5ea] bg-white px-2 py-1 text-xs text-[#1b1717] focus:border-[#1b1717] focus:outline-none"
+                />
+              )}
               <button
                 type="button"
                 disabled={saving}
-                onClick={handleRevert}
-                className="w-full inline-flex items-center justify-center gap-1 rounded-[6px] border border-[#e5e5ea] bg-[#f5f5f7] px-2 py-1 text-[10px] font-semibold text-[#6e6e73] hover:text-[#1b1717] hover:bg-[#e5e5ea] cursor-pointer"
+                onClick={() => handleCommit()}
+                title="Save (Enter)"
+                className="shrink-0 rounded-[6px] bg-[#1b1717] text-white p-1.5 hover:bg-black disabled:opacity-50 cursor-pointer"
               >
-                <ArrowCounterClockwise size={11} weight="bold" />
-                <span>Revert to extracted</span>
+                <Check size={12} weight="bold" />
               </button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
+            </div>
+          )}
+
+          {error && <p className="text-[10px] font-semibold text-[#ed1c24]">{error}</p>}
+
+          {isOverridden && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={handleRevert}
+              className="w-full inline-flex items-center justify-center gap-1 rounded-[6px] border border-[#e5e5ea] bg-[#f5f5f7] px-2 py-1 text-[10px] font-semibold text-[#6e6e73] hover:text-[#1b1717] hover:bg-[#e5e5ea] cursor-pointer"
+            >
+              <ArrowCounterClockwise size={11} weight="bold" />
+              <span>Revert to extracted</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

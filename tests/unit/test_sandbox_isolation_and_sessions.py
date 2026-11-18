@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from app.extraction.pacer_sentinel import PacerSentinel
 
 from app.models.tables import (
     Base,
@@ -157,7 +160,7 @@ def test_sandbox_extraction_never_pollutes_live_ledger(db_session: Session, staf
         worker_id="worker-1",
         extractor=fake_extractor,
         context_loader=lambda _db: {"db_companies": []},
-        pacer=DummyPacer(),
+        pacer=cast(PacerSentinel, DummyPacer()),
     )
 
     db_session.refresh(sess)

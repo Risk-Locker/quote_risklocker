@@ -347,7 +347,11 @@ def sync_session_draft_from_comparison(
         _set_decision("sum_insured", si_str)
 
     if "agreed_value" in edited_set or "valuation_type" in edited_set:
-        is_agreed = bool(field_values.get("agreed_value")) or str(field_values.get("valuation_type") or "").lower() == "agreed_value"
+        vt_raw = field_values.get("valuation_type")
+        if vt_raw is not None and str(vt_raw).strip() != "":
+            is_agreed = str(vt_raw).strip().lower() in {"agreed value", "agreed_value"}
+        else:
+            is_agreed = bool(field_values.get("agreed_value"))
         vt_str = "Agreed Value" if is_agreed else "Market Value"
         _set_manual_field("valuation_type", vt_str)
         _set_decision("valuation_type", vt_str)

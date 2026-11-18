@@ -59,6 +59,7 @@ def test_rolling_safety_ceilings_enforced():
         estimated_tokens=10_000,
     )
     assert can_proceed is False
+    assert reason is not None
     assert "RPM ceiling (13 req/min) reached" in reason
 
     # Slot 1: Test TPM ceiling (200k tokens)
@@ -77,6 +78,7 @@ def test_rolling_safety_ceilings_enforced():
         estimated_tokens=90_000,
     )
     assert can_proceed is False
+    assert reason is not None
     assert "TPM ceiling (200,000 tokens/min) reached" in reason
 
 

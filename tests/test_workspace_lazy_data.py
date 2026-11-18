@@ -90,8 +90,8 @@ def test_evidence_omits_scores_methods_coordinates_and_requires_known_field():
 
 
 def test_template_config_uses_override_only_for_exact_binding():
-    items = list(values())
-    draft = items[1]
+    uploaded, draft, session, extraction, revision = values()
+    items = [uploaded, draft, session, extraction, revision]
     draft.layout_override = {"canvas": {"width": 794, "height": 1123, "elements": [{"id": "override"}]}}
     draft.layout_override_template_id = "template-1"
     draft.layout_override_template_revision_id = "revision-1"
@@ -109,8 +109,8 @@ def test_template_config_uses_override_only_for_exact_binding():
 
 
 def test_template_config_requires_published_pinned_revision():
-    items = list(values())
-    items[1].template_revision_id = None
+    uploaded, draft, session, extraction, revision = values()
+    draft.template_revision_id = None
     with pytest.raises(AppError, match="template") as error:
-        get_workspace_template_config(Db(items), staff(), "session-1")
+        get_workspace_template_config(Db([uploaded, draft, session, extraction, revision]), staff(), "session-1")
     assert error.value.status_code == 409

@@ -222,7 +222,11 @@ def load_company_catalogs() -> dict[str, dict[str, Any]]:
     return parsed
 
 
-def seed_canonical_benefits(db, canonical_list: list[dict[str, Any]], dry_run: bool = True) -> tuple[list[str], list[str]]:
+def seed_canonical_benefits(
+    db,
+    canonical_list: list[dict[str, Any]],
+    dry_run: bool = True,
+) -> tuple[list[str], list[str], dict[str, BenefitConcept]]:
     """Seed / update benefit_concepts and benefit_aliases for all 79 benefits."""
     logs: list[str] = []
     new_concept_keys: list[str] = []

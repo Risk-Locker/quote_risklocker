@@ -393,87 +393,87 @@ export function Design2CanvasView({
           overflow: "hidden",
         }}
       >
-          <div style={{ flex: "1 1 auto", minHeight: 0, padding: "22px 42px 10px 42px", display: "flex", flexDirection: "column" }}>
-            {/* Header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center" }}>
-                <img
-                  src="/assets/brand/logo-horizontal-black.png"
-                  alt="RISK LOCKER"
-                  style={{ height: "46px", maxWidth: "215px", objectFit: "contain", display: "block" }}
-                />
+        <div style={{ flex: "1 1 auto", minHeight: 0, padding: "22px 42px 10px 42px", display: "flex", flexDirection: "column" }}>
+          {/* Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <img
+                src="/assets/brand/logo-horizontal-black.png"
+                alt="RISK LOCKER"
+                style={{ height: "46px", maxWidth: "215px", objectFit: "contain", display: "block" }}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: "17.3px", fontWeight: 800, letterSpacing: "-0.3px", lineHeight: 1.15 }}>
+                  <span style={{ color: "#535353", fontWeight: 700 }}>Motor Insurance</span>
+                  <span style={{ color: "#94A3B8", fontWeight: 300, margin: "0 4px" }}>|</span>
+                  <span style={{ color: "#E52320", fontWeight: 800 }}>Quotation</span>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "auto auto",
+                    justifyContent: "end",
+                    columnGap: "6px",
+                    rowGap: "1px",
+                    marginTop: "3px",
+                    fontSize: "9.2px",
+                    lineHeight: 1.3,
+                  }}
+                >
+                  <span style={{ fontWeight: 600, color: "#334155" }}>Quotation Ref :</span>
+                  <span style={{ fontWeight: 700, color: "#010000" }}>{quoteRef}</span>
+                  <span style={{ fontWeight: 600, color: "#334155" }}>Vehicle No :</span>
+                  <span style={{ fontWeight: 700, color: "#010000" }}>{vehPlate}</span>
+                  <span style={{ fontWeight: 600, color: "#334155" }}>Insurer :</span>
+                  <span style={{ fontWeight: 700, color: "#010000", textTransform: "uppercase" }}>{insurer}</span>
+                </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: "17.3px", fontWeight: 800, letterSpacing: "-0.3px", lineHeight: 1.15 }}>
-                    <span style={{ color: "#535353", fontWeight: 700 }}>Motor Insurance</span>
-                    <span style={{ color: "#94A3B8", fontWeight: 300, margin: "0 4px" }}>|</span>
-                    <span style={{ color: "#E52320", fontWeight: 800 }}>Quotation</span>
-                  </div>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "auto auto",
-                      justifyContent: "end",
-                      columnGap: "6px",
-                      rowGap: "1px",
-                      marginTop: "3px",
-                      fontSize: "9.2px",
-                      lineHeight: 1.3,
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                {logoSrc ? (
+                  <img
+                    src={logoSrc}
+                    alt={insurer}
+                    onError={() => {
+                      if (localCompanyLogo && rawLogoSrc !== localCompanyLogo) {
+                        setRawLogoSrc(localCompanyLogo);
+                      } else {
+                        setRawLogoSrc("");
+                      }
                     }}
-                  >
-                    <span style={{ fontWeight: 600, color: "#334155" }}>Quotation Ref :</span>
-                    <span style={{ fontWeight: 700, color: "#010000" }}>{quoteRef}</span>
-                    <span style={{ fontWeight: 600, color: "#334155" }}>Vehicle No :</span>
-                    <span style={{ fontWeight: 700, color: "#010000" }}>{vehPlate}</span>
-                    <span style={{ fontWeight: 600, color: "#334155" }}>Insurer :</span>
-                    <span style={{ fontWeight: 700, color: "#010000", textTransform: "uppercase" }}>{insurer}</span>
+                    style={{ maxHeight: "38px", maxWidth: "132px", width: "auto", height: "auto", objectFit: "contain", display: "block" }}
+                  />
+                ) : (
+                  <div style={{ fontSize: "12px", fontWeight: 900, color: "#0F172A", textTransform: "uppercase" }}>
+                    {insurer.split(" ")[0]}
                   </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-                  {logoSrc ? (
-                    <img
-                      src={logoSrc}
-                      alt={insurer}
-                      onError={() => {
-                        if (localCompanyLogo && rawLogoSrc !== localCompanyLogo) {
-                          setRawLogoSrc(localCompanyLogo);
-                        } else {
-                          setRawLogoSrc("");
-                        }
-                      }}
-                      style={{ maxHeight: "38px", maxWidth: "132px", width: "auto", height: "auto", objectFit: "contain", display: "block" }}
-                    />
-                  ) : (
-                    <div style={{ fontSize: "12px", fontWeight: 900, color: "#0F172A", textTransform: "uppercase" }}>
-                      {insurer.split(" ")[0]}
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
             </div>
+          </div>
 
-            {/* Structural Hairline 1: Header Bottom Divider */}
-            <div style={{ height: "1px", background: "#64748B", margin: "9px 0 11px 0", flexShrink: 0 }} />
+          {/* Structural Hairline 1: Header Bottom Divider */}
+          <div style={{ height: "1px", background: "#64748B", margin: "9px 0 11px 0", flexShrink: 0 }} />
 
-            {/* Upper Section: 2 Columns separated by Vertical Center Hairline */}
-            <div style={{ display: "flex", alignItems: "stretch" }}>
-              {/* Left Column (Specs + Premium) */}
-              <div style={{ flex: 1.02, paddingRight: "18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                <div>
-                    <div style={{ fontSize: "14.5px", fontWeight: 800, color: "#E52320", marginBottom: "5px", lineHeight: 1.2 }}>
-                      Vehicle Information <span style={{ fontSize: "13.5px", fontWeight: 700, color: "#544F4E" }}>车辆资料</span>
-                    </div>
-                    {[
-                      { label: "Customer / 客户姓名", val: custName },
-                      { label: "Period Of Insurance / 保障期限", val: period },
-                      { label: "Coverage Type / 保障种类", val: covType },
-                      { label: "Car Model / 车型", val: carModel },
-                      { label: "NCD / 无索偿折扣", val: ncdDisplay },
-                      { label: "Valuation Type / 估价方式", val: valType },
-                      { label: "Policy Excess / 自负额", val: formatMoney(excess) },
-                      { label: "Vehicle Sum Insured / 车辆保额", val: formatMoney(sumInsured) },
-                    ].map((row, idx) => (
+          {/* Upper Section: 2 Columns separated by Vertical Center Hairline */}
+          <div style={{ display: "flex", alignItems: "stretch" }}>
+            {/* Left Column (Specs + Premium) */}
+            <div style={{ flex: 1.02, paddingRight: "18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: "14.5px", fontWeight: 800, color: "#E52320", marginBottom: "5px", lineHeight: 1.2 }}>
+                  Vehicle Information <span style={{ fontSize: "13.5px", fontWeight: 700, color: "#544F4E" }}>车辆资料</span>
+                </div>
+                {[
+                  { label: "Customer / 客户姓名", val: custName },
+                  { label: "Period Of Insurance / 保障期限", val: period },
+                  { label: "Coverage Type / 保障种类", val: covType },
+                  { label: "Car Model / 车型", val: carModel },
+                  { label: "NCD / 无索偿折扣", val: ncdDisplay },
+                  { label: "Valuation Type / 估价方式", val: valType },
+                  { label: "Policy Excess / 自负额", val: formatMoney(excess) },
+                  { label: "Vehicle Sum Insured / 车辆保额", val: formatMoney(sumInsured) },
+                ].map((row, idx) => (
                   <div
                     key={idx}
                     style={{
@@ -933,10 +933,10 @@ export function Design2CanvasView({
           </div>
 
           <Design2Footer
-          whatsappQrSrc="/assets/whatsapp_qr.png"
-          agencyName={getVal(fields, "agency_name", "RISKLOCKER SDN. BHD.")}
-          agencyRegNo={getVal(fields, "agency_reg_no", "202301041962(1535879-U)")}
-        />
+            whatsappQrSrc="/assets/whatsapp_qr.png"
+            agencyName={getVal(fields, "agency_name", "RISKLOCKER SDN. BHD.")}
+            agencyRegNo={getVal(fields, "agency_reg_no", "202301041962(1535879-U)")}
+          />
         </div>
       )}
     </div>

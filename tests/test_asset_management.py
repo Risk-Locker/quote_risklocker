@@ -128,6 +128,7 @@ def test_update_business_asset(db_session: Session):
     assert updated["label"] == "Emergency Road Assistance"
     assert updated["category"] == "Road Support"
     db_asset = db_session.get(BusinessAsset, asset.id)
+    assert db_asset is not None
     assert db_asset.label == "Emergency Road Assistance"
     assert db_asset.category == "Road Support"
     assert db_asset.revision == 2
@@ -143,8 +144,10 @@ def test_bulk_move_business_assets(db_session: Session):
     assert res["moved_count"] == 2
     assert res["category"] == "3D Icons"
 
-    assert db_session.get(BusinessAsset, a1.id).category == "3D Icons"
-    assert db_session.get(BusinessAsset, a2.id).category == "3D Icons"
+    moved_1 = db_session.get(BusinessAsset, a1.id)
+    moved_2 = db_session.get(BusinessAsset, a2.id)
+    assert moved_1 is not None and moved_1.category == "3D Icons"
+    assert moved_2 is not None and moved_2.category == "3D Icons"
 
 
 def test_delete_business_asset_with_unlinking(db_session: Session):
@@ -243,8 +246,10 @@ def test_rename_business_asset_folder(db_session: Session):
     assert res["success"] is True
     assert res["updated_assets"] == 2
 
-    assert db_session.get(BusinessAsset, a1.id).category == "New 3D Folder"
-    assert db_session.get(BusinessAsset, a2.id).category == "New 3D Folder"
+    renamed_1 = db_session.get(BusinessAsset, a1.id)
+    renamed_2 = db_session.get(BusinessAsset, a2.id)
+    assert renamed_1 is not None and renamed_1.category == "New 3D Folder"
+    assert renamed_2 is not None and renamed_2.category == "New 3D Folder"
     db_session.refresh(profile)
     assert profile.asset_category == "New 3D Folder"
 
@@ -265,7 +270,8 @@ def test_delete_business_asset_folder_move_to_general(db_session: Session):
     mock_settings = SimpleNamespace(supabase_storage_bucket="test")
     res = delete_business_asset_folder(db_session, mock_settings, user, "Temp Folder", action="move_to_general")
     assert res["success"] is True
-    assert db_session.get(BusinessAsset, a1.id).category == "General"
+    moved_a1 = db_session.get(BusinessAsset, a1.id)
+    assert moved_a1 is not None and moved_a1.category == "General"
     db_session.refresh(profile)
     assert profile.asset_category == "General"
 
@@ -339,6 +345,7 @@ def test_upload_collision_replace(db_session: Session):
         assert replaced["id"] == first["id"]
         assert replaced["label"] == "My Icon"
         db_asset = db_session.get(BusinessAsset, first["id"])
+        assert db_asset is not None
         assert db_asset.revision == 2
 
 

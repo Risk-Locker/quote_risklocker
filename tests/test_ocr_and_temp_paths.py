@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import fitz
 
@@ -30,7 +31,7 @@ def test_qc_temp_directory_is_inside_repository_and_is_removed_after_use():
 
 def test_tesseract_enhanced_reading_returns_page_text(monkeypatch, tmp_path):
     pdf = tmp_path / "scan.pdf"
-    document = fitz.open()
+    document: Any = fitz.open()
     document.new_page()
     document.new_page()
     document.save(pdf)
@@ -54,7 +55,7 @@ def test_tesseract_enhanced_reading_returns_page_text(monkeypatch, tmp_path):
 
 def test_ocr_failure_is_actionable_and_does_not_claim_success(monkeypatch, tmp_path):
     pdf = tmp_path / "scan.pdf"
-    document = fitz.open()
+    document: Any = fitz.open()
     document.new_page()
     document.save(pdf)
     document.close()

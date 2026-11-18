@@ -484,7 +484,7 @@ def render_design2_schedule_pages(
             opt_rows += f"""
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;padding:4px 7px;border:1px solid #F1F5F9;border-radius:5px;background:#F8FAFC;">
                 <div style="display:flex;align-items:flex-start;gap:6px;min-width:0;flex:1;">
-                    <div style="flex-shrink:0;margin-top:1px;">{render_design2_icon_svg(oc.get('icon_hint', 'generic'), size=13)}</div>
+                    <div style="flex-shrink:0;margin-top:1px;">{render_design2_icon_svg(oc.get('icon_hint', 'generic'), size=18)}</div>
                     <div style="min-width:0;">
                         <div style="font-size:8.5px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#15803D;">({escape(val)})</span>' if val else ''}</div>
                         <div style="font-size:7.4px;color:#475569;line-height:1.25;">{escape(oc.get('description') or '')}</div>
@@ -576,7 +576,7 @@ def render_design2_schedule_pages(
                 rem_rows += f"""
                 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;padding:4px 7px;border:1px solid #E2E8F0;border-radius:5px;background:#FFF;">
                     <div style="display:flex;align-items:flex-start;gap:7px;min-width:0;flex:1;">
-                        <div style="flex-shrink:0;margin-top:1px;">{render_design2_icon_svg(oc.get('icon_hint', 'generic'), size=13)}</div>
+                        <div style="flex-shrink:0;margin-top:1px;">{render_design2_icon_svg(oc.get('icon_hint', 'generic'), size=18)}</div>
                         <div style="min-width:0;">
                             <div style="font-size:8.5px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#15803D;">({escape(val)})</span>' if val else ''}</div>
                             <div style="font-size:7.4px;color:#475569;line-height:1.25;">{escape(oc.get('description') or '')}</div>

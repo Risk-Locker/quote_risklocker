@@ -25,6 +25,7 @@ from app.models.tables import CatalogOffering
 
 seed_demo_path = ROOT / "commands" / "seed-demo.py"
 spec = importlib.util.spec_from_file_location("seed_demo", seed_demo_path)
+assert spec is not None and spec.loader is not None
 seed_demo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(seed_demo)
 INSURER_CONFIGS = seed_demo.INSURER_CONFIGS

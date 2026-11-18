@@ -388,7 +388,7 @@ def get_vehicle_history(db: Session, vehicle_no: str) -> dict[str, Any]:
 def assign_or_get_deal_cycle(
     db: Session,
     session: SessionModel | str,
-    vehicle_no: str,
+    vehicle_no: str | None,
     created_at: datetime | None = None,
 ) -> str:
     """Cluster 3-5 competitor quotations for the same vehicle renewal within a 60-day window into one deal cycle."""

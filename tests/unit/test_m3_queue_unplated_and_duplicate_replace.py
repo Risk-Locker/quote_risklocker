@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Generator
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -47,7 +48,7 @@ from app.services.insurance_tenure_service import resolve_or_create_tenure
 
 
 @pytest.fixture()
-def m3_db() -> Session:
+def m3_db() -> Generator[Session, None, None]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},

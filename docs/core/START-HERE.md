@@ -105,48 +105,11 @@ External chat tools without workspace access should be given this file plus the 
 | :--- | :--- | :--- |
 | `docs/SDLC/SYSTEM-ANALYSIS-AND-CORE-USECASES.md` | Core use cases, architectural forensic analysis & SDLC review | Core features or SDLC roadmap change |
 
-### Active Implementation Plans (`docs/plans/`)
+### Active & Reference Implementation Plans (`docs/plans/`)
 | Document | Purpose | Update when |
 | :--- | :--- | :--- |
-| `docs/plans/2026-11-13-ai-fleet-and-template-lifecycle.md` | AI Fleet quota equilibrium, living pacer, towing dynamic upgrade & template lifecycle plan | Active sprint tasks change or complete |
-| `docs/plans/2026-11-14-phase-1-critical-p0-backend-and-security-hotfixes.md` | Critical P0 backend, storage, RBAC, AST formula evaluator & road tax monotonicity plan | Active sprint tasks change or complete |
-| `docs/plans/2026-11-14-phase-2-db-schema-and-double-entry-ledger.md` | Database schema hardening, immutability restoration, partial indexes & double-entry ledger | Active sprint tasks change or complete |
-| `docs/plans/2026-11-14-phase-3-backend-engines-and-api-purity.md` | Backend core engines, query performance, leap-safe calendar dates & API purity | Active sprint tasks change or complete |
-| `docs/plans/2026-11-14-phase-4-frontend-demonolithization-and-ux.md` | Frontend de-monolithization, Playwright vector PDF export & PII cleansing | Active sprint tasks change or complete |
-| `docs/plans/2026-11-15-phase-5-ai-pipeline-hardening-and-verification.md` | AI pipeline hardening, Gemini model lockdown & 10/10 verification gauntlet | Active sprint tasks change or complete |
-| `docs/plans/2026-11-15-master-remediation-and-features-plan.md` | Master remediation of 7 domains, dynamic Gemini model selection, catalog studio assistant & token telemetry | Active sprint tasks change or complete |
-| `docs/plans/2026-11-15-fleet-independent-key-controls.md` | Gemini AI Parallel Fleet independent key controls, Active multi-key status, kill-switches & dynamic capacity scaling | Active sprint tasks change or complete |
-| `docs/plans/2026-11-15-design2-precision-and-builder-consolidation-plan.md` | Design 2 precision, "Template as Builder" view/unview toggles, ghost template cleanup & studio modernization | Active sprint tasks change or complete |
-| `docs/plans/2026-11-16-pre-commit-hygiene-and-gate-readiness-plan.md` | Pre-commit repository hygiene, agency bank details harmonization & 10/10 gate readiness | Active sprint tasks change or complete |
-| `docs/plans/2026-11-16-ci-cd-pipeline-hardening-and-deploy-monitoring-plan.md` | CI/CD deployment pipeline hardening, runner environment variables & mandatory deploy monitoring | Active sprint tasks change or complete |
-| `docs/plans/2026-11-16-system-precision-fleet-and-assets-remediation.md` | Master plan for extraction referee gate, Google PT fleet quota window, assets library UX & Design 2 typography | Active sprint tasks change or complete |
-| `docs/plans/milestone-1-extraction-referee-and-naming.md` | Extraction referee gate, commercial lorry classification & alphanumeric vehicle model formatting | Milestone 1 execution |
-| `docs/plans/milestone-2-ai-fleet-pt-calendar-and-pacing.md` | Google AI Studio PT midnight quota cycle, account reset & batch assigner 70s pacing stagger | Milestone 2 execution |
-| `docs/plans/milestone-3-ai-fleet-monitoring-dashboard.md` | AI fleet monitoring dashboard, Google PT cycle countdown, animated minute-bucket charts & timeline | Milestone 3 execution |
-| `docs/plans/milestone-4-assets-library-ux-and-cleanup.md` | Assets library sticky toolbar, inspection details modal & dummy logo database cleanup | Milestone 4 execution |
-| `docs/plans/milestone-5-marketing-comparison-state-hardening.md` | Marketing comparison stuck status timeout fallback & action footer cleanup | Milestone 5 execution |
-| `docs/plans/milestone-6-design2-typography-and-fonts.md` | Design 2 typography & font pairing hierarchy (Helvetica, Calibri, Source Han Sans) | Milestone 6 execution |
-| `docs/plans/2026-11-16-quotation-workspace-stabilization.md` | Quotation workspace stabilization, CostStatus normalization, vehicle model deduplication & fee toggle sync | Active sprint tasks change or complete |
 | `docs/plans/ENTERPRISE-LEVEL-Extraction-2026-11-16-1830.md` | Master field rationalization, workspace schema unification & 3-Tier Multi-Level AI loop vision | Master enterprise architecture reference |
-| `docs/plans/PLAN-1-DATABASE-CORE-AND-SYNC-ENGINE.md` | Immutable database core, key alignment, concurrency protection & real-time synchronization engine | Plan 1 execution |
-| `docs/plans/PLAN-2-WORKSPACE-UI-AND-3-TIER-AI-LOOP.md` | Streamlined workspace UI, field pruning, Eye 2 auditor & Eye 3 pre-flight referee loop | Plan 2 execution |
-| `docs/plans/milestone-1-db-core-and-decimal-math-cleanup.md` | Clean code remediation M1: PostgreSQL schema parity, pure Decimal math & sync service slicing | Milestone 1 execution |
-| `docs/plans/milestone-2-frontend-deslop-and-component-deduplication.md` | Clean code remediation M2: Dead code purge, benefit card deduplication & zero client-side math | Milestone 2 execution |
-| `docs/plans/milestone-3-patch-engine-slicing-and-3eye-wiring.md` | Clean code remediation M3: Workspace patch engine flattening & live 3-Eye referee wiring | Milestone 3 execution |
-| `docs/plans/2026-11-17-principal-fintech-audit-and-master-roadmap.md` | Principal Fintech 7-pillar architectural audit & 6-milestone zero-touch master roadmap | Active sprint tasks change or complete |
-| `docs/plans/milestone-1-sandbox-isolation-and-sessions-redesign.md` | Milestone 1: Test/Sandbox ledger isolation, N+1 session fix & `/sessions` activity command center | Milestone 1 execution |
-| `docs/plans/2026-11-17-ux-saving-ledger-and-sandbox-audit-plan.md` | Full UX/Saving/Ledger/Classifier audit, 5-milestone remediation roadmap & 36 verified test PDFs (`samples/`) | Active sprint tasks change or complete |
-| `docs/plans/milestone-1-save-sync-and-api-repairs.md` | Milestone 1: Cross-vehicle sync isolation (`F-01`), `/ledger` & `/comparison` 405 fixes (`F-02`, `F-03`), EV `kW` guard (`F-04a`), & staged save UX (`F-04b`) | Milestone 1 execution |
-| `docs/plans/milestone-2-ledger-ux-compact-and-dialogs.md` | Milestone 2: `/ledger` Compact <=960px layout, viewport-sticky `LedgerScrollRail`, `TenureRow` cell slicing, & `/ledger` native dialog purge (`F-06a`) | Milestone 2 execution |
-| `docs/plans/milestone-3a-design2-pdf-png-parity.md` | Milestone 3a: Design 2 pure-Pillow logo trim, horizontal asset parity, `RISKLOCKER SDN. BHD.` footer, total sync, & inline PDF viewer | Milestone 3a execution |
-| `docs/plans/milestone-3b-ai-vehicle-intelligence-and-deep-redetect.md` | Milestone 3b: Gemini `vehicle_type`/`capacity_unit` schema, `KG`/`W`/`CC` integrity, commercial fee defaults, real `★ Detected` provenance, & deep `Re-detect` | Milestone 3b execution |
-| `docs/plans/milestone-3c-box1-design2-parity-and-towing-conditions.md` | Milestone 3c: Commercial catalog pinning, Box 1 ↔ Design 2 WYSIWYG parity, DB `CompanyBenefitCondition` single source of truth & `/builder/benefits` deep link | Milestone 3c execution |
-| `docs/plans/2026-11-17-combined-master-roadmap-edit-persistence-kurnia-3c-upload.md` | Combined master roadmap: comparison edit persistence, workspace save semantics, Kurnia, Milestone 3c, unlimited comparison uploads | Active sprint tasks change or complete |
-| `docs/plans/milestone-4a-comparison-edit-persistence-and-special-perils.md` | Milestone 4a: pure comparison GET, write-time materialize, field-level manual overrides, single Special Perils resolver, inline card editing | Milestone 4a execution |
-| `docs/plans/milestone-4b-workspace-save-semantics-and-fee-toggles.md` | Milestone 4b: true dirty state, per-edit undo, learn 422 fix, Road Tax and Runner Fee toggle root cause | Milestone 4b execution |
-| `docs/plans/milestone-4c-kurnia-company.md` | Milestone 4c: Kurnia as a separate insurance company row, no AmAssurance folding | Milestone 4c execution |
-| `docs/plans/milestone-4d-unlimited-comparison-upload-queue.md` | Milestone 4d: setting-driven unlimited comparison staging, enqueue-all, server-side batch progress | Milestone 4d execution |
-| `docs/plans/2026-11-18-v30.5-3eye-towing-catalog-comparison-plan.md` | v30.5 3-Eye online grounding, authoritative 7-insurer DB towing matrix, & queue/UNPLATED/replace remediation | v30.5 execution & verification |
+| `docs/plans/2026-11-17-principal-fintech-audit-and-master-roadmap.md` | Principal Fintech 7-pillar architectural audit & remaining M6 operational lifecycle roadmap | Operational recovery / slicing tasks change |
 | `docs/plans/2026-11-18-v30.6-premium-box1-covernote-typography-batch-plan.md` | v30.6 premium integrity, bidirectional workspace/comparison sync, Box 1 <-> Design 2 1:1 parity, cover note editing & 100-PDF batch scaling | v30.6 execution & verification |
 | `docs/plans/agent-system-reset/00-master-plan.md` | Multi-tier agent harness reset master plan (`deep` / `balanced` / `flash` profiles & task-size routing) | Agent harness updates |
 | `docs/plans/agent-system-reset/01-audit-findings.md` | Empirical token and rule audit of `.agents/` and `AGENTS.md` | Reference audit |

@@ -610,7 +610,7 @@ def test_m3_covernote_patch_updates_all_fields_dates_benefits_and_won_premium(db
     assert tenure.policy_number == "CN-ETIQA-2026-999"
     assert cn_sess.policy_number == "CN-ETIQA-2026-999"
     assert tenure.winning_company_id == etiqa.id
-    assert cn_sess.company_id == etiqa.id
+    assert draft.company_id == etiqa.id
     assert tenure.expiry_month == "2029-02"
     assert float(tenure.won_premium) == pytest.approx(1620.50)
 

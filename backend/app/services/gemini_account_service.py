@@ -147,7 +147,7 @@ PARALLEL_MODELS: tuple[str, ...] = ("gemini-3.1-flash-lite", "gemini-3.5-flash-l
 class GeminiAccountManager:
     """Thread-safe multi-account Gemini manager enforcing 1,920 RPD, 52 RPM, 800k TPM across 4 parallel model endpoints (480 RPD buffer / 500 raw per endpoint, 13 RPM, 200k TPM)."""
 
-    def __init__(self, keys: tuple[str, ...] = ()):
+    def __init__(self, keys: Sequence[str] = ()):
         self._lock = threading.RLock()
         settings = get_settings()
         self._max_rpd_per_key = getattr(settings, "gemini_max_rpd_per_key", 480)

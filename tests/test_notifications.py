@@ -6,9 +6,11 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
@@ -84,7 +86,7 @@ class FakeSession:
 
 class TestNotificationService:
     def test_create_notification(self):
-        db = FakeSession()
+        db = cast(Session, FakeSession())
         notification = create_notification(
             db,
             recipient_id="recipient-1",
@@ -115,7 +117,7 @@ class TestNotificationService:
             body="Body",
             created_at=now + timedelta(minutes=1),
         )
-        db = FakeSession(rows=[n2, n1])
+        db = cast(Session, FakeSession(rows=[n2, n1]))
         result = get_notifications(db, "r1")
         assert result == [n2, n1]
 
@@ -138,9 +140,9 @@ class TestNotificationService:
             read_at=now,
             created_at=now,
         )
-        db = FakeSession(rows=[n1])
+        db = cast(Session, FakeSession(rows=[n1]))
         assert get_unread_count(db, "r1") == 1
-        db2 = FakeSession(rows=[n1, n2])
+        db2 = cast(Session, FakeSession(rows=[n1, n2]))
         assert get_unread_count(db2, "r1") == 2
 
     def test_mark_read(self):
@@ -153,7 +155,7 @@ class TestNotificationService:
             body="Body",
             created_at=now,
         )
-        db = FakeSession(objects={n1.id: n1})
+        db = cast(Session, FakeSession(objects={n1.id: n1}))
         result = mark_read(db, n1.id, "r1")
         assert result.read_at is not None
 
@@ -167,7 +169,7 @@ class TestNotificationService:
             body="Body",
             created_at=now,
         )
-        db = FakeSession(objects={n1.id: n1})
+        db = cast(Session, FakeSession(objects={n1.id: n1}))
         with pytest.raises(AppError, match="not found"):
             mark_read(db, n1.id, "r2")
 
@@ -181,7 +183,7 @@ class TestNotificationService:
             body="Body",
             created_at=now,
         )
-        db = FakeSession(rows=[n1])
+        db = cast(Session, FakeSession(rows=[n1]))
         assert mark_all_read(db, "r1") == 1
         assert n1.read_at is not None
 

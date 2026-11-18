@@ -178,142 +178,142 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     const isCurrent = operation.state === "current";
     const isCharged = isCurrent && costStatus !== "included" && costStatus !== "foc";
     const addPriceNum = isCharged ? parseMoneyVal(price) : 0;
-    let nextExtras = [...snapshot.extras];
-      if (isCharged && addPriceNum > 0) {
-        nextExtras.push({
-          selection_id: selectionId,
-          label: String(operation.label || "Custom benefit"),
-          price: { amount: price?.amount, currency: price?.currency || "MYR" },
-          included_in_premium: true,
-          unapplied_amount: "0.00",
-        });
-      }
-        const updatedSnap: WorkspaceSnapshot = {
-          ...snapshot,
-          benefits: [...snapshot.benefits, {
-            id: selectionId,
-            selection_key: key,
-            label: String(operation.label || "Custom benefit"),
-            state: isAddon ? "available_addon" : "current",
-            cost_status: costStatus,
-            concept_id: null,
-            item_kind: "custom",
-            typed_value: typed || null,
-          }],
-          benefit_cards: {
-            current_benefits: isAddon
-              ? snapshot.benefit_cards.current_benefits
-              : [...snapshot.benefit_cards.current_benefits, newCard],
-            available_addons: isAddon
-              ? [...snapshot.benefit_cards.available_addons, newCard]
-              : snapshot.benefit_cards.available_addons,
+    const nextExtras = [...snapshot.extras];
+    if (isCharged && addPriceNum > 0) {
+      nextExtras.push({
+        selection_id: selectionId,
+        label: String(operation.label || "Custom benefit"),
+        price: { amount: price?.amount, currency: price?.currency || "MYR" },
+        included_in_premium: true,
+        unapplied_amount: "0.00",
+      });
+    }
+    const updatedSnap: WorkspaceSnapshot = {
+      ...snapshot,
+      benefits: [...snapshot.benefits, {
+        id: selectionId,
+        selection_key: key,
+        label: String(operation.label || "Custom benefit"),
+        state: isAddon ? "available_addon" : "current",
+        cost_status: costStatus,
+        concept_id: null,
+        item_kind: "custom",
+        typed_value: typed || null,
+      }],
+      benefit_cards: {
+        current_benefits: isAddon
+          ? snapshot.benefit_cards.current_benefits
+          : [...snapshot.benefit_cards.current_benefits, newCard],
+        available_addons: isAddon
+          ? [...snapshot.benefit_cards.available_addons, newCard]
+          : snapshot.benefit_cards.available_addons,
+      },
+      extras: nextExtras,
+    };
+    return addPriceNum > 0 ? applyOptimisticPremiumAndTotal(updatedSnap, addPriceNum) : updatedSnap;
+  }
+  if (operation.op === "select_catalog_offering") {
+    const offeringId = String(operation.offering_id || "");
+    const offer = snapshot.benefit_cards.available_addons.find((item) => item.offering_id === offeringId) ||
+      snapshot.benefit_cards.current_benefits.find((item) => item.offering_id === offeringId);
+    if (!offer) return snapshot;
+    const isAddon = operation.state === "available_addon";
+    const isRemoved = operation.state === "removed";
+    const selectionId = offer.selection_id && !String(offer.selection_id).startsWith("pending:")
+      ? offer.selection_id
+      : `pending:catalog:${offer.offering_key}`;
+
+    const priceVal = ("price" in operation ? (operation.price as Record<string, unknown> | null | undefined) : undefined) !== undefined
+      ? (operation.price as Record<string, unknown> | null)
+      : (offer.price || offer.optional_price);
+    const costStatus = String(operation.cost_status || (isAddon ? (priceVal ? "paid" : "included") : (priceVal ? "paid" : "included")));
+
+    const labelVal = (operation as any).label || (operation as any).label_override;
+    const descVal = (operation as any).description || (operation as any).description_override;
+
+    const updatedCard: BenefitCardSummary = {
+      ...offer,
+      card_key: selectionId,
+      selection_id: selectionId,
+      cost_status: costStatus,
+      price: priceVal as any,
+      ...(labelVal ? { label: labelVal } : {}),
+      ...(descVal !== undefined ? { description: descVal } : {}),
+    };
+
+    const replacedCurrent = snapshot.benefit_cards.current_benefits.filter(
+      (item) => item.concept_id === offer.concept_id || item.selection_id === selectionId || item.offering_id === offeringId,
+    );
+    const oldPriceNum = replacedCurrent.reduce(
+      (sum, item) => sum + (item.cost_status !== "included" && item.cost_status !== "foc" ? parseMoneyVal(item.price || item.optional_price) : 0),
+      0,
+    );
+
+    let nextCurrent = snapshot.benefit_cards.current_benefits;
+    let nextAddons = snapshot.benefit_cards.available_addons;
+    let nextExtras = snapshot.extras;
+    let newPriceNum = 0;
+
+    if (isRemoved) {
+      nextCurrent = nextCurrent.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextAddons = nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
+    } else if (isAddon) {
+      nextCurrent = nextCurrent.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextAddons = [
+        ...nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId),
+        updatedCard,
+      ];
+      nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
+    } else {
+      nextAddons = nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextCurrent = [
+        ...nextCurrent.filter((item) => item.concept_id !== offer.concept_id && item.selection_id !== selectionId),
+        updatedCard,
+      ];
+      if (priceVal && costStatus !== "included" && costStatus !== "foc") {
+        newPriceNum = parseMoneyVal(priceVal);
+        nextExtras = [
+          ...nextExtras.filter((ex) => ex.selection_id !== selectionId),
+          {
+            selection_id: selectionId,
+            label: updatedCard.label,
+            price: priceVal as any,
+            sort_order: updatedCard.sort_order || 0,
+            included_in_premium: true,
+            unapplied_amount: "0.00",
           },
-          extras: nextExtras,
-        };
-        return addPriceNum > 0 ? applyOptimisticPremiumAndTotal(updatedSnap, addPriceNum) : updatedSnap;
+        ];
+      } else {
+        nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
       }
-      if (operation.op === "select_catalog_offering") {
-        const offeringId = String(operation.offering_id || "");
-        const offer = snapshot.benefit_cards.available_addons.find((item) => item.offering_id === offeringId) ||
-          snapshot.benefit_cards.current_benefits.find((item) => item.offering_id === offeringId);
-        if (!offer) return snapshot;
-        const isAddon = operation.state === "available_addon";
-        const isRemoved = operation.state === "removed";
-        const selectionId = offer.selection_id && !String(offer.selection_id).startsWith("pending:")
-          ? offer.selection_id
-          : `pending:catalog:${offer.offering_key}`;
+    }
 
-        const priceVal = ("price" in operation ? (operation.price as Record<string, unknown> | null | undefined) : undefined) !== undefined
-          ? (operation.price as Record<string, unknown> | null)
-          : (offer.price || offer.optional_price);
-        const costStatus = String(operation.cost_status || (isAddon ? (priceVal ? "paid" : "included") : (priceVal ? "paid" : "included")));
+    const nextBenefits = snapshot.benefits.filter((item) => item.id !== selectionId);
+    if (!isRemoved) {
+      nextBenefits.push({
+        id: selectionId,
+        selection_key: `catalog:${offer.offering_key}`,
+        catalog_offering_id: offer.offering_id,
+        concept_id: offer.concept_id,
+        state: isAddon ? "available_addon" : "current",
+        cost_status: costStatus,
+        item_kind: "catalog",
+      });
+    }
 
-        const labelVal = (operation as any).label || (operation as any).label_override;
-        const descVal = (operation as any).description || (operation as any).description_override;
-
-        const updatedCard: BenefitCardSummary = {
-          ...offer,
-          card_key: selectionId,
-          selection_id: selectionId,
-          cost_status: costStatus,
-          price: priceVal as any,
-          ...(labelVal ? { label: labelVal } : {}),
-          ...(descVal !== undefined ? { description: descVal } : {}),
-        };
-
-        const replacedCurrent = snapshot.benefit_cards.current_benefits.filter(
-          (item) => item.concept_id === offer.concept_id || item.selection_id === selectionId || item.offering_id === offeringId,
-        );
-        const oldPriceNum = replacedCurrent.reduce(
-          (sum, item) => sum + (item.cost_status !== "included" && item.cost_status !== "foc" ? parseMoneyVal(item.price || item.optional_price) : 0),
-          0,
-        );
-
-        let nextCurrent = snapshot.benefit_cards.current_benefits;
-        let nextAddons = snapshot.benefit_cards.available_addons;
-        let nextExtras = snapshot.extras;
-        let newPriceNum = 0;
-
-        if (isRemoved) {
-          nextCurrent = nextCurrent.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
-          nextAddons = nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
-          nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
-        } else if (isAddon) {
-          nextCurrent = nextCurrent.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
-          nextAddons = [
-            ...nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId),
-            updatedCard,
-          ];
-          nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
-        } else {
-          nextAddons = nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
-          nextCurrent = [
-            ...nextCurrent.filter((item) => item.concept_id !== offer.concept_id && item.selection_id !== selectionId),
-            updatedCard,
-          ];
-          if (priceVal && costStatus !== "included" && costStatus !== "foc") {
-            newPriceNum = parseMoneyVal(priceVal);
-            nextExtras = [
-              ...nextExtras.filter((ex) => ex.selection_id !== selectionId),
-              {
-                selection_id: selectionId,
-                label: updatedCard.label,
-                price: priceVal as any,
-                sort_order: updatedCard.sort_order || 0,
-                included_in_premium: true,
-                unapplied_amount: "0.00",
-              },
-            ];
-          } else {
-            nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
-          }
-        }
-
-        const nextBenefits = snapshot.benefits.filter((item) => item.id !== selectionId);
-        if (!isRemoved) {
-          nextBenefits.push({
-            id: selectionId,
-            selection_key: `catalog:${offer.offering_key}`,
-            catalog_offering_id: offer.offering_id,
-            concept_id: offer.concept_id,
-            state: isAddon ? "available_addon" : "current",
-            cost_status: costStatus,
-            item_kind: "catalog",
-          });
-        }
-
-          const updatedSnap: WorkspaceSnapshot = {
-            ...snapshot,
-            benefits: nextBenefits,
-            benefit_cards: {
-              current_benefits: nextCurrent,
-              available_addons: nextAddons,
-            },
-            extras: nextExtras,
-          };
-          const delta = newPriceNum - oldPriceNum;
-          return delta !== 0 ? applyOptimisticPremiumAndTotal(updatedSnap, delta) : updatedSnap;
-        }
+    const updatedSnap: WorkspaceSnapshot = {
+      ...snapshot,
+      benefits: nextBenefits,
+      benefit_cards: {
+        current_benefits: nextCurrent,
+        available_addons: nextAddons,
+      },
+      extras: nextExtras,
+    };
+    const delta = newPriceNum - oldPriceNum;
+    return delta !== 0 ? applyOptimisticPremiumAndTotal(updatedSnap, delta) : updatedSnap;
+  }
         if (operation.op === "benefit_update") {
           const selectionId = String(operation.selection_id || "");
           const state = operation.state ? String(operation.state) : null;
@@ -378,106 +378,106 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
               ...(hasPrice ? { price: priceVal as any } : {}),
             };
             nextCurrent = [...nextCurrent, movedCard];
-            const effPrice = hasPrice ? priceVal : (movedCard.price || movedCard.optional_price);
-              if (effPrice && effNextCostStatus !== "included" && effNextCostStatus !== "foc") {
-                nextExtras = [...nextExtras.filter((ex) => ex.selection_id !== selectionId), {
-                  selection_id: selectionId,
-                  label: labelVal || movedCard.label,
-                  price: effPrice as any,
-                  sort_order: movedCard.sort_order || 0,
-                  included_in_premium: true,
-                  unapplied_amount: "0.00",
-                }];
-              }
-            } else {
-              // Update in-place
-              const updateCard = (item: BenefitCardSummary): BenefitCardSummary => {
-                if (item.selection_id !== selectionId && item.card_key !== selectionId) return item;
-                return {
-                  ...item,
-                  ...(costStatus ? { cost_status: costStatus } : {}),
-                  ...(labelVal ? { label: labelVal } : {}),
-                  ...(descVal !== undefined ? { description: descVal } : {}),
-                  ...(typed ? { value: String(typed.display_text ?? typed.value ?? item.value) } : {}),
-                  ...(hasPrice ? { price: priceVal as any } : {}),
-                };
-              };
-              nextCurrent = nextCurrent.map(updateCard);
-              nextAddons = nextAddons.map(updateCard);
-              if (labelVal) {
-                nextExtras = nextExtras.map((ex) => ex.selection_id === selectionId ? { ...ex, label: labelVal } : ex);
-              }
-                  if (hasPrice || costStatus) {
-                    if (effNextPriceObj && effNextCostStatus !== "included" && effNextCostStatus !== "foc") {
-                      const found = nextExtras.some((ex) => ex.selection_id === selectionId);
-                      if (found) {
-                        nextExtras = nextExtras.map((ex) => ex.selection_id === selectionId
-                          ? { ...ex, price: effNextPriceObj as any, included_in_premium: true, unapplied_amount: "0.00" }
-                          : ex);
-                      } else if (inCurrent) {
-                        nextExtras = [...nextExtras, {
-                          selection_id: selectionId,
-                          label: labelVal || targetCard?.label || "Add-on",
-                          price: effNextPriceObj as any,
-                          sort_order: targetCard?.sort_order || 0,
-                          included_in_premium: true,
-                          unapplied_amount: "0.00",
-                        }];
-                      }
-                    } else {
-                      nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
-                    }
-                  }
-                }
+      const effPrice = hasPrice ? priceVal : (movedCard.price || movedCard.optional_price);
+      if (effPrice && effNextCostStatus !== "included" && effNextCostStatus !== "foc") {
+        nextExtras = [...nextExtras.filter((ex) => ex.selection_id !== selectionId), {
+          selection_id: selectionId,
+          label: labelVal || movedCard.label,
+          price: effPrice as any,
+          sort_order: movedCard.sort_order || 0,
+          included_in_premium: true,
+          unapplied_amount: "0.00",
+        }];
+      }
+    } else {
+      // Update in-place
+      const updateCard = (item: BenefitCardSummary): BenefitCardSummary => {
+        if (item.selection_id !== selectionId && item.card_key !== selectionId) return item;
+        return {
+          ...item,
+          ...(costStatus ? { cost_status: costStatus } : {}),
+          ...(labelVal ? { label: labelVal } : {}),
+          ...(descVal !== undefined ? { description: descVal } : {}),
+          ...(typed ? { value: String(typed.display_text ?? typed.value ?? item.value) } : {}),
+          ...(hasPrice ? { price: priceVal as any } : {}),
+        };
+      };
+      nextCurrent = nextCurrent.map(updateCard);
+      nextAddons = nextAddons.map(updateCard);
+      if (labelVal) {
+        nextExtras = nextExtras.map((ex) => ex.selection_id === selectionId ? { ...ex, label: labelVal } : ex);
+      }
+      if (hasPrice || costStatus) {
+        if (effNextPriceObj && effNextCostStatus !== "included" && effNextCostStatus !== "foc") {
+          const found = nextExtras.some((ex) => ex.selection_id === selectionId);
+          if (found) {
+            nextExtras = nextExtras.map((ex) => ex.selection_id === selectionId
+              ? { ...ex, price: effNextPriceObj as any, included_in_premium: true, unapplied_amount: "0.00" }
+              : ex);
+          } else if (inCurrent) {
+            nextExtras = [...nextExtras, {
+              selection_id: selectionId,
+              label: labelVal || targetCard?.label || "Add-on",
+              price: effNextPriceObj as any,
+              sort_order: targetCard?.sort_order || 0,
+              included_in_premium: true,
+              unapplied_amount: "0.00",
+            }];
+          }
+        } else {
+          nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
+        }
+      }
+    }
 
-                // Remove from extras if a priced benefit was removed or moved to add-on
-                if (state === "removed" || state === "available_addon") {
-                  nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
-                }
-                  const updatedSnap: WorkspaceSnapshot = {
-                    ...snapshot,
-                    benefits: nextBenefits,
-                    benefit_cards: {
-                      current_benefits: nextCurrent,
-                      available_addons: nextAddons,
-                    },
-                    extras: nextExtras,
-                  };
-                  const delta = newPriceNum - oldPriceNum;
-                  return delta !== 0 ? applyOptimisticPremiumAndTotal(updatedSnap, delta) : updatedSnap;
-                }
-                if (operation.op === "reset_benefits") {
-                  const detVal = snapshot.fields?.premium?.detected_value;
-                  if (detVal !== undefined && detVal !== null && String(detVal).trim() !== "") {
-                    return applyOptimisticPremiumAndTotal(snapshot, 0, parseMoneyVal(detVal));
-                  }
-                  return applyOptimisticPremiumAndTotal(snapshot, 0);
-                }
-                if (operation.op === "update_display_options") {
-                  const nextOptions = {
-                    ...(snapshot.display_options || {}),
-                    ...(operation.options || {}),
-                  };
-                    const nextSnap = {
-                      ...snapshot,
-                      display_options: nextOptions,
-                    };
-                    const opts = (operation.options || {}) as Record<string, unknown>;
-                    if("round_total" in opts || "include_road_tax" in opts || "include_runner_fee" in opts) {
-                    return applyOptimisticPremiumAndTotal(nextSnap, 0);
-                  }
-                  return nextSnap;
-                }
-                if (operation.op === "layout_override") {
-                  return {
-                    ...snapshot,
-                    layout_override: operation.layout as Record<string, unknown>,
-                    layout_binding: {
-                      template_id: String(operation.template_id || "") || null,
-                      template_revision_id: String(operation.template_revision_id || "") || null,
-                      base_hash: String(operation.base_hash || "") || null,
-                    },
-                  };
+    // Remove from extras if a priced benefit was removed or moved to add-on
+    if (state === "removed" || state === "available_addon") {
+      nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
+    }
+    const updatedSnap: WorkspaceSnapshot = {
+      ...snapshot,
+      benefits: nextBenefits,
+      benefit_cards: {
+        current_benefits: nextCurrent,
+        available_addons: nextAddons,
+      },
+      extras: nextExtras,
+    };
+    const delta = newPriceNum - oldPriceNum;
+    return delta !== 0 ? applyOptimisticPremiumAndTotal(updatedSnap, delta) : updatedSnap;
+  }
+  if (operation.op === "reset_benefits") {
+    const detVal = snapshot.fields?.premium?.detected_value;
+    if (detVal !== undefined && detVal !== null && String(detVal).trim() !== "") {
+      return applyOptimisticPremiumAndTotal(snapshot, 0, parseMoneyVal(detVal));
+    }
+    return applyOptimisticPremiumAndTotal(snapshot, 0);
+  }
+  if (operation.op === "update_display_options") {
+    const nextOptions = {
+      ...(snapshot.display_options || {}),
+      ...(operation.options || {}),
+    };
+    const nextSnap = {
+      ...snapshot,
+      display_options: nextOptions,
+    };
+    const opts = (operation.options || {}) as Record<string, unknown>;
+    if ("round_total" in opts || "include_road_tax" in opts || "include_runner_fee" in opts) {
+      return applyOptimisticPremiumAndTotal(nextSnap, 0);
+    }
+    return nextSnap;
+  }
+  if (operation.op === "layout_override") {
+    return {
+      ...snapshot,
+      layout_override: operation.layout as Record<string, unknown>,
+      layout_binding: {
+        template_id: String(operation.template_id || "") || null,
+        template_revision_id: String(operation.template_revision_id || "") || null,
+        base_hash: String(operation.base_hash || "") || null,
+      },
+    };
                 }
                 if (operation.op === "pin_catalog") {
                   return {

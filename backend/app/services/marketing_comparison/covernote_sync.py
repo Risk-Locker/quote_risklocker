@@ -122,8 +122,8 @@ def sync_and_update_covernote(
         if matched_comp:
             tenure.winning_company_id = matched_comp.id
             comp_name = comp_name or matched_comp.name
-            if cn_session:
-                cn_session.company_id = matched_comp.id
+            if cn_session and cn_session.draft:
+                cn_session.draft.company_id = matched_comp.id
         if cn_session and comp_name:
             cn_session.detected_company = comp_name
 
@@ -251,7 +251,11 @@ def sync_and_update_covernote(
             elif tenure.won_premium is not None:
                 ce.motor_premium = max(_ZERO, (_q2(tenure.won_premium) - eff_rt - eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
             if payload.get("agreed_value") is not None or payload.get("valuation_type") is not None:
-                is_ag = bool(payload.get("agreed_value")) or str(payload.get("valuation_type") or "").lower() == "agreed_value"
+                vt_raw = payload.get("valuation_type")
+                if vt_raw is not None and str(vt_raw).strip() != "":
+                    is_ag = str(vt_raw).strip().lower() in {"agreed value", "agreed_value"}
+                else:
+                    is_ag = bool(payload.get("agreed_value"))
                 ce.agreed_value = is_ag
                 ce.valuation_type = "agreed_value" if is_ag else "market_value"
             if payload.get("excess") is not None:

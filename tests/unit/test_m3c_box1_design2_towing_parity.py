@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Generator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -54,7 +55,7 @@ from app.services.marketing_comparison.benefits_extractor import (
 
 
 @pytest.fixture()
-def hermetic_db() -> Session:
+def hermetic_db() -> Generator[Session, None, None]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},

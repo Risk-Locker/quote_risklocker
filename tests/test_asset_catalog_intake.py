@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -15,6 +16,7 @@ if str(BACKEND) not in sys.path:
 
 from app.models.tables import BusinessAsset, CompanyAlias, InsuranceCompany
 from app.services.asset_catalog_intake import apply_asset_manifest, build_asset_import_plan
+from app.storage.supabase import SupabaseStorage
 
 
 def manifest():
@@ -107,7 +109,7 @@ def test_apply_registers_assets_dynamic_companies_and_logo_links(asset_plan):
     db = FakeDb()
     storage = Storage()
 
-    result = apply_asset_manifest(db, plan, storage=storage)
+    result = apply_asset_manifest(db, plan, storage=cast(SupabaseStorage, storage))
 
     assert result["assets_created"] == len(plan["assets"])
     assert result["companies_created"] == len(plan["companies"])
@@ -125,10 +127,10 @@ def test_reapplying_same_plan_is_idempotent_and_uploads_nothing_again(asset_plan
     plan = asset_plan
     db = FakeDb()
     first_storage = Storage()
-    apply_asset_manifest(db, plan, storage=first_storage)
+    apply_asset_manifest(db, plan, storage=cast(SupabaseStorage, first_storage))
     second_storage = Storage()
 
-    result = apply_asset_manifest(db, plan, storage=second_storage)
+    result = apply_asset_manifest(db, plan, storage=cast(SupabaseStorage, second_storage))
 
     assert result["assets_created"] == 0
     assert result["assets_unchanged"] == len(plan["assets"])
@@ -151,7 +153,7 @@ def test_existing_company_without_slug_is_merged_by_normalized_name(asset_plan):
     )
     db = FakeDb(companies=[existing_qbe])
 
-    result = apply_asset_manifest(db, asset_plan, storage=Storage())
+    result = apply_asset_manifest(db, asset_plan, storage=cast(SupabaseStorage, Storage()))
 
     assert result["companies_created"] == len(asset_plan["companies"]) - 1
     assert len(db.companies) == len(asset_plan["companies"])
@@ -180,7 +182,7 @@ def test_existing_asset_key_with_different_hash_is_reported_without_overwrite(as
     db = FakeDb(assets=[existing])
     storage = Storage()
 
-    result = apply_asset_manifest(db, plan, storage=storage)
+    result = apply_asset_manifest(db, plan, storage=cast(SupabaseStorage, storage))
 
     assert result["conflicts"][0]["asset_key"] == entry["asset_key"]
     assert existing.content_hash == "f" * 64
