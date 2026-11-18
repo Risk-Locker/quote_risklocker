@@ -137,7 +137,7 @@ function estimateStagedFileTokens(file: File, explicitPages?: number): {
   };
 }
 
-const MAX_JOB_WAIT_MS = 15 * 60 * 1000;
+const MAX_JOB_WAIT_MS = 30 * 60 * 1000;
 const STALE_HEARTBEAT_MS = 60 * 1000;
 
 const PIPELINE_STEPS = [
@@ -256,13 +256,13 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
           prev.map((i) =>
             i.id === item.id
               ? {
-                  ...i,
-                  status: "completed",
-                  plate: res.vehicle_plate || i.plate,
-                  insurer: res.detected_company || i.insurer,
-                  premium: res.total_premium || i.premium,
-                  error: undefined,
-                }
+                ...i,
+                status: "completed",
+                plate: res.vehicle_plate || i.plate,
+                insurer: res.detected_company || i.insurer,
+                premium: res.total_premium || i.premium,
+                error: undefined,
+              }
               : i
           )
         );
@@ -282,7 +282,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       ? typeof rawCompLimit === "number" && rawCompLimit >= 1
         ? rawCompLimit
         : Infinity
-      : limits?.max_bulk_upload_files || 30;
+      : limits?.max_bulk_upload_files || 100;
   const isUnlimitedQueue = !Number.isFinite(maxBulkLimit);
   const gemini = limits?.gemini;
   const enqueuingRef = useRef(false);
@@ -316,7 +316,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
           return stored;
         });
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Automatically clear bulkProcessing and handle comparison redirect once all jobs finish
@@ -344,7 +344,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   // Persist staged queue across tab reloads/crashes
   useEffect(() => {
     if (!hasRestoredQueue.current) return;
-    saveStagedQueue(bulkFiles).catch(() => {});
+    saveStagedQueue(bulkFiles).catch(() => { });
   }, [bulkFiles]);
 
   useEffect(() => {
@@ -518,7 +518,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         await api(`/sessions/${sessionId}`, { method: "DELETE" });
       } catch {
         if (jobId) {
-          api(`/jobs/${jobId}/cancel`, { method: "POST" }).catch(() => {});
+          api(`/jobs/${jobId}/cancel`, { method: "POST" }).catch(() => { });
         }
       }
     } else if (jobId) {
@@ -553,8 +553,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
 
     if (nonPdfCount > 0 || oversizedCount > 0) {
       setBulkNotice(
-        `Ignored ${nonPdfCount ? `${nonPdfCount} non-PDF file(s)` : ""}${nonPdfCount && oversizedCount ? " and " : ""}${
-          oversizedCount ? `${oversizedCount} file(s) exceeding ${formatBytes(maximum)}` : ""
+        `Ignored ${nonPdfCount ? `${nonPdfCount} non-PDF file(s)` : ""}${nonPdfCount && oversizedCount ? " and " : ""}${oversizedCount ? `${oversizedCount} file(s) exceeding ${formatBytes(maximum)}` : ""
         }.`
       );
     }
@@ -658,7 +657,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               );
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       });
 
       return [...prev, ...newItems];
@@ -675,7 +674,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     if (bulkProcessing) return;
     setBulkFiles([]);
     setBulkNotice("");
-    clearStagedQueue().catch(() => {});
+    clearStagedQueue().catch(() => { });
   }
 
   async function cancelBulkItem(item: BulkFileItem) {
@@ -685,11 +684,11 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         await api(`/sessions/${item.sessionId}`, { method: "DELETE" });
       } catch {
         if (item.jobId) {
-          api(`/jobs/${item.jobId}/cancel`, { method: "POST" }).catch(() => {});
+          api(`/jobs/${item.jobId}/cancel`, { method: "POST" }).catch(() => { });
         }
       }
     } else if (item.jobId) {
-      api(`/jobs/${item.jobId}/cancel`, { method: "POST" }).catch(() => {});
+      api(`/jobs/${item.jobId}/cancel`, { method: "POST" }).catch(() => { });
     }
   }
 
@@ -701,10 +700,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     setBulkProcessing(false);
     setBulkFiles([]);
     setBulkNotice("Batch stopped. Cancelled sessions have been deleted.");
-    clearStagedQueue().catch(() => {});
+    clearStagedQueue().catch(() => { });
     for (const item of activeItems) {
       if (item.sessionId) {
-        api(`/sessions/${item.sessionId}`, { method: "DELETE" }).catch(() => {});
+        api(`/sessions/${item.sessionId}`, { method: "DELETE" }).catch(() => { });
       }
     }
   }
@@ -791,10 +790,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                     prev.map((i) =>
                       i.id === item.id
                         ? {
-                            ...i,
-                            status: "uploading",
-                            error: `Queue rate-limit window active. Resuming in ${waitSec}s (attempt ${attempt}/4)...`,
-                          }
+                          ...i,
+                          status: "uploading",
+                          error: `Queue rate-limit window active. Resuming in ${waitSec}s (attempt ${attempt}/4)...`,
+                        }
                         : i
                     )
                   );
@@ -813,13 +812,13 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                 prev.map((i) =>
                   i.id === item.id
                     ? {
-                        ...i,
-                        sessionId: result!.session_id,
-                        jobId: result!.job_id,
-                        status: "processing",
-                        progress: 25,
-                        error: undefined,
-                      }
+                      ...i,
+                      sessionId: result!.session_id,
+                      jobId: result!.job_id,
+                      status: "processing",
+                      progress: 25,
+                      error: undefined,
+                    }
                     : i
                 )
               );
@@ -895,7 +894,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                     existingBatch = p;
                   }
                 }
-              } catch {}
+              } catch { }
 
               const count = (existingBatch?.count || 0) + 1;
               const vehicles = Array.from(new Set([...(existingBatch?.vehicles || []), currentPlate]));
@@ -910,22 +909,22 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               try {
                 localStorage.setItem("rl_latest_policy_issue", JSON.stringify(eventData));
                 window.dispatchEvent(new CustomEvent("rl_policy_issued", { detail: eventData }));
-              } catch {}
+              } catch { }
             }
 
             setBulkFiles((prev) =>
               prev.map((i) =>
                 i.id === itemId
                   ? {
-                      ...i,
-                      status: "completed",
-                      progress: 100,
-                      plate: sRes.session.vehicle_plate || undefined,
-                      tenureId: resolvedTenureId || undefined,
-                      insurer: sRes.session.detected_company || undefined,
-                      premium: sRes.session.total_premium || undefined,
-                      ref: sRes.session.quotation_ref || undefined,
-                    }
+                    ...i,
+                    status: "completed",
+                    progress: 100,
+                    plate: sRes.session.vehicle_plate || undefined,
+                    tenureId: resolvedTenureId || undefined,
+                    insurer: sRes.session.detected_company || undefined,
+                    premium: sRes.session.total_premium || undefined,
+                    ref: sRes.session.quotation_ref || undefined,
+                  }
                   : i
               )
             );
@@ -942,10 +941,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
             prev.map((i) =>
               i.id === itemId
                 ? {
-                    ...i,
-                    status: "failed",
-                    error: currentJob.error?.message || "Extraction failed.",
-                  }
+                  ...i,
+                  status: "failed",
+                  error: currentJob.error?.message || "Extraction failed.",
+                }
                 : i
             )
           );
@@ -956,13 +955,13 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
           prev.map((i) =>
             i.id === itemId
               ? {
-                  ...i,
-                  status: "processing",
-                  progress: Math.max(i.progress, currentJob.progress || 30),
-                  phase: currentJob.phase,
-                  queuePosition: currentJob.queue_position,
-                  otherUsersCount: currentJob.other_users_count,
-                }
+                ...i,
+                status: "processing",
+                progress: Math.max(i.progress, currentJob.progress || 30),
+                phase: currentJob.phase,
+                queuePosition: currentJob.queue_position,
+                otherUsersCount: currentJob.other_users_count,
+              }
               : i
           )
         );
@@ -1053,8 +1052,8 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               {mode === "comparison"
                 ? "Marketing Comparison Intake"
                 : mode === "bulk"
-                ? "Corporate Fleet Upload"
-                : "Upload Quotation (Sandbox)"}
+                  ? "Corporate Fleet Upload"
+                  : "Upload Quotation (Sandbox)"}
             </h1>
             <p className="mt-1 text-[13px] text-[var(--rl-text-muted)] line-clamp-2">
               {mode === "comparison"
@@ -1062,8 +1061,8 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                   ? "Upload any number of insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, Kurnia, AmAssurance) to compile your side-by-side marketing comparison matrix."
                   : `Upload up to ${maxBulkLimit} insurer quotation PDFs for the same vehicle (e.g. Etiqa, Berjaya Sompo, Kurnia, AmAssurance) to compile your side-by-side marketing comparison matrix.`
                 : mode === "bulk"
-                ? "High-speed parallel batch intake across 10 concurrent processing slots for corporate fleet deals."
-                : "Single quote preview sandbox. Real client renewal quotes should be compiled in Marketing Comparison for multi-insurer comparisons and ledger tracking."}
+                  ? "High-speed parallel batch intake across 10 concurrent processing slots for corporate fleet deals."
+                  : "Single quote preview sandbox. Real client renewal quotes should be compiled in Marketing Comparison for multi-insurer comparisons and ledger tracking."}
             </p>
           </div>
 
@@ -1072,11 +1071,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
             <button
               type="button"
               onClick={() => handleTabChange("comparison")}
-              className={`flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                mode === "comparison"
+              className={`flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${mode === "comparison"
                   ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
                   : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+                }`}
             >
               <Columns size={15} weight={mode === "comparison" ? "bold" : "regular"} />
               <span>Marketing Comparison</span>
@@ -1089,11 +1087,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
             <button
               type="button"
               onClick={() => handleTabChange("single")}
-              className={`flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                mode === "single"
+              className={`flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${mode === "single"
                   ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
                   : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+                }`}
             >
               <FileText size={15} weight={mode === "single" ? "bold" : "regular"} />
               <span>Single Quote</span>
@@ -1101,11 +1098,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
             <button
               type="button"
               onClick={() => handleTabChange("bulk")}
-              className={`flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                mode === "bulk"
+              className={`flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${mode === "bulk"
                   ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
                   : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-              }`}
+                }`}
             >
               <Files size={15} weight={mode === "bulk" ? "bold" : "regular"} />
               <span>Corporate Fleet</span>
@@ -1215,13 +1211,12 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-white p-4 shadow-xs">
           <div className="flex items-center gap-3">
             <span
-              className={`grid size-9 place-items-center rounded-[var(--rl-radius-sm)] ${
-                gemini?.active
+              className={`grid size-9 place-items-center rounded-[var(--rl-radius-sm)] ${gemini?.active
                   ? "bg-emerald-600 text-white shadow-xs"
                   : (gemini?.key_count ?? 0) > 0
-                  ? "bg-amber-100 text-amber-700"
-                  : "bg-gray-100 text-gray-500"
-              }`}
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-gray-100 text-gray-500"
+                }`}
             >
               <Sparkle size={18} weight="fill" />
             </span>
@@ -1235,23 +1230,23 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                     gemini?.active
                       ? "success"
                       : (gemini?.key_count ?? 0) > 0
-                      ? "warning"
-                      : "default"
+                        ? "warning"
+                        : "default"
                   }
                 >
                   {gemini?.active
                     ? gemini?.status_label || "Ready · Active"
                     : (gemini?.key_count ?? 0) > 0
-                    ? gemini?.status_label || "Needs Check"
-                    : "Offline"}
+                      ? gemini?.status_label || "Needs Check"
+                      : "Offline"}
                 </Badge>
               </div>
               <p className="text-xs text-[var(--rl-text-muted)] mt-0.5">
                 {gemini?.active
                   ? `Parallel Fleet: ${gemini.key_count ?? 2} Keys × 2 Models = ${gemini.fleet_summary?.total_parallel_endpoints ?? 4} Parallel Endpoints · Capacity: ${(gemini.fleet_summary?.fleet_rpm_limit ?? 48)} RPM · ${(gemini.fleet_summary?.fleet_tpm_limit ?? 880_000).toLocaleString()} TPM · ${(gemini.fleet_summary?.fleet_rpd_limit ?? 1840).toLocaleString()} RPD (Buffered: 460/endpoint; 2,000 raw)`
                   : (gemini?.key_count ?? 0) > 0
-                  ? `Configured with ${gemini?.key_count ?? 1} key${(gemini?.key_count ?? 1) > 1 ? "s" : ""}. Click 'Test Key' to verify live connection.`
-                  : "No Gemini API key configured. Add a key in Settings or .env to enable high-speed AI extraction."}
+                    ? `Configured with ${gemini?.key_count ?? 1} key${(gemini?.key_count ?? 1) > 1 ? "s" : ""}. Click 'Test Key' to verify live connection.`
+                    : "No Gemini API key configured. Add a key in Settings or .env to enable high-speed AI extraction."}
               </p>
             </div>
           </div>
@@ -1319,19 +1314,17 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
               onDragOver={handleSingleDragOver}
               onDragLeave={handleSingleDragLeave}
               onDrop={handleSingleDrop}
-              className={`rl-tour-dropzone grid min-h-[170px] cursor-pointer place-items-center rounded-[var(--rl-radius)] border-2 border-dashed p-8 text-center transition-all duration-200 ${
-                isDragging
+              className={`rl-tour-dropzone grid min-h-[170px] cursor-pointer place-items-center rounded-[var(--rl-radius)] border-2 border-dashed p-8 text-center transition-all duration-200 ${isDragging
                   ? "border-[var(--rl-black)] bg-[var(--rl-black)]/[0.04] scale-[1.01] ring-4 ring-[var(--rl-black)]/5 shadow-md"
                   : "border-[var(--rl-border)] bg-[var(--rl-bg)] hover:border-[var(--rl-black)]/30 hover:bg-[var(--rl-black)]/[0.01]"
-              }`}
+                }`}
             >
               <span className="grid justify-items-center gap-3 pointer-events-none">
                 <span
-                  className={`grid size-12 place-items-center rounded-[var(--rl-radius)] transition-transform duration-200 ${
-                    isDragging
+                  className={`grid size-12 place-items-center rounded-[var(--rl-radius)] transition-transform duration-200 ${isDragging
                       ? "bg-[var(--rl-black)] text-white scale-110 shadow-sm"
                       : "bg-[var(--rl-black)]/6 text-[var(--rl-text-strong)]"
-                  }`}
+                    }`}
                 >
                   <Upload aria-hidden="true" size={24} weight="bold" />
                 </span>
@@ -1470,13 +1463,12 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                     return (
                       <div key={step.key} className="flex items-center justify-between text-[12px]">
                         <span
-                          className={`flex items-center gap-2 ${
-                            isDone
+                          className={`flex items-center gap-2 ${isDone
                               ? "text-[var(--rl-text-strong)] font-medium"
                               : isCurrent
-                              ? "text-[var(--rl-black)] font-bold"
-                              : "text-[var(--rl-text-muted)] opacity-60"
-                          }`}
+                                ? "text-[var(--rl-black)] font-bold"
+                                : "text-[var(--rl-text-muted)] opacity-60"
+                            }`}
                         >
                           {isDone ? (
                             <CheckCircle size={14} weight="fill" className="text-emerald-600" />
@@ -1529,10 +1521,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                 {!gemini?.active
                   ? "AI Engine Unavailable — Key Required"
                   : loading
-                  ? "Preparing & Extracting with AI..."
-                  : error && file
-                  ? "Retry Upload"
-                  : "Upload & Extract"}
+                    ? "Preparing & Extracting with AI..."
+                    : error && file
+                      ? "Retry Upload"
+                      : "Upload & Extract"}
               </Button>
               {loading ? (
                 <Button type="button" variant="secondary" size="md" onClick={cancelPreparation}>
@@ -1764,15 +1756,14 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                   return (
                     <div
                       key={item.id}
-                      className={`flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius-sm)] border p-3.5 transition-colors ${
-                        isDone
+                      className={`flex flex-wrap items-center justify-between gap-3 rounded-[var(--rl-radius-sm)] border p-3.5 transition-colors ${isDone
                           ? "border-emerald-200 bg-emerald-50/40"
                           : isFailed
-                          ? "border-red-200 bg-red-50/40"
-                          : isWorking
-                          ? "border-blue-200 bg-blue-50/20"
-                          : "border-[var(--rl-border)] bg-[var(--rl-bg)]"
-                      }`}
+                            ? "border-red-200 bg-red-50/40"
+                            : isWorking
+                              ? "border-blue-200 bg-blue-50/20"
+                              : "border-[var(--rl-border)] bg-[var(--rl-bg)]"
+                        }`}
                     >
                       {/* File details & extracted info */}
                       <div className="flex items-center gap-3 min-w-0 flex-1">

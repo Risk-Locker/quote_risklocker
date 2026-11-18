@@ -147,6 +147,7 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/plans/milestone-4c-kurnia-company.md` | Milestone 4c: Kurnia as a separate insurance company row, no AmAssurance folding | Milestone 4c execution |
 | `docs/plans/milestone-4d-unlimited-comparison-upload-queue.md` | Milestone 4d: setting-driven unlimited comparison staging, enqueue-all, server-side batch progress | Milestone 4d execution |
 | `docs/plans/2026-11-18-v30.5-3eye-towing-catalog-comparison-plan.md` | v30.5 3-Eye online grounding, authoritative 7-insurer DB towing matrix, & queue/UNPLATED/replace remediation | v30.5 execution & verification |
+| `docs/plans/2026-11-18-v30.6-premium-box1-covernote-typography-batch-plan.md` | v30.6 premium integrity, bidirectional workspace/comparison sync, Box 1 <-> Design 2 1:1 parity, cover note editing & 100-PDF batch scaling | v30.6 execution & verification |
 | `docs/plans/agent-system-reset/00-master-plan.md` | Multi-tier agent harness reset master plan (`deep` / `balanced` / `flash` profiles & task-size routing) | Agent harness updates |
 | `docs/plans/agent-system-reset/01-audit-findings.md` | Empirical token and rule audit of `.agents/` and `AGENTS.md` | Reference audit |
 | `docs/plans/agent-system-reset/02-core-contract-and-model-profiles.md` | Model-tier operating contract and profile specifications (`Argon`, `Hydrogen`, `Claude`, `3.8 Flash`) | Agent harness updates |

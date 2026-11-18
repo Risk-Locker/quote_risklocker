@@ -689,12 +689,15 @@ def prefetch_comparison_benefit_context(
             comp_ids.add(s.draft.company_id)
 
     selections_by_draft: dict[str, list[DraftBenefitSelection]] = {}
+    all_selections_by_draft: dict[str, list[DraftBenefitSelection]] = {}
     concept_ids: set[str] = set()
     if draft_ids:
         for sel in db.scalars(
             select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id.in_(draft_ids))
         ).all():
-            selections_by_draft.setdefault(sel.draft_id, []).append(sel)
+            all_selections_by_draft.setdefault(sel.draft_id, []).append(sel)
+            if sel.state == "current":
+                selections_by_draft.setdefault(sel.draft_id, []).append(sel)
             if sel.concept_id:
                 concept_ids.add(sel.concept_id)
 
@@ -775,6 +778,7 @@ def prefetch_comparison_benefit_context(
 
     return {
         "selections_by_draft": selections_by_draft,
+        "all_selections_by_draft": all_selections_by_draft,
         "concepts_by_id": concepts_by_id,
         "ext_records_by_file": ext_records_by_file,
         "ext_lines_by_file": ext_lines_by_file,
@@ -802,20 +806,25 @@ def _resolve_comparison_benefits(
     """
     tokens: list[str] = []
     
-    # 1. Draft Benefit Selections
+    # 1. Draft Benefit Selections (strictly state == 'current' for active detection;
+    #    track inactive selections to respect explicit Workspace removals over raw PDF fallback)
     draft_id = session.draft_id if session else None
-    selections: list[DraftBenefitSelection] = []
+    all_selections: list[DraftBenefitSelection] = []
     if draft_id:
         if prefetched is not None:
-            selections = list(prefetched["selections_by_draft"].get(draft_id, ()))
+            all_selections = list(
+                (prefetched.get("all_selections_by_draft") or prefetched["selections_by_draft"]).get(draft_id, ())
+            )
         else:
-            selections = list(
+            all_selections = list(
                 db.scalars(
                     select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft_id)
                 ).all()
             )
-    
-    concept_ids = {s.concept_id for s in selections if s.concept_id}
+    selections = [s for s in all_selections if s.state == "current"]
+    inactive_selections = [s for s in all_selections if s.state != "current"]
+
+    concept_ids = {s.concept_id for s in all_selections if s.concept_id}
     concepts: dict[str, BenefitConcept] = {}
     if concept_ids:
         if prefetched is not None:
@@ -823,7 +832,30 @@ def _resolve_comparison_benefits(
         else:
             c_list = list(db.scalars(select(BenefitConcept).where(BenefitConcept.id.in_(concept_ids))).all())
             concepts = {c.id: c for c in c_list}
-        
+
+    def _classify_sel_domains(sel: DraftBenefitSelection) -> set[str]:
+        matched: set[str] = set()
+        c = concepts.get(sel.concept_id) if sel.concept_id else None
+        ckey = (c.concept_key if c else "") or ""
+        skey = sel.selection_key or ""
+        lbl = sel.label_override or (c.label if c else "") or ""
+        blob = f"{ckey} {skey} {lbl}".lower()
+        if any(w in blob for w in ("windscreen", "w/screen", "cermin")):
+            matched.add("windscreen")
+        if any(w in blob for w in ("special-peril", "special_peril", "special peril", "flood", "banjir", "peril khas")):
+            matched.add("special-perils")
+        if any(w in blob for w in ("legal-liability", "liability to passenger", "liability of passenger", "llp", "llop", "lltp")):
+            matched.add("llp_llop")
+        return matched
+
+    active_domains: set[str] = set()
+    for s in selections:
+        active_domains.update(_classify_sel_domains(s))
+    inactive_domains: set[str] = set()
+    for s in inactive_selections:
+        inactive_domains.update(_classify_sel_domains(s))
+    disabled_domains = inactive_domains - active_domains
+
     for s in selections:
         if s.label_override:
             tokens.append(s.label_override)
@@ -835,6 +867,8 @@ def _resolve_comparison_benefits(
                 tokens.append(c.label)
             if c.concept_key:
                 tokens.append(c.concept_key)
+            if isinstance(s.typed_value_override, dict) and s.typed_value_override.get("display_text"):
+                tokens.append(str(s.typed_value_override["display_text"]))
                 
     # 2. Extraction Benefit Lines & Extraction Record text
     ext_rec = None
@@ -917,53 +951,65 @@ def _resolve_comparison_benefits(
                 end_tokens.add(t_clean)
 
     # --- SPECIAL PERILS ---
-    # Genuine perils: flood, typhoon, storm, landslide, peril khas, special perils, or Endorsement 57 (word-boundary, never matching 'contribution')
+    # Genuine perils: flood, typhoon, storm, landslide, peril khas, special perils, or Endorsement 57
     from app.services.marketing_comparison.special_perils import (
         has_special_perils_evidence,
         is_special_perils_value_included,
     )
-    has_special_perils = has_special_perils_evidence(
-        text=combined_text,
-        endorsements=end_tokens,
-        benefit_lines=ext_lines,
-        fields=f,
-    )
+    sp_field_raw = f.get("special_perils")
+    sp_manual_override = isinstance(sp_field_raw, dict) and sp_field_raw.get("status") == "manual_override"
+    if "special-perils" in disabled_domains and not sp_manual_override:
+        has_special_perils = False
+    else:
+        has_special_perils = has_special_perils_evidence(
+            text=combined_text,
+            endorsements=end_tokens,
+            benefit_lines=ext_lines,
+            fields=f,
+        )
     special_perils_val = "Included" if has_special_perils else None
 
     # --- WINDSCREEN ---
     windscreen_amount: float | None = None
+    ws_field_raw = f.get("windscreen_sum_insured") or f.get("windscreen")
+    ws_manual_override = isinstance(ws_field_raw, dict) and ws_field_raw.get("status") == "manual_override"
+    ws_explicitly_removed = (
+        ("windscreen" in disabled_domains and not ws_manual_override)
+        or (ws_manual_override and not _is_valid_windscreen_amt(_to_float(ws_field_raw.get("value"))))
+    )
 
-    # Priority 1: Check ExtractionBenefitLine records for explicit extracted limit
-    if ext_lines:
-        for el in ext_lines:
-            el_text = f"{el.raw_label or ''} {el.normalized_label or ''}".lower()
-            if any(w in el_text for w in ("windscreen", "w/screen", "cermin")):
-                # Check candidate mappings first (contains coverage_limit)
-                for m in (el.candidate_mappings or []):
-                    if isinstance(m, dict) and m.get("coverage_limit"):
-                        v = _to_float(m.get("coverage_limit"))
+    if not ws_explicitly_removed:
+        # Priority 1: Check ExtractionBenefitLine records for explicit extracted limit
+        if ext_lines:
+            for el in ext_lines:
+                el_text = f"{el.raw_label or ''} {el.normalized_label or ''}".lower()
+                if any(w in el_text for w in ("windscreen", "w/screen", "cermin")):
+                    # Check candidate mappings first (contains coverage_limit)
+                    for m in (el.candidate_mappings or []):
+                        if isinstance(m, dict) and m.get("coverage_limit"):
+                            v = _to_float(m.get("coverage_limit"))
+                            if _is_valid_windscreen_amt(v):
+                                windscreen_amount = v
+                                break
+                    if windscreen_amount:
+                        break
+                    # Check extracted value
+                    if isinstance(el.extracted_value, dict):
+                        v = _to_float(el.extracted_value.get("coverage_limit") or el.extracted_value.get("limit") or el.extracted_value.get("sum_insured") or el.extracted_value.get("value") or el.extracted_value.get("amount"))
                         if _is_valid_windscreen_amt(v):
                             windscreen_amount = v
                             break
-                if windscreen_amount:
-                    break
-                # Check extracted value
-                if isinstance(el.extracted_value, dict):
-                    v = _to_float(el.extracted_value.get("coverage_limit") or el.extracted_value.get("limit") or el.extracted_value.get("sum_insured") or el.extracted_value.get("value") or el.extracted_value.get("amount"))
-                    if _is_valid_windscreen_amt(v):
-                        windscreen_amount = v
+                    cand_cl = getattr(el, "coverage_limit", None)
+                    if cand_cl:
+                        v = _to_float(cand_cl)
+                        if _is_valid_windscreen_amt(v):
+                            windscreen_amount = v
+                            break
+                    if windscreen_amount:
                         break
-                cand_cl = getattr(el, "coverage_limit", None)
-                if cand_cl:
-                    v = _to_float(cand_cl)
-                    if _is_valid_windscreen_amt(v):
-                        windscreen_amount = v
-                        break
-                if windscreen_amount:
-                    break
 
     # Priority 2: Check DraftBenefitSelection records
-    if windscreen_amount is None:
+    if not ws_explicitly_removed and windscreen_amount is None:
         for s in selections:
             s_text = f"{s.label_override or ''} {s.selection_key or ''}".lower()
             if "windscreen" in s_text or "cermin" in s_text:
@@ -980,7 +1026,7 @@ def _resolve_comparison_benefits(
                         break
 
     # Priority 3: Check scalar draft fields (windscreen_coverage or windscreen_sum_insured or optional_cover_amount)
-    if windscreen_amount is None:
+    if not ws_explicitly_removed and windscreen_amount is None:
         cand_ws = _to_float(f.get("windscreen_coverage") or f.get("windscreen_sum_insured") or f.get("windscreen"))
         if _is_valid_windscreen_amt(cand_ws):
             windscreen_amount = cand_ws
@@ -990,7 +1036,7 @@ def _resolve_comparison_benefits(
                 windscreen_amount = cand_opt
 
     # Priority 4: Explicit line-level currency tokens mentioning windscreen (never search entire document)
-    if windscreen_amount is None:
+    if not ws_explicitly_removed and windscreen_amount is None:
         lines_to_check: list[str] = []
         for tok in tokens:
             if "\n" in tok:
@@ -1026,7 +1072,7 @@ def _resolve_comparison_benefits(
                         break
 
     # Priority 5: Fallback to tenure target windscreen if windscreen is covered in quote or endorsements
-    if windscreen_amount is None and (
+    if not ws_explicitly_removed and windscreen_amount is None and (
         any(w in combined_text for w in ("windscreen", "w/screen", "cermin"))
         or bool(re.search(r"\b(?:endorsement|end|end\.)\s*(?:89|97)\b", combined_text))
         or bool({"89", "97"}.intersection(end_tokens))
@@ -1035,18 +1081,25 @@ def _resolve_comparison_benefits(
             windscreen_amount = float(windscreen_target)
 
     # --- LLP / LLOP ---
-    has_llp = any(
-        kw in combined_text
-        for kw in (
-            "legal liability to passenger",
-            "legal liability of passenger",
-            "liability to passenger",
-            "liability of passenger",
-            "llp",
-            "llop",
-            "lltp",
-        )
-    ) or bool(re.search(r"\b(?:endorsement|end|end\.)\s*(?:100|72)\b", combined_text)) or bool({"100", "72"}.intersection(end_tokens))
+    llp_field_raw = f.get("llp_llop")
+    llp_manual_override = isinstance(llp_field_raw, dict) and llp_field_raw.get("status") == "manual_override"
+    if "llp_llop" in disabled_domains and not llp_manual_override:
+        has_llp = False
+    elif llp_manual_override:
+        has_llp = is_special_perils_value_included(llp_field_raw.get("value"))
+    else:
+        has_llp = any(
+            kw in combined_text
+            for kw in (
+                "legal liability to passenger",
+                "legal liability of passenger",
+                "liability to passenger",
+                "liability of passenger",
+                "llp",
+                "llop",
+                "lltp",
+            )
+        ) or bool(re.search(r"\b(?:endorsement|end|end\.)\s*(?:100|72)\b", combined_text)) or bool({"100", "72"}.intersection(end_tokens))
     llp_val = "Included" if has_llp else None
 
     # --- TOWING ---

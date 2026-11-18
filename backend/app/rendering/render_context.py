@@ -5,6 +5,12 @@ from __future__ import annotations
 import json
 import re
 from decimal import Decimal, InvalidOperation
+
+from app.domain.benefit_pricing import (
+    is_selection_included_in_premium,
+    parse_money_decimal,
+    unapplied_selection_amount,
+)
 from hashlib import sha256
 from typing import Any, Iterable
 
@@ -163,6 +169,7 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
                     except Exception:
                         pass
 
+        unapplied_dec = unapplied_selection_amount(sel, offering=offering)
         extras.append({
             "selection_id": sel.id,
             "concept_id": getattr(sel, "concept_id", None),
@@ -172,6 +179,8 @@ def build_extras(selections: Iterable[Any], concepts: Iterable[Any], offerings: 
             "label": label,
             "coverage_limit": limit_str,
             "price": price,
+            "included_in_premium": is_selection_included_in_premium(sel),
+            "unapplied_amount": f"{unapplied_dec:.2f}",
             "sort_order": int(getattr(sel, "sort_order", 0) or 0),
         })
     extras.sort(key=lambda item: (item["sort_order"], item["label"].casefold(), item["selection_id"]))
@@ -197,6 +206,9 @@ def adjusted_total_text(
     """Total premium including staff-added extras; deterministic from extracted values."""
     extras_total = Decimal("0")
     for extra in extras:
+        if extra.get("included_in_premium"):
+            extras_total += parse_money_decimal(extra.get("unapplied_amount"))
+            continue
         raw_price = extra.get("price") or {}
         amount = raw_price.get("amount") if raw_price.get("amount") is not None else raw_price.get("value")
         if amount is not None:

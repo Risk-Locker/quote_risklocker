@@ -160,7 +160,7 @@ def render_design2_html(
     v_type = _get_val(draft_fields, "vehicle_type", "Car")
     is_comm = is_commercial_vehicle(v_type, car_model, draft_fields)
 
-    # Extract deduplicated insurer FOC perks with dynamic in-place Towing upgrade
+    # Extract Box 1 Free Added Coverage items strictly 1:1 (zero hardcoded fallback perks)
     free_items = extract_free_coverage_items(
         current_benefits,
         insurer_name=insurer,
@@ -169,26 +169,6 @@ def render_design2_html(
         car_model=car_model,
         fields=draft_fields,
     )
-    if not free_items and not current_benefits:
-        if is_comm:
-            free_items = [
-                {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
-            ]
-            ins_l = (insurer or "").lower()
-            if "takaful" in ins_l or "stmb" in ins_l:
-                free_items.append({"title": "No Claim Cashback", "description": "Distributable surplus profit-sharing distribution via Hibah if no claims."})
-            elif any(k in ins_l for k in ("sompo", "amassurance", "liberty")):
-                free_items.append({"title": "Panel Repair Workmanship Warranty", "description": "12-month repair quality warranty from approved commercial repairers."})
-        else:
-            free_items = [
-                {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
-                {"title": "24/7 Roadside Assistance", "description": "24/7 emergency accidental towing service to nearest approved panel workshop."},
-            ]
-            ins_l = (insurer or "").lower()
-            if "takaful" in ins_l or "stmb" in ins_l:
-                free_items.append({"title": "No Claim Cashback", "description": "Distributable surplus profit-sharing distribution via Hibah if no claims."})
-            elif any(k in ins_l for k in ("sompo", "allianz", "kurnia", "amassurance", "liberty", "etiqa")):
-                free_items.append({"title": "Panel Repair Workmanship Warranty", "description": "12-month repair quality warranty from approved repairers."})
 
     free_items_html = ""
     for fi in free_items[:6]:
@@ -200,14 +180,14 @@ def render_design2_html(
                 <svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#5ABA00"/><path d="m8.2 12.2 2.5 2.5 5-5.2" stroke="#FFF" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
             <div style="min-width: 0;">
-                <div style="font-size: 9.8px; font-weight: 800; color: #0F172A; line-height: 1.18;">{ftitle}</div>
-                {f'<div style="font-size: 8.2px; color: #1E293B; line-height: 1.25; margin-top: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">{fdesc}</div>' if fdesc else ''}
+                <div style="font-size: 10.6px; font-weight: 800; color: #0F172A; line-height: 1.18;">{ftitle}</div>
+                {f'<div style="font-size: 9.0px; color: #1E293B; line-height: 1.24; margin-top: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">{fdesc}</div>' if fdesc else ''}
             </div>
         </div>
         """
 
     if not free_items_html:
-        free_items_html = '<div style="grid-column: 1 / -1; font-size: 8px; color: #52525B;">Standard comprehensive policy benefits included under underwriter terms.</div>'
+        free_items_html = '<div style="grid-column: 1 / -1; font-size: 9.0px; color: #52525B;">Standard comprehensive policy benefits included under underwriter terms.</div>'
 
     # Unified Add-On Matrix (Selected float to top 01..k, unselected follow)
     raw_sel = render_context.get("selected_ids")
@@ -252,17 +232,17 @@ def render_design2_html(
 
         addon_grid_html += f"""
         <div class="d2-card">
-            <div style="flex: 0 0 38px; display: flex; align-items: center; justify-content: center; padding-left: 2px;">
+            <div style="flex: 0 0 36px; display: flex; align-items: center; justify-content: center; padding-left: 2px;">
                 {icon_media_html}
             </div>
             <div style="flex: 1; min-width: 0; padding: 4px 5px 3px 2px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
                 <div style="min-height: 0; overflow: hidden;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2px;">
-                        <div style="font-size: 8.2px; font-weight: 750; color: #0F172A; line-height: 1.15; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{title}</div>
-                        <div style="font-size: 6.8px; font-weight: 700; color: #334155; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
+                        <div style="font-size: 9.2px; font-weight: 800; color: #0F172A; line-height: 1.15; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{title}</div>
+                        <div style="font-size: 7.6px; font-weight: 700; color: #334155; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
                     </div>
-                    {f'<div style="font-size: 7.6px; font-weight: 800; color: #15803D; margin-top: 1px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{val}</div>' if val else ''}
-                    {f'<div style="font-size: 7.0px; color: #0F172A; line-height: 1.18; margin-top: 1px; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: {desc_clamp}; -webkit-box-orient: vertical;">{desc}</div>' if desc else ''}
+                    {f'<div style="font-size: 8.4px; font-weight: 800; color: #15803D; margin-top: 1px; line-height: 1.12; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{val}</div>' if val else ''}
+                    {f'<div style="font-size: 7.9px; color: #0F172A; line-height: 1.18; margin-top: 1px; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: {desc_clamp}; -webkit-box-orient: vertical;">{desc}</div>' if desc else ''}
                 </div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: auto; padding-top: 1px; flex-shrink: 0;">
                     {indicator_html}
@@ -363,7 +343,7 @@ body {{
 .d2-main {{
     flex: 1 1 auto;
     min-height: 0;
-    padding: 30px 44px 12px 44px;
+    padding: 22px 42px 10px 42px;
     display: flex;
     flex-direction: column;
 }}
@@ -372,7 +352,7 @@ body {{
     height: 108px;
     background: #E52320;
     color: #FFFFFF;
-    padding: 0 44px;
+    padding: 0 42px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -380,12 +360,12 @@ body {{
 .spec-row {{
     display: flex;
     align-items: flex-end;
-    font-size: 9px;
-    padding: 6px 0 3.5px 0;
-    min-height: 26.5px;
+    font-size: 9.6px;
+    padding: 4.5px 0 3px 0;
+    min-height: 24.5px;
 }}
 .spec-label {{
-    width: 168px;
+    width: 174px;
     white-space: nowrap;
     font-weight: 500;
     color: #1E293B;
@@ -414,7 +394,7 @@ body {{
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.045);
     display: flex;
     align-items: stretch;
-    height: 66px;
+    height: 71px;
     overflow: hidden;
 }}
 </style>
@@ -435,7 +415,7 @@ body {{
                         <span style="color: #94A3B8; font-weight: 300; margin: 0 2px;">|</span>
                         <span style="color: #E52320; font-weight: 800;">Quotation</span>
                     </div>
-                    <div style="display: grid; grid-template-columns: auto auto; justify-content: end; column-gap: 6px; row-gap: 1px; margin-top: 3px; font-size: 8.6px; line-height: 1.3;">
+                    <div style="display: grid; grid-template-columns: auto auto; justify-content: end; column-gap: 6px; row-gap: 1px; margin-top: 3px; font-size: 9.2px; line-height: 1.3;">
                         <span style="font-weight: 600; color: #334155;">Quotation Ref :</span>
                         <span style="font-weight: 700; color: #010000;">{escape(quote_ref)}</span>
                         <span style="font-weight: 600; color: #334155;">Vehicle No :</span>
@@ -449,15 +429,15 @@ body {{
         </div>
 
         <!-- Structural Hairline 1: Header Bottom Divider -->
-        <div style="height: 1px; background: #64748B; margin: 13px 0 16px 0; flex-shrink: 0;"></div>
+        <div style="height: 1px; background: #64748B; margin: 9px 0 11px 0; flex-shrink: 0;"></div>
 
         <!-- Upper Section: 2 Columns separated by Vertical Center Hairline -->
         <div style="display: flex; align-items: stretch;">
             <!-- Left Column: Specs + Premium Summary -->
             <div style="flex: 1.02; padding-right: 18px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
-                    <div style="font-size: 14px; font-weight: 800; color: #E52320; margin-bottom: 6px; line-height: 1.2;">
-                        Vehicle Information <span style="font-size: 13px; font-weight: 700; color: #544F4E;">车辆资料</span>
+                    <div style="font-size: 14.5px; font-weight: 800; color: #E52320; margin-bottom: 5px; line-height: 1.2;">
+                        Vehicle Information <span style="font-size: 13.5px; font-weight: 700; color: #544F4E;">车辆资料</span>
                     </div>
                     <div class="spec-row"><div class="spec-label">Customer / 客户姓名</div><div class="spec-colon">:</div><div class="spec-value">{escape(cust_name)}</div></div>
                     <div class="spec-row"><div class="spec-label">Period Of Insurance / 保障期限</div><div class="spec-colon">:</div><div class="spec-value">{escape(period)}</div></div>
@@ -469,15 +449,15 @@ body {{
                     <div class="spec-row"><div class="spec-label">Vehicle Sum Insured / 车辆保额</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(sum_insured))}</div></div>
                 </div>
 
-                <div style="margin-top: 18px;">
-                    <div style="font-size: 14px; font-weight: 800; color: #E52320; margin-bottom: 5px; line-height: 1.2;">
-                        Premium Summary <span style="font-size: 13px; font-weight: 700; color: #544F4E;">保费</span>
+                <div style="margin-top: 12px;">
+                    <div style="font-size: 14.5px; font-weight: 800; color: #E52320; margin-bottom: 4px; line-height: 1.2;">
+                        Premium Summary <span style="font-size: 13.5px; font-weight: 700; color: #544F4E;">保费</span>
                     </div>
                     <div class="spec-row"><div class="spec-label">Insurance Premium / 保费</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(premium))}</div></div>
                     <div class="spec-row"><div class="spec-label">Roadtax and Runner Fee / 路税及服务费</div><div class="spec-colon">:</div><div class="spec-value">{escape(rt_combined)}</div></div>
-                    <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 22px;">
-                        <div style="font-size: 13px; font-weight: 800; color: #E52320; white-space: nowrap;">TOTAL PAYABLE 应付总额 :</div>
-                        <div style="font-size: 21px; font-weight: 900; color: #E52320; letter-spacing: -0.4px; line-height: 1; white-space: nowrap;">{escape(_format_money(total_payable))}</div>
+                    <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 14px;">
+                        <div style="font-size: 13.5px; font-weight: 800; color: #E52320; white-space: nowrap;">TOTAL PAYABLE 应付总额 :</div>
+                        <div style="font-size: 22px; font-weight: 900; color: #E52320; letter-spacing: -0.4px; line-height: 1; white-space: nowrap;">{escape(_format_money(total_payable))}</div>
                     </div>
                 </div>
             </div>
@@ -489,23 +469,23 @@ body {{
             <div style="flex: 0.98; padding-left: 18px; display: flex; flex-direction: column;">
                 <div style="flex: 1; background: #F8F9FC; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
-                        <div style="background: #E52320; color: #FFFFFF; height: 40px; padding: 0 15px; font-size: 10.5px; font-weight: 800; display: flex; align-items: center; gap: 9px;">
+                        <div style="background: #E52320; color: #FFFFFF; height: 40px; padding: 0 15px; font-size: 11.5px; font-weight: 800; display: flex; align-items: center; gap: 9px;">
                             {gift_svg}
                             <span>{escape(insurer.split(' ')[0])} Free Added Coverage</span>
                         </div>
-                        <div style="padding: 16px 15px 12px 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 11px; align-content: start;">
+                        <div style="padding: 14px 14px 10px 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 10px; align-content: start;">
                             {free_items_html}
                         </div>
                     </div>
 
-                    <div style="padding: 10px 14px 14px 14px; display: flex; justify-content: space-between; align-items: flex-end; gap: 6px;">
+                    <div style="padding: 8px 14px 12px 14px; display: flex; justify-content: space-between; align-items: flex-end; gap: 6px;">
                         <div style="min-width: 0; flex: 1;">
-                            <div style="font-size: 10.8px; font-weight: 800; color: #E52320; margin-bottom: 4px; line-height: 1.2; white-space: nowrap;">
-                                Company Bank Details <span style="font-size: 9.8px; font-weight: 700; color: #544F4E;">公司银行戶口</span>
+                            <div style="font-size: 11.4px; font-weight: 800; color: #E52320; margin-bottom: 4px; line-height: 1.2; white-space: nowrap;">
+                                Company Bank Details <span style="font-size: 10.2px; font-weight: 700; color: #544F4E;">公司银行戶口</span>
                             </div>
-                            <div style="font-size: 11.4px; font-weight: 800; color: #0F172A; line-height: 1.28;">{agency_acc_name}</div>
-                            <div style="font-size: 11.2px; font-weight: 400; color: #1E293B; line-height: 1.28;">{bank_name}</div>
-                            <div style="font-size: 11.4px; font-weight: 400; color: #1E293B; letter-spacing: 0.2px; line-height: 1.28;">{bank_acc}</div>
+                            <div style="font-size: 11.8px; font-weight: 800; color: #0F172A; line-height: 1.28;">{agency_acc_name}</div>
+                            <div style="font-size: 11.5px; font-weight: 400; color: #1E293B; line-height: 1.28;">{bank_name}</div>
+                            <div style="font-size: 11.8px; font-weight: 400; color: #1E293B; letter-spacing: 0.2px; line-height: 1.28;">{bank_acc}</div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
                             {duitnow_badge_html}
@@ -517,11 +497,11 @@ body {{
         </div>
 
         <!-- Structural Hairline 3: Mid-Page Horizontal Divider -->
-        <div style="height: 1px; background: #64748B; margin: 18px 0 12px 0; flex-shrink: 0;"></div>
+        <div style="height: 1px; background: #64748B; margin: 12px 0 9px 0; flex-shrink: 0;"></div>
 
         <!-- Lower Section: Add-On Upgrades ++ -->
         <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;">
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 11px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
                 <div style="font-size: 24.5px; font-weight: 900; letter-spacing: -0.4px; line-height: 1;">
                     <span style="color: #E52320;">Add-On</span> <span style="color: #1D1D1B;">Upgrades</span> <span style="color: #E52320;">++</span>
                 </div>
@@ -530,7 +510,7 @@ body {{
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px 7px;">
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6.5px 7px;">
                 {addon_grid_html}
             </div>
             {overflow_banner}

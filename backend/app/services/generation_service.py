@@ -445,7 +445,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     extras = build_extras(selections, concepts, offerings)
     fields = deepcopy(draft.fields or {})
     disp_opts = draft.display_options or {}
-    round_tot = bool(disp_opts.get("round_total", True))
+    round_tot = bool(disp_opts.get("round_total", False))
     inc_rt = disp_opts.get("include_road_tax") if "include_road_tax" in disp_opts else None
     inc_rf = disp_opts.get("include_runner_fee") if "include_runner_fee" in disp_opts else None
 

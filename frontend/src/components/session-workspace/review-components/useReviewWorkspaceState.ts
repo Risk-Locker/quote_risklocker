@@ -88,7 +88,7 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
 
   // Rounding and Schedule Toggles
   const [roundTotal, setRoundTotal] = useState<boolean>(() =>
-    (workspace?.display_options as Record<string, unknown> | undefined)?.round_total !== false
+      (workspace?.display_options as Record<string, unknown> | undefined)?.round_total === true
   );
   const [showDesign2Schedule, setShowDesign2Schedule] = useState<boolean>(() =>
     Boolean((workspace?.display_options as Record<string, unknown> | undefined)?.include_benefit_schedule)
@@ -114,7 +114,7 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
       if (lastSyncedRevisionRef.current === null || workspace.revision !== lastSyncedRevisionRef.current) {
         lastSyncedRevisionRef.current = workspace.revision;
         if ("round_total" in workspace.display_options) {
-          setRoundTotal((workspace.display_options as Record<string, unknown>).round_total !== false);
+          setRoundTotal((workspace.display_options as Record<string, unknown>).round_total === true);
         }
         if ("include_benefit_schedule" in workspace.display_options) {
           setShowDesign2Schedule(Boolean((workspace.display_options as Record<string, unknown>).include_benefit_schedule));
@@ -466,7 +466,7 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
           stored = altCov;
         } else if (!stored) {
           stored = (workspace.fields["market_value"] as WorkspaceField | undefined)?.value ||
-                   (workspace.fields["agreed_value"] as WorkspaceField | undefined)?.value;
+            (workspace.fields["agreed_value"] as WorkspaceField | undefined)?.value;
         }
       }
       if (field.name === "quotation_reference") {

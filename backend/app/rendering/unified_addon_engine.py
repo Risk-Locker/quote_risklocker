@@ -857,9 +857,13 @@ def extract_free_coverage_items(
     car_model: str = "",
     fields: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
-    """Extracts insurer FOC perks for the top-right 'Free Added Coverage' card.
-    For Commercial Vehicles (lorries/trucks), towing and passenger car perks are strictly excluded.
-    For Private Cars, dynamic in-place Towing upgrade is applied.
+    """Extracts Top-Right 'Free Added Coverage' cards with strict 1:1 Box 1 parity.
+
+    Only complimentary benefits actually present in Box 1 (`active_benefits`) are returned,
+    in exact Box 1 order. Never fabricates phantom RM 200 towing or hardcoded fallback perks,
+    and never drops Box 1 items whose concept happens to overlap the bottom 24-card catalog.
+    When Box 1 includes a base Towing card on Private Cars without a manual override, eligible
+    selected riders (e.g. OTO 360 / Motor PA Plus) upgrade that Box 1 towing card in-place.
     """
     seen_titles: set[str] = set()
     items: list[dict[str, str]] = []
@@ -889,7 +893,6 @@ def extract_free_coverage_items(
         clean_val = (limit_val or "").strip()
         if not clean_val:
             return clean_title
-        # Avoid double parentheses if title already embeds this limit value
         val_compact = re.sub(r"\.00\b", "", clean_val).lower()
         title_low = clean_title.lower()
         if clean_val.lower() in title_low or (val_compact and val_compact in title_low):
@@ -898,94 +901,52 @@ def extract_free_coverage_items(
             return clean_title
         return f"{clean_title} ({clean_val})"
 
-    # 1. Towing Resolution (Comprehensive Private Cars ONLY — DB Box 1 / Manual Edit first, zero hardcoded RM 200 stone)
-    if not is_comm and not is_non_comp:
-        resolved_towing_card = next((raw for raw in (active_benefits or []) if _is_base_towing_card(raw)), None)
-        has_manual_override = bool(
-            resolved_towing_card
-            and (
-                resolved_towing_card.get("has_manual_override")
-                or resolved_towing_card.get("is_manual")
-                or str(resolved_towing_card.get("source") or "").lower() == "manual"
-                or resolved_towing_card.get("label_override")
-            )
-        )
-        towing_upgrade = None if has_manual_override else detect_towing_upgrade(active_benefits, insurer_name)
-
-        if resolved_towing_card and has_manual_override:
-            c_title = str(resolved_towing_card.get("label") or resolved_towing_card.get("title") or "Emergency Towing Assistance").strip()
-            c_val = str(resolved_towing_card.get("value") or resolved_towing_card.get("display_value") or resolved_towing_card.get("coverage_limit") or "").strip()
-            c_desc = str(resolved_towing_card.get("description") or resolved_towing_card.get("short_description") or "").strip()
-            final_title = _format_towing_title(c_title, c_val)
-            items.append({"title": final_title, "description": c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer."})
-            seen_titles.add(_normalize_benefit_code(final_title))
-            seen_titles.add("emergency_towing_assistance")
-            seen_titles.add("unlimited_towing_assistance")
-        elif resolved_towing_card:
-            c_title = str(resolved_towing_card.get("label") or resolved_towing_card.get("title") or "Emergency Towing Assistance").strip()
-            c_val = str(resolved_towing_card.get("value") or resolved_towing_card.get("display_value") or resolved_towing_card.get("coverage_limit") or "").strip()
-            c_desc = str(resolved_towing_card.get("description") or resolved_towing_card.get("short_description") or "").strip()
-            # Let condition-resolved DB values stand when already specific; only upgrade via add-on detector when base is un-upgraded
-            card_already_upgraded = "unlimited" in c_val.lower() or "unlimited" in c_title.lower() or "extended" in c_title.lower()
-            if towing_upgrade and not card_already_upgraded:
-                up_title = towing_upgrade["title"]
-                up_desc = towing_upgrade["description"]
-                items.append({"title": up_title, "description": up_desc})
-                seen_titles.add(_normalize_benefit_code(up_title))
-            else:
-                if not c_val and insurer_name:
-                    from app.domain.motor.towing_matrix import resolve_towing_entitlement
-
-                    prod_raw = fields.get("product_name") if isinstance(fields, dict) else None
-                    prod_val = str(prod_raw.get("value") if isinstance(prod_raw, dict) else prod_raw or "").strip()
-                    c_val = resolve_towing_entitlement(insurer_name, product_name=prod_val).formatted
-                final_title = _format_towing_title(c_title, c_val)
-                items.append({"title": final_title, "description": c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer."})
-                seen_titles.add(_normalize_benefit_code(final_title))
-            seen_titles.add("emergency_towing_assistance")
-            seen_titles.add("unlimited_towing_assistance")
-        elif towing_upgrade:
-            items.append({
-                "title": towing_upgrade["title"],
-                "description": towing_upgrade["description"],
-            })
-            seen_titles.add(_normalize_benefit_code(towing_upgrade["title"]))
-            seen_titles.add("emergency_towing_assistance")
-            seen_titles.add("unlimited_towing_assistance")
-        elif insurer_name:
-            from app.domain.motor.towing_matrix import resolve_towing_entitlement
-
-            prod_raw = fields.get("product_name") if isinstance(fields, dict) else None
-            prod_val = str(prod_raw.get("value") if isinstance(prod_raw, dict) else prod_raw or "").strip()
-            ent = resolve_towing_entitlement(insurer_name, product_name=prod_val)
-            fallback_title = _format_towing_title(
-                "Unlimited Towing" if ent.limit_type == "Unlimited" else "Emergency Towing Assistance",
-                ent.formatted,
-            )
-            items.append({
-                "title": fallback_title,
-                "description": "24/7 accidental towing service to nearest panel workshop or approved repairer.",
-            })
-            seen_titles.add(_normalize_benefit_code(fallback_title))
-            seen_titles.add("emergency_towing_assistance")
-            seen_titles.add("unlimited_towing_assistance")
-
     for raw in active_benefits or []:
         if raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
             continue
+
+        if _is_base_towing_card(raw):
+            c_title = str(raw.get("label") or raw.get("title") or "Emergency Towing Assistance").strip()
+            c_val = str(raw.get("value") or raw.get("display_value") or raw.get("coverage_limit") or "").strip()
+            c_desc = str(raw.get("description") or raw.get("short_description") or "").strip()
+            has_manual_override = bool(
+                raw.get("has_manual_override")
+                or raw.get("is_manual")
+                or str(raw.get("source") or "").lower() == "manual"
+                or raw.get("label_override")
+            )
+            towing_upgrade = None
+            if not is_comm and not is_non_comp and not has_manual_override:
+                card_already_upgraded = (
+                    "unlimited" in c_val.lower()
+                    or "unlimited" in c_title.lower()
+                    or "extended" in c_title.lower()
+                )
+                if not card_already_upgraded:
+                    towing_upgrade = detect_towing_upgrade(active_benefits, insurer_name)
+
+            if towing_upgrade:
+                out_title = towing_upgrade["title"]
+                out_desc = towing_upgrade["description"]
+            else:
+                out_title = _format_towing_title(c_title, c_val)
+                out_desc = c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer."
+
+            norm_out = _normalize_benefit_code(out_title)
+            if norm_out not in seen_titles and "emergency_towing_assistance" not in seen_titles:
+                seen_titles.add(norm_out)
+                seen_titles.add("emergency_towing_assistance")
+                seen_titles.add("unlimited_towing_assistance")
+                items.append({"title": out_title, "description": out_desc})
+            if len(items) >= limit:
+                break
+            continue
+
         title = str(raw.get("title") or raw.get("label") or "").strip()
         if not title:
             continue
         norm_title = _normalize_benefit_code(title)
-        matched_cat = _match_catalog_item(raw)
-        if matched_cat is not None:
-            is_special_perils = any(k in norm_title for k in ("special_perils", "convulsion", "flood")) or raw.get("concept_key") == "special-perils"
-            if not is_special_perils:
-                continue
-        # Suppress any towing for commercial lorries / non-comprehensive quotes, or duplicate base towing for cars
-        if (is_comm or is_non_comp) and any(k in norm_title for k in ("towing", "roadside", "assist")):
-            continue
-        if "towing" in norm_title or norm_title in seen_titles:
+        if norm_title in seen_titles:
             continue
         seen_titles.add(norm_title)
         desc = str(raw.get("description") or raw.get("short_description") or "").strip()
@@ -998,50 +959,6 @@ def extract_free_coverage_items(
         items.append({"title": title, "description": desc})
         if len(items) >= limit:
             break
-
-    # If fewer items, supplement with authentic insurer perks
-    if is_comm:
-        fallbacks = [
-            {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
-        ]
-        ins_lower = (insurer_name or "").lower()
-        if "takaful" in ins_lower or "stmb" in ins_lower:
-            fallbacks.append({
-                "title": "No Claim Cashback",
-                "description": "Distributable surplus profit-sharing distribution via Hibah if no claims.",
-            })
-        elif any(k in ins_lower for k in ("sompo", "amassurance", "liberty")):
-            fallbacks.append({
-                "title": "Panel Repair Workmanship Warranty",
-                "description": "12-month repair quality warranty from approved commercial repairers.",
-            })
-    else:
-        fallbacks = [
-            {"title": "Legal Defense Costs", "description": "Reimburses court legal representation and defense fees up to RM2,000."},
-        ]
-        ins_lower = (insurer_name or "").lower()
-        if "takaful" in ins_lower or "stmb" in ins_lower:
-            fallbacks.append({
-                "title": "No Claim Cashback",
-                "description": "Distributable surplus profit-sharing distribution via Hibah if no claims.",
-            })
-        elif any(k in ins_lower for k in ("sompo", "allianz", "kurnia", "amassurance", "liberty", "etiqa")):
-            fallbacks.append({
-                "title": "Panel Repair Workmanship Warranty",
-                "description": "12-month repair quality warranty from approved repairers.",
-            })
-
-    for fb in fallbacks:
-        if len(items) >= limit:
-            break
-        fb_norm = _normalize_benefit_code(fb["title"])
-        if fb_norm not in seen_titles:
-            if "warranty" in fb_norm and any("warranty" in s for s in seen_titles):
-                continue
-            if "legal" in fb_norm and any("legal" in s for s in seen_titles):
-                continue
-            seen_titles.add(fb_norm)
-            items.append(fb)
 
     return items[:limit]
 

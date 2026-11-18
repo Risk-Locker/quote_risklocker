@@ -41,8 +41,9 @@ interface UseUploadQueuePollerOptions<T extends PollableBulkItem> {
   existingTenureId?: string | null;
 }
 
-const MAX_BATCH_IDS = 200;
+const MAX_BATCH_IDS = 50;
 const POLL_INTERVAL_MS = 2500;
+const MAX_CONCURRENT_HYDRATES = 4;
 
 export function useUploadQueuePoller<T extends PollableBulkItem>({
   bulkFiles,
@@ -105,7 +106,7 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
                 existingBatch = parsed;
               }
             }
-          } catch {}
+          } catch { }
 
           const count = (existingBatch?.count || 0) + 1;
           const vehicles = Array.from(new Set([...(existingBatch?.vehicles || []), currentPlate]));
@@ -120,24 +121,24 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
           try {
             localStorage.setItem("rl_latest_policy_issue", JSON.stringify(eventData));
             window.dispatchEvent(new CustomEvent("rl_policy_issued", { detail: eventData }));
-          } catch {}
+          } catch { }
         }
 
         setBulkFiles((prev) =>
           prev.map((curr) =>
             curr.id === item.id
               ? {
-                  ...curr,
-                  status: "completed",
-                  progress: 100,
-                  plate: sRes?.session?.vehicle_plate || curr.plate,
-                  tenureId: resolvedTenureId || curr.tenureId,
-                  insurer: sRes?.session?.detected_company || curr.insurer,
-                  premium: sRes?.session?.total_premium || curr.premium,
-                  ref: sRes?.session?.quotation_ref || curr.ref,
-                  phase: undefined,
-                  error: undefined,
-                }
+                ...curr,
+                status: "completed",
+                progress: 100,
+                plate: sRes?.session?.vehicle_plate || curr.plate,
+                tenureId: resolvedTenureId || curr.tenureId,
+                insurer: sRes?.session?.detected_company || curr.insurer,
+                premium: sRes?.session?.total_premium || curr.premium,
+                ref: sRes?.session?.quotation_ref || curr.ref,
+                phase: undefined,
+                error: undefined,
+              }
               : curr
           )
         );
@@ -161,7 +162,7 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
         (item) => item.status === "completed" && Boolean(item.sessionId) && !item.tenureId
       );
       if (unhydratedDone.length > 0) {
-        void Promise.all(unhydratedDone.map((it) => hydrateCompletedSession(it)));
+        void Promise.all(unhydratedDone.slice(0, MAX_CONCURRENT_HYDRATES).map((it) => hydrateCompletedSession(it)));
       }
 
       const activeItems = filesRef.current.filter(

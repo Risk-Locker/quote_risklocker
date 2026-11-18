@@ -149,6 +149,34 @@ def _record_values(full: dict) -> dict:
     }
 
 
+def _release_db_before_blocking_io(db) -> None:
+    """Release pooled DB connection before slow external HTTPS/Gemini extraction I/O.
+
+    Leaves in-memory SQLite (:memory:) connections intact so transient test
+    databases are never torn down mid-job.
+    """
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    bind = None
+    try:
+        bind = db.get_bind()
+    except Exception:
+        bind = getattr(db, "bind", None)
+    url = getattr(bind, "url", None)
+    is_memory_sqlite = (
+        url is not None
+        and getattr(url, "drivername", "").startswith("sqlite")
+        and (getattr(url, "database", None) in (None, "", ":memory:"))
+    )
+    if not is_memory_sqlite:
+        close_fn = getattr(db, "close", None)
+        if callable(close_fn):
+            close_fn()
+
+
 def process_extraction_job(
     db,
     settings,
@@ -260,22 +288,38 @@ def process_extraction_job(
         logger.info("Job %s was cancelled during pacing; aborting.", job.id)
         return
 
+    job_id = str(job.id)
+    uploaded_id = str(uploaded.id)
+    session_id = str(session.id)
+    draft_id = str(draft.id)
+    batch_id = str(batch.id)
+    source_filename = str(uploaded.original_filename or "")
+
     context = context_loader(db)
     heartbeat_job(db, job, worker_id=worker_id, progress=15, phase="extracting", lease_seconds=300)
-    logger.info("Job %s: executing extraction pipeline (enhanced_reading=%s)", job.id, enhanced_reading)
+    logger.info("Job %s: executing extraction pipeline (enhanced_reading=%s)", job_id, enhanced_reading)
+    _release_db_before_blocking_io(db)
     with qc_temp_directory("extract-") as directory:
         source_path = (directory / "source.pdf").resolve()
         source_path.write_bytes(source_bytes)
         result = extractor(
             source_path,
             enhanced_reading=enhanced_reading,
-            source_filename=uploaded.original_filename,
+            source_filename=source_filename,
             fail_closed=True,
             **context,
         )
 
-    # If job was cancelled while extractor was running, discard results immediately
-    db.refresh(job)
+    # Re-acquire fresh ORM instances after releasing the pooled DB connection
+    job = db.get(Job, job_id)
+    uploaded = db.get(UploadedFile, uploaded_id)
+    session = db.get(Session, session_id)
+    draft = db.get(QuotationDraft, draft_id)
+    batch = db.get(Batch, batch_id)
+    if not job:
+        raise JobProcessingError("job_missing", "The extraction job is no longer available.")
+    if not uploaded or not session or not draft or not batch:
+        raise JobProcessingError("workspace_missing", "The quotation workspace is incomplete.")
     if job.cancelled_at is not None or job.state == "cancelled":
         logger.info("Job %s was cancelled during extraction; discarding results.", job.id)
         return
@@ -910,69 +954,81 @@ def run_one_job(
     job = claim_next_job(db, worker_id=worker_id, lease_seconds=300)
     if job is None:
         return None
+    # Capture plain strings before slow extraction may release/reacquire the DB session.
+    job_id = str(job.id)
+    job_type = str(job.job_type)
+    returned_job: Job = job
     logger.info(
         "Worker [%s] claimed job %s (type=%s, attempt=%s/%s)",
         worker_id,
-        job.id,
-        job.job_type,
+        job_id,
+        job_type,
         job.attempt,
         job.max_attempts,
     )
     try:
-        if job.job_type == "extract_pdf":
+        if job_type == "extract_pdf":
             process_extraction_job(db, settings, job, worker_id=worker_id, storage=storage, pacer=pacer)
-        elif job.job_type == "render_pdf":
+        elif job_type == "render_pdf":
             process_render_job(db, settings, job, worker_id=worker_id, storage=storage)
         else:
             raise JobProcessingError("unsupported_job", "This background task is not supported.")
-        logger.info("Job %s (%s) finished successfully", job.id, job.job_type)
+        logger.info("Job %s (%s) finished successfully", job_id, job_type)
     except JobProcessingError as exc:
         logger.error(
             "Job %s (%s) failed with JobProcessingError: [%s] %s",
-            job.id,
-            job.job_type,
+            job_id,
+            job_type,
             exc.code,
             exc.safe_message,
         )
         db.rollback()
-        fresh_job = db.get(Job, job.id) or job
-        fail_job(db, fresh_job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
+        fresh_job = db.get(Job, job_id)
+        if fresh_job is not None:
+            fail_job(db, fresh_job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
+            returned_job = fresh_job
     except AIExtractionUnavailableException as exc:
         logger.error(
             "Job %s (%s) failed with AIExtractionUnavailableException: %s",
-            job.id,
-            job.job_type,
+            job_id,
+            job_type,
             exc.message,
         )
         db.rollback()
-        fresh_job = db.get(Job, job.id) or job
-        fail_job(
-            db,
-            fresh_job,
-            worker_id=worker_id,
-            code="ai_quota_exhausted",
-            message=exc.message,
-        )
+        fresh_job = db.get(Job, job_id)
+        if fresh_job is not None:
+            fail_job(
+                db,
+                fresh_job,
+                worker_id=worker_id,
+                code="ai_quota_exhausted",
+                message=exc.message,
+            )
+            returned_job = fresh_job
     except RenderJobProcessingError as exc:
         logger.error(
             "Job %s (%s) failed with RenderJobProcessingError: [%s] %s",
-            job.id,
-            job.job_type,
+            job_id,
+            job_type,
             exc.code,
             exc.safe_message,
         )
         db.rollback()
-        fresh_job = db.get(Job, job.id) or job
-        fail_job(db, fresh_job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
+        fresh_job = db.get(Job, job_id)
+        if fresh_job is not None:
+            fail_job(db, fresh_job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
+            returned_job = fresh_job
     except Exception:
-        logger.exception("Job %s (%s) failed with unhandled exception", job.id, job.job_type)
+        logger.exception("Job %s (%s) failed with unhandled exception", job_id, job_type)
         db.rollback()
-        fresh_job = db.get(Job, job.id) or job
-        fail_job(
-            db,
-            fresh_job,
-            worker_id=worker_id,
-            code="processing_failed",
-            message="The background task failed safely and will be retried.",
-        )
-    return job
+        fresh_job = db.get(Job, job_id)
+        if fresh_job is not None:
+            fail_job(
+                db,
+                fresh_job,
+                worker_id=worker_id,
+                code="processing_failed",
+                message="The background task failed safely and will be retried.",
+            )
+            returned_job = fresh_job
+    return returned_job

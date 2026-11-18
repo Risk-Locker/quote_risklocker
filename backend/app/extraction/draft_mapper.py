@@ -607,10 +607,15 @@ def build_draft(
                 "message": "",
             }
 
-        # If gross_premium and service_tax are extracted, calculate total net insurance premium
+        # If gross_premium and service_tax (plus optional stamp_duty) are extracted, calculate total net insurance premium
+        sd_val = fields.get("stamp_duty", {}).get("value")
+        calc_prem: Decimal | None = None
         if gp_val and st_val and "premium" in fields:
             try:
-                calc_prem = Decimal(str(gp_val).replace(",", "")) + Decimal(str(st_val).replace(",", ""))
+                gp_num = Decimal(str(gp_val).replace(",", ""))
+                st_num = Decimal(str(st_val).replace(",", ""))
+                sd_num = Decimal(str(sd_val).replace(",", "")) if sd_val else Decimal("0.00")
+                calc_prem = gp_num + st_num + sd_num
                 if not p_val or (bp_val and str(p_val) == str(bp_val)):
                     fields["premium"]["value"] = f"{calc_prem:.2f}"
                     fields["premium"]["status"] = "ready"
@@ -619,17 +624,33 @@ def build_draft(
                 pass
 
         # If total_amount in PDF was the insurer total contribution / total payable
+        # (STMB TOTAL CONTRIBUTION, AmAssurance/Lonpac Total Payable, Etiqa Total Contribution Payable,
+        # Tune Total Payable Perlu Dibayar, Sompo Total Amount Payable)
         if t_val and "premium" in fields:
             try:
                 tot_num = Decimal(str(t_val).replace(",", ""))
-                if not p_val or str(p_val) in {"0", "0.00"} or (bp_val and str(p_val) == str(bp_val) and str(t_val) != str(bp_val)):
-                    fields["premium"]["value"] = f"{tot_num:.2f}"
-                    fields["premium"]["status"] = "ready"
-                    p_val = f"{tot_num:.2f}"
-                elif p_val:
-                    p_dec = Decimal(str(p_val).replace(",", ""))
-                    if p_dec == tot_num:
+                r_raw = fields.get("roadtax", {}).get("value") or "0"
+                s_raw = fields.get("service_fee", {}).get("value") or "0"
+                r_dec = Decimal(str(r_raw).replace(",", "")) if str(r_raw).strip() else Decimal("0.00")
+                s_dec = Decimal(str(s_raw).replace(",", "")) if str(s_raw).strip() else Decimal("0.00")
+                p_dec = Decimal(str(p_val).replace(",", "")) if p_val else Decimal("0.00")
+                bp_dec = Decimal(str(bp_val).replace(",", "")) if bp_val else None
+                gp_dec = Decimal(str(gp_val).replace(",", "")) if gp_val else None
+
+                # Do not fold Risklocker roadtax/runner fee back into fields["premium"]
+                includes_rf_rt = (r_dec + s_dec) > Decimal("0.00") and abs(tot_num - (p_dec + r_dec + s_dec)) <= Decimal("0.10")
+                if not includes_rf_rt:
+                    should_promote_total = (
+                        not p_val
+                        or p_dec <= Decimal("0.00")
+                        or (bp_dec is not None and p_dec == bp_dec and tot_num != bp_dec)
+                        or (gp_dec is not None and p_dec == gp_dec and tot_num > gp_dec)
+                        or (calc_prem is not None and abs(tot_num - calc_prem) <= Decimal("0.10"))
+                        or (tot_num == p_dec)
+                    )
+                    if should_promote_total:
                         fields["premium"]["value"] = f"{tot_num:.2f}"
+                        fields["premium"]["status"] = "ready"
                         p_val = f"{tot_num:.2f}"
 
                 # Always preserve extracted total_amount as the Final Price / Total Payable from PDF

@@ -377,7 +377,7 @@ def _add_2d_spatial_candidates(
     targets = [
         ("basic_premium_vehicle", [["basic", "premium"], ["premium", "asas"], ["basic", "contribution"], ["caruman", "asas"], ["sumbangan", "asas"]], 50.0),
         ("gross_premium", [["gross", "premium"], ["premium", "kasar"], ["gross", "contribution"]], 50.0),
-        ("total_amount", [["total", "payable"], ["total", "amount"], ["amount", "payable"], ["total", "/", "jumlah"], ["total", "contribution", "payable"]], 50.0),
+        ("total_amount", [["total", "payable"], ["total", "amount"], ["amount", "payable"], ["total", "/", "jumlah"], ["total", "contribution", "payable"], ["total", "contribution"], ["total", "payable", "perlu", "dibayar"]], 50.0),
         ("optional_cover_amount", [["extra", "benefit"], ["manfaat", "tambahan"], ["total", "optional"]], 0.0),
         ("service_tax", [["service", "tax"], ["cukai", "perkhidmatan"]], 0.0),
         ("stamp_duty", [["stamp", "duty"], ["duti", "setem"], ["setem", "hasil"]], 0.0),

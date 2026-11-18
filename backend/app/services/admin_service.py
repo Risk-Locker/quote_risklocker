@@ -671,13 +671,13 @@ def set_runner_fee_default(db: Session, user, amount: float) -> float:
 def get_bulk_upload_limit(db: Session | Any) -> int:
     setting = db.get(AppSetting, "bulk_upload_limit")
     if not setting or not isinstance(setting.value, dict):
-        return 10
-    val = setting.value.get("max_files", 10)
+        return 100
+    val = setting.value.get("max_files", 100)
     try:
         val_int = int(val)
         return val_int if val_int >= 3 else 3
     except (ValueError, TypeError):
-        return 10
+        return 100
 
 
 def set_bulk_upload_limit(db: Session | Any, user: Any, limit: int) -> int:

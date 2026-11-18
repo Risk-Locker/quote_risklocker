@@ -422,7 +422,7 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
     rt_label = str(labels.get("roadtax") or "Roadtax and Runner Fee / 路税及服务费")
 
     disp_opts = (render_context or {}).get("display_options") or ((render_context or {}).get("draft") or {}).get("display_options") or {}
-    round_tot = bool(disp_opts.get("round_total", True))
+    round_tot = bool(disp_opts.get("round_total", False))
 
     total = (render_context or {}).get("total_premium_adjusted") or _value(fields, "total_premium_adjusted")
     if not total:
@@ -460,6 +460,14 @@ def _premium_info_block(element: dict[str, Any], fields: dict, render_context: d
         else:
             extras_sum = Decimal("0")
             for extra in extras:
+                if extra.get("included_in_premium"):
+                    unapp = extra.get("unapplied_amount")
+                    if unapp is not None:
+                        try:
+                            extras_sum += Decimal(re.sub(r"[^\d.]", "", str(unapp)))
+                        except Exception:
+                            pass
+                    continue
                 raw_price = extra.get("price") or {}
                 amt = raw_price.get("amount") if isinstance(raw_price, dict) else raw_price
                 if amt is not None:

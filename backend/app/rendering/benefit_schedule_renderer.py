@@ -398,16 +398,16 @@ def render_design2_schedule_pages(
             )
             val = escape(card.get("value") or "")
             ov_cards_html += f"""
-            <div style="background:#F8F9FC;border-radius:6px;box-shadow:0 1px 2px rgba(15,23,42,0.05);height:62px;display:flex;align-items:stretch;overflow:hidden;">
-                <div style="flex:0 0 40px;display:flex;align-items:center;justify-content:center;padding-left:4px;">{icon_media}</div>
+            <div style="background:#F8F9FC;border-radius:6px;box-shadow:0 1px 2px rgba(15,23,42,0.05);height:68px;display:flex;align-items:stretch;overflow:hidden;">
+                <div style="flex:0 0 38px;display:flex;align-items:center;justify-content:center;padding-left:3px;">{icon_media}</div>
                 <div style="flex:1;min-width:0;padding:4px 7px 4px 2px;display:flex;flex-direction:column;justify-content:space-between;position:relative;">
                     <div>
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:3px;">
-                            <div style="font-size:7.4px;font-weight:700;color:#0F172A;line-height:1.12;padding-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{escape(card['title'])}</div>
-                            <div style="font-size:6.2px;font-weight:600;color:#94A3B8;flex-shrink:0;line-height:1;">{escape(card['serial_number'])}</div>
+                            <div style="font-size:8.6px;font-weight:750;color:#0F172A;line-height:1.14;padding-top:1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{escape(card['title'])}</div>
+                            <div style="font-size:7.2px;font-weight:600;color:#94A3B8;flex-shrink:0;line-height:1;">{escape(card['serial_number'])}</div>
                         </div>
-                        {f'<div style="font-size:7px;font-weight:800;color:#5ABA00;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{val}</div>' if val else ''}
-                        <div style="font-size:6.2px;color:#475569;line-height:1.15;margin-top:1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{escape(card.get('description') or '')}</div>
+                        {f'<div style="font-size:7.8px;font-weight:800;color:#15803D;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{val}</div>' if val else ''}
+                        <div style="font-size:7.4px;color:#334155;line-height:1.18;margin-top:1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{escape(card.get('description') or '')}</div>
                     </div>
                     <div style="display:flex;justify-content:flex-end;align-items:center;">{indicator}</div>
                 </div>
@@ -436,28 +436,28 @@ def render_design2_schedule_pages(
                 </div>
                 <div style="min-width:0;flex:1;">
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span style="font-size:7.5px;font-weight:800;color:#94A3B8;">#{idx:02d}</span>
-                        <span style="font-size:9px;font-weight:800;color:#0F172A;">{escape(row['title'])}</span>
-                        {f'<span style="font-size:8px;font-weight:800;color:#5ABA00;background:#ECFDF5;padding:1px 5px;border-radius:4px;">{escape(val)}</span>' if val else ''}
+                        <span style="font-size:8px;font-weight:800;color:#94A3B8;">#{idx:02d}</span>
+                        <span style="font-size:9.8px;font-weight:800;color:#0F172A;">{escape(row['title'])}</span>
+                        {f'<span style="font-size:8.6px;font-weight:800;color:#15803D;background:#ECFDF5;padding:1px 5px;border-radius:4px;">{escape(val)}</span>' if val else ''}
                     </div>
-                    <div style="font-size:7.4px;color:#475569;line-height:1.3;margin-top:2px;">{escape(row.get('description') or 'Subject to master policy terms and endorsements.')}</div>
+                    <div style="font-size:8.2px;color:#334155;line-height:1.28;margin-top:2px;">{escape(row.get('description') or 'Subject to master policy terms and endorsements.')}</div>
                 </div>
             </div>
             <div style="flex-shrink:0;">
-                <span style="font-size:7px;font-weight:800;padding:2px 6px;border-radius:4px;white-space:nowrap;{row['badge_css']}">{escape(row['badge_text'])}</span>
+                <span style="font-size:7.6px;font-weight:800;padding:2px 6px;border-radius:4px;white-space:nowrap;{row['badge_css']}">{escape(row['badge_text'])}</span>
             </div>
         </div>
         """
 
     # Fit cleanly on Sheet 2 without footer collision (accounting for 108px taller footer -> 875px budget)
     overflow_grid_rows = math.ceil(len(overflow_cards) / 4) if overflow_cards else 0
-    overflow_h = overflow_grid_rows * 69 + (34 if overflow_cards else 0)
+    overflow_h = overflow_grid_rows * 75 + (34 if overflow_cards else 0)
     shown_active = active_rows[:12]
     remaining_active = active_rows[12:]
     active_grid_rows = math.ceil(len(shown_active) / 2) if shown_active else 0
-    active_h = active_grid_rows * 46 + (32 if shown_active else 0)
+    active_h = active_grid_rows * 50 + (32 if shown_active else 0)
     remaining_budget = max(0, 875 - overflow_h - active_h - 28)
-    opt_limit = max(0, (remaining_budget // 38) * 2)
+    opt_limit = max(0, (remaining_budget // 42) * 2)
 
     active_section = ""
     if shown_active:
@@ -486,11 +486,11 @@ def render_design2_schedule_pages(
                 <div style="display:flex;align-items:flex-start;gap:6px;min-width:0;flex:1;">
                     <div style="flex-shrink:0;margin-top:1px;">{render_design2_icon_svg(oc.get('icon_hint', 'generic'), size=13)}</div>
                     <div style="min-width:0;">
-                        <div style="font-size:7.8px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#5ABA00;">({escape(val)})</span>' if val else ''}</div>
-                        <div style="font-size:6.6px;color:#64748B;line-height:1.25;">{escape(oc.get('description') or '')}</div>
+                        <div style="font-size:8.5px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#15803D;">({escape(val)})</span>' if val else ''}</div>
+                        <div style="font-size:7.4px;color:#475569;line-height:1.25;">{escape(oc.get('description') or '')}</div>
                     </div>
                 </div>
-                <span style="font-size:6.4px;font-weight:700;padding:1.5px 4.5px;border-radius:3px;white-space:nowrap;{badge_css}">{escape(badge_txt)}</span>
+                <span style="font-size:7.0px;font-weight:700;padding:1.5px 4.5px;border-radius:3px;white-space:nowrap;{badge_css}">{escape(badge_txt)}</span>
             </div>
             """
         opt_section = f"""
@@ -578,11 +578,11 @@ def render_design2_schedule_pages(
                     <div style="display:flex;align-items:flex-start;gap:7px;min-width:0;flex:1;">
                         <div style="flex-shrink:0;margin-top:1px;">{render_design2_icon_svg(oc.get('icon_hint', 'generic'), size=13)}</div>
                         <div style="min-width:0;">
-                            <div style="font-size:7.8px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#5ABA00;">({escape(val)})</span>' if val else ''}</div>
-                            <div style="font-size:6.6px;color:#64748B;line-height:1.25;">{escape(oc.get('description') or '')}</div>
+                            <div style="font-size:8.5px;font-weight:700;color:#0F172A;">{escape(oc['serial_number'])} · {escape(oc['title'])} {f'<span style="color:#15803D;">({escape(val)})</span>' if val else ''}</div>
+                            <div style="font-size:7.4px;color:#475569;line-height:1.25;">{escape(oc.get('description') or '')}</div>
                         </div>
                     </div>
-                    <span style="font-size:6.4px;font-weight:700;padding:1.5px 4.5px;border-radius:3px;white-space:nowrap;{badge_css}">{escape(badge_txt)}</span>
+                    <span style="font-size:7.0px;font-weight:700;padding:1.5px 4.5px;border-radius:3px;white-space:nowrap;{badge_css}">{escape(badge_txt)}</span>
                 </div>
                 """
             cont_opt_html = f"""

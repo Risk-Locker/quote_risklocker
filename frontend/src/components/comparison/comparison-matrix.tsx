@@ -58,6 +58,7 @@ import { UnlinkCovernoteModal } from "./components/UnlinkCovernoteModal";
 import { DetectionLogsModal } from "./components/DetectionLogsModal";
 import { NcdEntitlementModal } from "./components/NcdEntitlementModal";
 import { AdjustFeesModal } from "./components/AdjustFeesModal";
+import { EditCoverNoteModal } from "./components/EditCoverNoteModal";
 import { SnapshotPreviewModal } from "./components/SnapshotPreviewModal";
 import { SourcePdfViewerPane } from "./components/SourcePdfViewerPane";
 import { UnderwriterQuoteCard } from "./components/UnderwriterQuoteCard";
@@ -309,30 +310,40 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     }>;
     covernote_policy?: {
       session_id: string;
-      document_type: string;
+      document_type?: string;
       policy_number?: string | null;
       company_name: string;
       company_id?: string | null;
       sum_insured: number;
       valuation_type: string;
       motor_premium: number;
-      road_tax: number;
-      runner_fee: number;
+      rounded_motor_premium?: number | null;
+      exact_motor_premium?: number | null;
+      road_tax?: number;
+      runner_fee?: number;
+      include_road_tax?: boolean;
+      include_runner_fee?: boolean;
       total_payable: number;
       rounded_total_payable?: number | null;
-      towing_limit: string;
+      exact_total_payable?: number | null;
+      towing_limit?: string;
       towing_km?: string;
       agreed_value: boolean;
-      excess: number;
+      waiver_betterment?: boolean;
+      betterment_rate?: number;
+      betterment_display?: string;
+      excess?: number;
       windscreen_sum_insured: number | null;
-      canonical_perils: string[];
-      canonical_perils_formatted: string;
+      special_perils?: string | null;
+      llp_llop?: string | null;
+      canonical_perils?: string[];
+      canonical_perils_formatted?: string;
       coverage_start_date?: string | null;
       coverage_end_date?: string | null;
       coverage_period_formatted?: string | null;
       uploaded_file_id?: string | null;
       original_filename?: string | null;
-      is_covernote: boolean;
+      is_covernote?: boolean;
     } | null;
     unlinked_covernotes?: Array<{
       session_id: string;
@@ -429,8 +440,20 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   };
   const [isUnlinkingCovernote, setIsUnlinkingCovernote] = useState(false);
   const [promotingEntryId, setPromotingEntryId] = useState<string | null>(null);
-
   const [showUnlinkModal, setShowUnlinkModal] = useState(false);
+  const [showEditCovernoteModal, setShowEditCovernoteModal] = useState(false);
+
+  const handlePatchCovernote = async (patch: Record<string, any>) => {
+    const res = await api<any>(`/comparison/${tenureId}/covernote`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    setData(res);
+    if (res?.tenure) {
+      populateEditInputs(res.tenure);
+    }
+    triggerStatus("success", "Cover Note Updated", "Issued Cover Note details saved and synchronized across the system.");
+  };
 
   const performUnlink = async () => {
     try {
@@ -1390,24 +1413,43 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           entries: prev.entries.map((e) =>
             e.id === entry.id
               ? {
-                  ...e,
-                  towing_limit: res.towing_limit ?? e.towing_limit,
-                  towing_km: res.towing_km ?? e.towing_km,
-                  special_perils: res.special_perils !== undefined ? res.special_perils : e.special_perils,
-                  llp_llop: res.llp_llop !== undefined ? res.llp_llop : e.llp_llop,
-                  excess: res.excess !== undefined ? res.excess : e.excess,
-                  windscreen_sum_insured:
-                    res.windscreen_sum_insured !== undefined ? res.windscreen_sum_insured : e.windscreen_sum_insured,
-                  notes: res.notes !== undefined ? res.notes : e.notes,
-                  is_manual: res.is_manual ?? e.is_manual,
-                  manual_overrides: res.manual_overrides ?? e.manual_overrides,
-                  version: res.version ?? (e.version || 1) + 1,
-                  rank: res.rank ?? e.rank,
-                }
+                ...e,
+                sum_insured: res.sum_insured !== undefined ? res.sum_insured : e.sum_insured,
+                motor_premium: res.motor_premium !== undefined ? res.motor_premium : e.motor_premium,
+                exact_motor_premium: res.motor_premium !== undefined ? res.motor_premium : e.exact_motor_premium,
+                total_payable: res.total_payable !== undefined ? res.total_payable : e.total_payable,
+                exact_total_payable: res.total_payable !== undefined ? res.total_payable : e.exact_total_payable,
+                rate_percentage: res.rate_percentage !== undefined ? res.rate_percentage : e.rate_percentage,
+                agreed_value: res.agreed_value !== undefined ? res.agreed_value : e.agreed_value,
+                valuation_type: res.valuation_type !== undefined ? res.valuation_type : e.valuation_type,
+                waiver_betterment: res.waiver_betterment !== undefined ? res.waiver_betterment : e.waiver_betterment,
+                betterment_rate: res.betterment_rate !== undefined ? res.betterment_rate : e.betterment_rate,
+                betterment_display: res.betterment_display !== undefined ? res.betterment_display : e.betterment_display,
+                towing_limit: res.towing_limit ?? e.towing_limit,
+                towing_km: res.towing_km ?? e.towing_km,
+                special_perils: res.special_perils !== undefined ? res.special_perils : e.special_perils,
+                llp_llop: res.llp_llop !== undefined ? res.llp_llop : e.llp_llop,
+                excess: res.excess !== undefined ? res.excess : e.excess,
+                windscreen_sum_insured:
+                  res.windscreen_sum_insured !== undefined ? res.windscreen_sum_insured : e.windscreen_sum_insured,
+                notes: res.notes !== undefined ? res.notes : e.notes,
+                is_manual: res.is_manual ?? e.is_manual,
+                manual_overrides: res.manual_overrides ?? e.manual_overrides,
+                version: res.version ?? (e.version || 1) + 1,
+                rank: res.rank ?? e.rank,
+              }
               : e
           ),
         };
       });
+      if (
+        patch.motor_premium !== undefined ||
+        patch.sum_insured !== undefined ||
+        patch.windscreen_sum_insured !== undefined ||
+        patch.clear_override_field !== undefined
+      ) {
+        void fetchComparison(true);
+      }
     } catch (err: any) {
       if (String(err?.message || "").includes("409") || String(err?.message || "").toLowerCase().includes("conflict")) {
         triggerStatus("error", "Version Conflict", "This card was updated in another tab. Refreshing latest data...");
@@ -2321,8 +2363,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             ncd={ncd}
             tenureId={tenureId}
             isUnlinkingCovernote={isUnlinkingCovernote}
+            roundingMode={roundingMode}
             onOpenNcdModal={handleOpenNcdModal}
             onUnlinkCovernote={handleUnlinkCovernote}
+            onOpenEditCovernote={() => setShowEditCovernoteModal(true)}
+            onPatchCovernoteField={handlePatchCovernote}
           />
         </div>
 
@@ -2521,6 +2566,20 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             populateEditInputs(updated.tenure);
             triggerStatus("success", "Fees Updated", "Road Tax & Runner Fee were successfully updated and all quotes recalculated.");
           }}
+        />
+      )}
+
+      {/* Full Edit Cover Note Modal */}
+      {tenure && (
+        <EditCoverNoteModal
+          isOpen={showEditCovernoteModal}
+          onClose={() => setShowEditCovernoteModal(false)}
+          covernotePolicy={data?.covernote_policy}
+          roadTax={tenure.road_tax}
+          runnerFee={tenure.runner_fee}
+          includeRoadTax={tenure.include_road_tax !== false}
+          includeRunnerFee={tenure.include_runner_fee !== false}
+          onSave={handlePatchCovernote}
         />
       )}
     </div>

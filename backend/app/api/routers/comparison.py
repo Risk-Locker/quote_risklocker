@@ -624,6 +624,11 @@ async def upload_previous_policy(
 class UpdateComparisonEntryPatch(BaseModel):
     is_hidden: bool | None = None
     manual_rank: int | None = None
+    sum_insured: float | None = None
+    motor_premium: float | None = None
+    agreed_value: bool | None = None
+    valuation_type: str | None = None
+    waiver_betterment: bool | None = None
     basic_figure_amount: float | None = None
     towing_limit: str | None = None
     special_perils: str | None = None
@@ -680,7 +685,17 @@ def patch_comparison_entry(
         raise HTTPException(status_code=422, detail="Excess cannot be negative.")
     if payload.windscreen_sum_insured is not None and payload.windscreen_sum_insured < 0:
         raise HTTPException(status_code=422, detail="Windscreen sum insured cannot be negative.")
+    if payload.sum_insured is not None and payload.sum_insured < 0:
+        raise HTTPException(status_code=422, detail="Sum insured cannot be negative.")
+    if payload.motor_premium is not None and payload.motor_premium < 0:
+        raise HTTPException(status_code=422, detail="Motor premium cannot be negative.")
 
+    from datetime import datetime, timezone
+    from decimal import Decimal
+    from app.services.marketing_comparison.ncd_evaluator import get_standard_betterment_rate
+    from app.services.marketing_comparison.workspace_sync import sync_session_draft_from_comparison
+
+    tenure = db.get(InsuranceTenure, tenure_id)
     edited_fields: list[str] = []
     clear_field: str | None = payload.clear_override_field.strip() if payload.clear_override_field else None
 
@@ -688,6 +703,37 @@ def patch_comparison_entry(
         entry.is_hidden = payload.is_hidden
     if payload.manual_rank is not None:
         entry.manual_rank = payload.manual_rank if payload.manual_rank > 0 else None
+
+    if payload.sum_insured is not None:
+        entry.sum_insured = round(float(payload.sum_insured), 2)
+        edited_fields.append("sum_insured")
+
+    if payload.agreed_value is not None or payload.valuation_type is not None:
+        if payload.valuation_type is not None:
+            is_agreed = str(payload.valuation_type).strip().lower() in ("agreed value", "agreed_value")
+        else:
+            is_agreed = bool(payload.agreed_value)
+        entry.agreed_value = is_agreed
+        entry.valuation_type = "agreed_value" if is_agreed else "market_value"
+        edited_fields.extend(["agreed_value", "valuation_type"])
+
+    if payload.waiver_betterment is not None:
+        entry.waiver_betterment = bool(payload.waiver_betterment)
+        if entry.waiver_betterment:
+            entry.betterment_rate = 0.0
+            entry.betterment_display = "No (0%)"
+        else:
+            veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if (tenure and getattr(tenure, "tracked_vehicle", None)) else None
+            quote_year = tenure.coverage_start_date.year if (tenure and tenure.coverage_start_date) else datetime.now(timezone.utc).year
+            veh_age = max(0, quote_year - (veh_yom or quote_year))
+            b_rate, b_disp = get_standard_betterment_rate(veh_age)
+            entry.betterment_rate = b_rate
+            entry.betterment_display = b_disp
+        edited_fields.append("waiver_betterment")
+
+    if payload.motor_premium is not None:
+        entry.motor_premium = round(float(payload.motor_premium), 2)
+        edited_fields.append("motor_premium")
 
     if payload.towing_limit is not None:
         clean_tow = payload.towing_limit.strip()
@@ -700,7 +746,10 @@ def patch_comparison_entry(
 
     if payload.special_perils is not None:
         clean_sp = payload.special_perils.strip()
-        if clean_sp:
+        if clean_sp.lower() in {"not included", "no", "none", "excluded", "-"}:
+            entry.special_perils = None
+            edited_fields.append("special_perils")
+        elif clean_sp:
             entry.special_perils = clean_sp
             edited_fields.append("special_perils")
         else:
@@ -709,7 +758,10 @@ def patch_comparison_entry(
 
     if payload.llp_llop is not None:
         clean_llp = payload.llp_llop.strip()
-        if clean_llp:
+        if clean_llp.lower() in {"not included", "no", "none", "excluded", "-"}:
+            entry.llp_llop = None
+            edited_fields.append("llp_llop")
+        elif clean_llp:
             entry.llp_llop = clean_llp
             edited_fields.append("llp_llop")
         else:
@@ -744,8 +796,6 @@ def patch_comparison_entry(
                 f[target_key] = {"value": payload.basic_figure_amount}
                 s.draft.fields = f
                 flag_modified(s.draft, "fields")
-
-    tenure = db.get(InsuranceTenure, tenure_id)
 
     # If a field override is cleared, restore its extracted value from the linked session if available
     if clear_field and entry.session_id:
@@ -798,27 +848,44 @@ def patch_comparison_entry(
         record_manual_overrides(entry, edited_fields=edited_fields, clear_field=clear_field)
         entry.version = (entry.version or 1) + 1
 
-    # Sync edited fields to linked QuotationDraft
+    # Sync edited fields & benefits bidirectionally to linked QuotationDraft
     if edited_fields and entry.session_id:
-        s_sync = db.get(SessionModel, entry.session_id)
-        if s_sync and s_sync.draft:
-            d_fields = dict(s_sync.draft.fields or {})
-            if "towing_limit" in edited_fields:
-                d_fields["towing"] = {"value": entry.towing_limit, "status": "manual_override"}
-                d_fields["towing_limit"] = {"value": entry.towing_limit, "status": "manual_override"}
-            if "special_perils" in edited_fields:
-                d_fields["special_perils"] = {"value": entry.special_perils or "Not Included", "status": "manual_override"}
-            if "llp_llop" in edited_fields:
-                d_fields["llp_llop"] = {"value": entry.llp_llop or "Not Included", "status": "manual_override"}
-            if "excess" in edited_fields:
-                d_fields["excess"] = {"value": f"{float(entry.excess):.2f}", "status": "manual_override"}
-                d_fields["excess_amount"] = {"value": f"{float(entry.excess):.2f}", "status": "manual_override"}
-            if "windscreen_sum_insured" in edited_fields:
-                ws_s = f"{float(entry.windscreen_sum_insured):.2f}" if entry.windscreen_sum_insured else ""
-                d_fields["windscreen_sum_insured"] = {"value": ws_s, "status": "manual_override"}
-                d_fields["windscreen"] = {"value": ws_s, "status": "manual_override"}
-            s_sync.draft.fields = d_fields
-            flag_modified(s_sync.draft, "fields")
+        prem_delta_dec = sync_session_draft_from_comparison(
+            db,
+            tenure,
+            entry.session_id,
+            edited_fields=edited_fields,
+            field_values={
+                "sum_insured": entry.sum_insured,
+                "motor_premium": entry.motor_premium,
+                "agreed_value": entry.agreed_value,
+                "valuation_type": entry.valuation_type,
+                "waiver_betterment": entry.waiver_betterment,
+                "towing_limit": entry.towing_limit,
+                "special_perils": entry.special_perils or "Not Included",
+                "llp_llop": entry.llp_llop or "Not Included",
+                "excess": entry.excess,
+                "windscreen_sum_insured": entry.windscreen_sum_insured,
+            },
+            explicit_motor_premium=("motor_premium" in edited_fields),
+            user_id=str(user.id) if getattr(user, "id", None) else None,
+        )
+        if prem_delta_dec != Decimal("0.00") and "motor_premium" not in edited_fields:
+            entry.motor_premium = round(max(0.0, float(entry.motor_premium or 0.0) + float(prem_delta_dec)), 2)
+
+    eff_rt = float(tenure.road_tax) if (tenure and tenure.include_road_tax is not False) else 0.0
+    eff_rf = float(tenure.runner_fee) if (tenure and tenure.include_runner_fee is not False) else 0.0
+    entry.road_tax = eff_rt
+    entry.runner_fee = eff_rf
+    entry.include_road_tax = (tenure.include_road_tax is not False) if tenure else True
+    entry.include_runner_fee = (tenure.include_runner_fee is not False) if tenure else True
+    entry.total_payable = round(float(entry.motor_premium or 0.0) + eff_rt + eff_rf, 2)
+    if float(entry.sum_insured or 0.0) > 0 and float(entry.motor_premium or 0.0) > 0:
+        entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
+    else:
+        entry.rate_percentage = 0.0
+    if tenure and tenure.covernote_session_id and entry.session_id == tenure.covernote_session_id:
+        tenure.won_premium = entry.total_payable
 
     db.commit()
 
@@ -842,6 +909,15 @@ def patch_comparison_entry(
         "manual_rank": entry.manual_rank,
         "rank": entry.rank,
         "version": entry.version or 1,
+        "sum_insured": float(entry.sum_insured or 0.0),
+        "motor_premium": float(entry.motor_premium or 0.0),
+        "total_payable": float(entry.total_payable or 0.0),
+        "rate_percentage": float(entry.rate_percentage or 0.0),
+        "agreed_value": bool(entry.agreed_value),
+        "valuation_type": entry.valuation_type,
+        "waiver_betterment": bool(entry.waiver_betterment),
+        "betterment_rate": float(entry.betterment_rate or 0.0),
+        "betterment_display": entry.betterment_display,
         "towing_limit": entry.towing_limit,
         "towing_km": entry.towing_limit if "towing_limit" in get_entry_overrides(entry) else (entry.towing_km or entry.towing_limit),
         "special_perils": entry.special_perils,
@@ -1096,4 +1172,58 @@ def link_tenure_covernote(
 
     db.commit()
     return {"status": "success", "tenure_id": tenure_id, "session_id": sess.id, "message": "Policy linked successfully"}
+
+
+class CovernotePatchRequest(BaseModel):
+    policy_number: str | None = None
+    company_id: str | None = None
+    company_name: str | None = None
+    coverage_start_date: str | None = None
+    coverage_end_date: str | None = None
+    sum_insured: float | None = None
+    motor_premium: float | None = None
+    agreed_value: bool | None = None
+    valuation_type: str | None = None
+    windscreen_sum_insured: float | None = None
+    towing_limit: str | None = None
+    special_perils: str | None = None
+    llp_llop: str | None = None
+    excess: float | None = None
+    waiver_betterment: bool | None = None
+
+
+@router.patch("/{tenure_id}/covernote")
+def patch_tenure_covernote(
+    tenure_id: str,
+    payload: CovernotePatchRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Edit Cover Note policy number, insurer, dates, financials, and benefits inline or via modal."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    if payload.sum_insured is not None and payload.sum_insured < 0:
+        raise HTTPException(status_code=422, detail="Sum insured cannot be negative.")
+    if payload.motor_premium is not None and payload.motor_premium < 0:
+        raise HTTPException(status_code=422, detail="Motor premium cannot be negative.")
+    if payload.excess is not None and payload.excess < 0:
+        raise HTTPException(status_code=422, detail="Excess cannot be negative.")
+    if payload.windscreen_sum_insured is not None and payload.windscreen_sum_insured < 0:
+        raise HTTPException(status_code=422, detail="Windscreen sum insured cannot be negative.")
+    if payload.policy_number is not None and len(payload.policy_number.strip()) > 120:
+        raise HTTPException(status_code=422, detail="Policy number must be 120 characters or fewer.")
+
+    from app.services.marketing_comparison.covernote_sync import sync_and_update_covernote
+
+    data = payload.model_dump(exclude_unset=True)
+    try:
+        return sync_and_update_covernote(
+            db,
+            tenure_id,
+            data,
+            user_id=str(user.id) if getattr(user, "id", None) else None,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        code = 404 if "not found" in msg.lower() or "no active cover note" in msg.lower() else 422
+        raise HTTPException(status_code=code, detail=msg)
 

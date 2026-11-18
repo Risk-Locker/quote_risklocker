@@ -2,6 +2,7 @@ export type ScalarDecision = "confirm" | "edit" | "clear" | "keep_check_needed";
 
 export type WorkspaceField = {
   value?: string | null;
+  detected_value?: string | null;
   status: string;
   message?: string;
   decision?: { decision: ScalarDecision } | null;
@@ -72,7 +73,14 @@ export type WorkspaceSnapshot = {
     available_addons: BenefitCardSummary[];
     groups?: Array<{ plan_id: string; plan_key: string; plan_label: string; cards: BenefitCardSummary[] }>;
   };
-  extras: Array<{ selection_id: string; label: string; price?: { amount?: number | string; currency?: string }; sort_order?: number }>;
+  extras: Array<{
+    selection_id: string;
+    label: string;
+    price?: { amount?: number | string; currency?: string };
+    sort_order?: number;
+    included_in_premium?: boolean;
+    unapplied_amount?: string;
+  }>;
   total_premium_adjusted: string;
   packs: Array<{
     package_id: string;

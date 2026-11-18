@@ -14,6 +14,11 @@ from sqlalchemy.orm import defer, load_only
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.errors import AppError
+from app.domain.benefit_pricing import (
+    parse_money_decimal,
+    reconcile_selections_premium_delta,
+    selection_applied_to_premium,
+)
 from app.domain.benefits import (
     BenefitValue,
     CostStatus,
@@ -1092,6 +1097,31 @@ def apply_workspace_patch(
     draft.scalar_decisions = deepcopy(draft.scalar_decisions or {})
     changed_paths: list[str] = []
     operation_names: list[str] = []
+    pre_selections = _draft_selections_with_pending(db, draft.id)
+    pre_applied: dict[str, Decimal] = {
+        sel.id: selection_applied_to_premium(sel)
+        for sel in pre_selections
+        if getattr(sel, "id", None)
+    }
+    has_explicit_premium_op = any(
+        isinstance(op, dict)
+        and op.get("op") == "scalar_decision"
+        and str(op.get("field") or "") in {"premium", "coverage_premium"}
+        for op in operations
+    )
+    has_reset_benefits_op = any(
+        isinstance(op, dict) and op.get("op") == "reset_benefits"
+        for op in operations
+    )
+    benefit_mutation_ops = {
+        "create_custom_benefit",
+        "select_catalog_offering",
+        "select_package_plan",
+        "remove_package_plan",
+        "benefit_update",
+        "revert_benefit",
+        "reset_benefits",
+    }
     try:
         for operation in operations:
             if not isinstance(operation, dict):
@@ -1147,8 +1177,55 @@ def apply_workspace_patch(
             else:
                 raise AppError(f"Unsupported workspace operation: {operation_name or 'missing'}.", 422)
 
-        benefit_mutation_ops = {"create_custom_benefit", "select_catalog_offering", "select_package_plan", "remove_package_plan", "benefit_update", "revert_benefit", "reset_benefits"}
         if any(op in benefit_mutation_ops for op in operation_names):
+            if hasattr(db, "flush"):
+                db.flush()
+            deleted_ids = {getattr(x, "id", None) for x in getattr(db, "deleted", ())}
+            post_selections = [
+                sel for sel in _draft_selections_with_pending(db, draft.id)
+                if getattr(sel, "id", None) not in deleted_ids
+            ]
+            if has_reset_benefits_op:
+                if not has_explicit_premium_op:
+                    prem_entry = dict(draft.fields.get("premium") or {}) if isinstance(draft.fields.get("premium"), dict) else {}
+                    det_val = prem_entry.get("detected_value")
+                    if det_val is not None and str(det_val).strip():
+                        det_dec = parse_money_decimal(det_val)
+                        prem_entry["value"] = f"{det_dec:.2f}"
+                        prem_entry["status"] = "ready"
+                        prem_entry["message"] = ""
+                        draft.fields["premium"] = prem_entry
+                        if "fields.premium" not in changed_paths:
+                            changed_paths.append("fields.premium")
+                reconcile_selections_premium_delta(
+                    {sel.id: selection_applied_to_premium(sel) for sel in post_selections if getattr(sel, "id", None)},
+                    post_selections,
+                    apply_delta=False,
+                )
+            else:
+                net_delta = reconcile_selections_premium_delta(
+                    pre_applied,
+                    post_selections,
+                    apply_delta=not has_explicit_premium_op,
+                )
+                if not has_explicit_premium_op and net_delta != Decimal("0.00"):
+                    prem_entry = dict(draft.fields.get("premium") or {}) if isinstance(draft.fields.get("premium"), dict) else {}
+                    if "detected_value" not in prem_entry or prem_entry.get("detected_value") is None:
+                        prem_entry["detected_value"] = prem_entry.get("value")
+                    cur_prem = parse_money_decimal(prem_entry.get("value") or prem_entry.get("detected_value"))
+                    new_prem = max(Decimal("0.00"), (cur_prem + net_delta).quantize(Decimal("0.01")))
+                    prem_entry["value"] = f"{new_prem:.2f}"
+                    prem_entry["status"] = "ready"
+                    prem_entry["message"] = ""
+                    draft.fields["premium"] = prem_entry
+                    if "fields.premium" not in changed_paths:
+                        changed_paths.append("fields.premium")
+                    decisions_map = draft.scalar_decisions or {}
+                    decisions_map["premium"] = {
+                        "decision": "edit",
+                        "decided_by": user.id,
+                        "decided_at": _utcnow().isoformat(),
+                    }
             _recompute_total(draft.fields or {}, draft.scalar_decisions or {}, user, draft=draft, db=db)
             if "fields.total_amount" not in changed_paths:
                 changed_paths.append("fields.total_amount")
@@ -1349,11 +1426,73 @@ def apply_workspace_patch(
                         raw_ws = _extract_f_val("windscreen_sum_insured") or _extract_f_val("windscreen")
                         try:
                             if raw_ws is not None and str(raw_ws).strip() != "":
-                                ce.windscreen_sum_insured = float(str(raw_ws).replace(",", ""))
+                                ws_f = float(str(raw_ws).replace(",", ""))
+                                ce.windscreen_sum_insured = ws_f if ws_f > 0 else None
                         except (ValueError, TypeError):
                             pass
 
-                        if float(ce.sum_insured) > 0 and float(ce.motor_premium) > 0:
+                        has_benefit_mutation = any(op in benefit_mutation_ops for op in operation_names)
+                        if has_benefit_mutation:
+                            from app.services.marketing_comparison.benefits_extractor import _resolve_comparison_benefits
+                            from app.services.marketing_comparison.materialize import record_manual_overrides
+                            from app.services.marketing_comparison.ncd_evaluator import get_standard_betterment_rate
+
+                            b_sync = _resolve_comparison_benefits(
+                                db,
+                                session,
+                                getattr(session, "company_id", None) or ce.company_id,
+                                f,
+                                float(tenure.windscreen_target) if tenure.windscreen_target else None,
+                            )
+                            ce.windscreen_sum_insured = b_sync.get("windscreen_sum_insured")
+                            ce.special_perils = b_sync.get("special_perils")
+                            ce.llp_llop = b_sync.get("llp_llop")
+                            ce.towing_limit = b_sync.get("towing_km") or "Unlimited"
+                            ce.towing_km = ce.towing_limit
+
+                            has_bet_active = any(
+                                s.state == "current" and "betterment" in f"{s.selection_key or ''} {s.label_override or ''}".lower()
+                                for s in selections
+                            )
+                            has_bet_inactive = any(
+                                s.state != "current" and "betterment" in f"{s.selection_key or ''} {s.label_override or ''}".lower()
+                                for s in selections
+                            )
+                            if has_bet_active or has_bet_inactive:
+                                ce.waiver_betterment = has_bet_active
+                                if ce.waiver_betterment:
+                                    ce.betterment_rate = 0.0
+                                    ce.betterment_display = "No (0%)"
+                                else:
+                                    veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if getattr(tenure, "tracked_vehicle", None) else None
+                                    quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year
+                                    veh_age = max(0, quote_year - (veh_yom or quote_year))
+                                    b_rate, b_disp = get_standard_betterment_rate(veh_age)
+                                    ce.betterment_rate = b_rate
+                                    ce.betterment_display = b_disp
+
+                            for clr_key in ("windscreen_sum_insured", "special_perils", "llp_llop", "towing_limit", "waiver_betterment", "motor_premium"):
+                                record_manual_overrides(ce, clear_field=clr_key)
+                        elif changed_paths:
+                            from app.services.marketing_comparison.materialize import record_manual_overrides
+
+                            if any("fields.premium" in p for p in changed_paths):
+                                record_manual_overrides(ce, clear_field="motor_premium")
+                            if any("fields.sum_insured" in p or "fields.coverage_amount" in p for p in changed_paths):
+                                raw_cov = _extract_f_val("sum_insured") or _extract_f_val("coverage_amount")
+                                try:
+                                    if raw_cov is not None and str(raw_cov).strip() != "":
+                                        ce.sum_insured = float(str(raw_cov).replace(",", ""))
+                                except (ValueError, TypeError):
+                                    pass
+                                record_manual_overrides(ce, clear_field="sum_insured")
+                            if any("fields.valuation_type" in p for p in changed_paths):
+                                record_manual_overrides(ce, clear_field="valuation_type")
+                                record_manual_overrides(ce, clear_field="agreed_value")
+                            if any("fields.excess" in p for p in changed_paths):
+                                record_manual_overrides(ce, clear_field="excess")
+
+                        if float(ce.sum_insured or 0.0) > 0 and float(ce.motor_premium or 0.0) > 0:
                             ce.rate_percentage = round((float(ce.motor_premium) / float(ce.sum_insured)) * 100, 4)
 
                         ce.version = (ce.version or 1) + 1
@@ -1362,7 +1501,9 @@ def apply_workspace_patch(
                     ce.runner_fee = eff_rf
                     ce.include_road_tax = (tenure.include_road_tax is not False)
                     ce.include_runner_fee = (tenure.include_runner_fee is not False)
-                    ce.total_payable = float(ce.motor_premium) + eff_rt + eff_rf
+                    ce.total_payable = round(float(ce.motor_premium or 0.0) + eff_rt + eff_rf, 2)
+                    if tenure.covernote_session_id and ce.session_id == tenure.covernote_session_id:
+                        tenure.won_premium = ce.total_payable
 
         db.commit()
         db.refresh(draft)

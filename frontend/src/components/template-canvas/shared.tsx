@@ -526,9 +526,9 @@ export function CanvasElementView({
   };
   const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
   const density = {
-    comfortable: { padding: 7, gap: 6,  icon: 24, label: 11,   value: 10,  desc: 8.5 },
-    normal:      { padding: 5, gap: 5,  icon: 22, label: 10.5, value: 9.5, desc: 8   },
-    compact:     { padding: 4, gap: 4.5, icon: 20, label: 10,   value: 9,   desc: 7.8 },
+    comfortable: { padding: 7, gap: 6, icon: 24, label: 11, value: 10, desc: 8.5 },
+    normal: { padding: 5, gap: 5, icon: 22, label: 10.5, value: 9.5, desc: 8 },
+    compact: { padding: 4, gap: 4.5, icon: 20, label: 10, value: 9, desc: 7.8 },
   }[element.textDensity || "compact"] || { padding: 4, gap: 4.5, icon: 20, label: 10, value: 9, desc: 7.8 };
   return (
     <div
@@ -701,12 +701,12 @@ export function CanvasElementView({
           ).toLowerCase();
           const items = benefitData
             ? (isAddons
-                ? benefitData.available_addons || []
-                : isExtras
-                  ? currentCards.filter(checkPaid)
-                  : ((element as any).excludeExtras || effectiveExtrasMode === "none" || effectiveExtrasMode === "lump_sum")
-                    ? currentCards.filter((b: any) => !checkPaid(b))
-                    : currentCards)
+              ? benefitData.available_addons || []
+              : isExtras
+                ? currentCards.filter(checkPaid)
+                : ((element as any).excludeExtras || effectiveExtrasMode === "none" || effectiveExtrasMode === "lump_sum")
+                  ? currentCards.filter((b: any) => !checkPaid(b))
+                  : currentCards)
             : [];
           const groups = !isAddons && benefitData?.groups?.length ? benefitData.groups : [];
           const groupById = new Map(groups.map((g) => [String(g.plan_id), g]));
@@ -836,18 +836,18 @@ export function CanvasElementView({
                       if (!m) m = val.match(/[\d,]+/);
                       if (m) val = val.includes("RM") ? m[0] : `RM ${m[0]}`;
                       if (/total loss|theft allowance/i.test(label) && val.includes("%")) {
-                         const pctMatch = b?.value?.match(/\d+%/);
-                         if (pctMatch) val = pctMatch[0];
+                        const pctMatch = b?.value?.match(/\d+%/);
+                        if (pctMatch) val = pctMatch[0];
                       }
                     }
                   }
                   const desc = b?.description || "";
                   const assetUrl = b
                     ? b.asset_url ||
-                      (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
-                      (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
-                      (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
-                      (assets.find((a) => a.id === b.asset_id)?.url || null)
+                    (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
+                    (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
+                    (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
+                    (assets.find((a) => a.id === b.asset_id)?.url || null)
                     : null;
                   const isAddonCard = Boolean(isAddons || b?.is_addon || b?.price || (b?.cost_status === "paid") || b?.detected_cost);
                   const showAsset = getVis(b, isAddonCard, "showAsset", true);
@@ -945,13 +945,12 @@ export function CanvasElementView({
                       style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
                     >
                       <div
-                        className={`w-full h-full flex flex-col overflow-hidden ${
-                          element.cardStyle === "minimal"
+                        className={`w-full h-full flex flex-col overflow-hidden ${element.cardStyle === "minimal"
                             ? "bg-transparent border border-transparent"
                             : element.cardStyle === "soft"
                               ? "bg-[#f3f0f0] border border-gray-200 shadow-xs"
                               : "border border-[var(--rl-border)] bg-white shadow-xs"
-                        }`}
+                          }`}
                         style={{
                           padding: density.padding,
                           borderRadius: cardShape ? cardRadius : undefined,
@@ -964,13 +963,12 @@ export function CanvasElementView({
                       >
                         {showGroup && (
                           <div
-                            className={`font-bold leading-snug shrink-0 ${
-                              (element as any).textWrap === "truncate"
+                            className={`font-bold leading-snug shrink-0 ${(element as any).textWrap === "truncate"
                                 ? "truncate"
                                 : (element as any).textWrap === "wrap"
-                                ? "line-clamp-2 leading-tight break-words"
-                                : "leading-tight break-words"
-                            }`}
+                                  ? "line-clamp-2 leading-tight break-words"
+                                  : "leading-tight break-words"
+                              }`}
                             style={{
                               fontSize: (element as any).titleSize || density.label,
                               marginBottom: 3,
@@ -1017,7 +1015,7 @@ export function CanvasElementView({
                               const sectionPrefs = isAddonCard ? benefitData?.displayPreferences?.addons : benefitData?.displayPreferences?.defaults;
                               let computedHideCoverage = !showCoverage || element.hideCoverage || false;
                               let computedHideCost = !showCost || element.hideCost || false;
-                              
+
                               if (sectionPrefs) {
                                 if (sectionPrefs.custom) {
                                   computedHideCoverage = computedHideCoverage || !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
@@ -1056,13 +1054,12 @@ export function CanvasElementView({
                                       ) : <span />}
                                       {hasCost && (
                                         <span
-                                          className={`inline-block rounded px-1 py-0.5 font-bold whitespace-nowrap leading-tight border text-[8px] ${
-                                            customCostBg || customCostColor
+                                          className={`inline-block rounded px-1 py-0.5 font-bold whitespace-nowrap leading-tight border text-[8px] ${customCostBg || customCostColor
                                               ? ""
                                               : isDark
                                                 ? "bg-red-950/40 text-red-300 border-red-800/50"
                                                 : "bg-red-50 text-red-600 border-red-200"
-                                          }`}
+                                            }`}
                                           style={{
                                             fontSize: customCostSize ? Math.min(customCostSize, 9) : 8.5,
                                             color: customCostColor || undefined,
@@ -1077,14 +1074,13 @@ export function CanvasElementView({
                                   )}
                                   {desc && showDescription && (
                                     <span
-                                      className={`leading-tight mt-0.5 text-[var(--rl-text-muted)] ${
-                                        customDescMaxLines === 1 ? "line-clamp-1" :
-                                        customDescMaxLines === 2 ? "line-clamp-2" :
-                                        customDescMaxLines === 3 ? "line-clamp-3" :
-                                        customDescMaxLines === 4 ? "line-clamp-4" :
-                                        customDescMaxLines === 5 ? "line-clamp-5" :
-                                        customDescMaxLines === 0 ? "" : "line-clamp-3"
-                                      }`}
+                                      className={`leading-tight mt-0.5 text-[var(--rl-text-muted)] ${customDescMaxLines === 1 ? "line-clamp-1" :
+                                          customDescMaxLines === 2 ? "line-clamp-2" :
+                                            customDescMaxLines === 3 ? "line-clamp-3" :
+                                              customDescMaxLines === 4 ? "line-clamp-4" :
+                                                customDescMaxLines === 5 ? "line-clamp-5" :
+                                                  customDescMaxLines === 0 ? "" : "line-clamp-3"
+                                        }`}
                                       style={{
                                         fontSize: customDescSize,
                                         fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
@@ -1130,122 +1126,122 @@ export function CanvasElementView({
                   return (
                     <div
                       className="grid w-full items-stretch"
-                      style={{ 
+                      style={{
                         gridTemplateColumns: `repeat(${numCols}, minmax(0, 1fr))`,
                         gridAutoRows: effectiveCardRowH > 0 ? `${effectiveCardRowH}px` : undefined,
-                        gap: density.gap 
+                        gap: density.gap
                       }}
                     >
                       {visibleItems.map((b: any, idx: number) => {
-                            const label = b ? b.label : `Benefit ${idx + 1}`;
-                            let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(b.value) && (/\d/.test(b.value) || /unlimited/i.test(b.value)) ? b.value : "";
-                            if (val) {
-                              if (/towing|breakdown/i.test(label)) {
-                                if (/unlimited/i.test(val)) val = "Unlimited";
-                                else {
-                                  const m = val.match(/(\d+)\s*km/i);
-                                  if (m) val = m[0].toLowerCase();
-                                }
-                              } else if (/workmanship/i.test(label)) {
-                                const m = val.match(/(\d+)[- ]year/i);
-                                if (m) val = `${m[1]} years`;
-                              } else if (/legal defense|flood|ambulance|belonging|theft|key/i.test(label)) {
-                                let cleanVal = val.replace(/up to/gi, "").trim();
-                                let m = cleanVal.match(/RM\s*[\d,]+/i);
-                                if (!m) m = cleanVal.match(/[\d,]+/);
-                                if (m) val = cleanVal.includes("RM") ? m[0] : `RM ${m[0]}`;
-                                if (/total loss|theft allowance/i.test(label) && val.includes("%")) {
-                                   const pctMatch = b?.value?.match(/\d+%/);
-                                   if (pctMatch) val = pctMatch[0];
-                                }
-                              }
+                        const label = b ? b.label : `Benefit ${idx + 1}`;
+                        let val = b?.value && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(b.value) && (/\d/.test(b.value) || /unlimited/i.test(b.value)) ? b.value : "";
+                        if (val) {
+                          if (/towing|breakdown/i.test(label)) {
+                            if (/unlimited/i.test(val)) val = "Unlimited";
+                            else {
+                              const m = val.match(/(\d+)\s*km/i);
+                              if (m) val = m[0].toLowerCase();
                             }
-                            const desc = b?.description || "";
-                            const assetUrl = b
-                              ? b.asset_url ||
-                                (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
-                                (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
-                                (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
-                                (assets.find((a) => a.id === b.asset_id)?.url || null)
-                              : null;
-                            const isAddonCard = Boolean(isAddons || b?.is_addon || b?.price || (b?.cost_status === "paid") || b?.detected_cost);
-                            const showAsset = getVis(b, isAddonCard, "showAsset", true);
-                            const showGroup = getVis(b, isAddonCard, "showGroup", true);
-                            const showCoverage = getVis(b, isAddonCard, "showCoverage", true);
-                            const showDescription = getVis(b, isAddonCard, "showDescription", true);
-                            const showCost = getVis(b, isAddonCard, "showCost", true);
-                            let extraMatch = null;
-                            if (benefitData?.extras) {
-                              extraMatch = benefitData.extras.find((ex: any) =>
-                                (b?.concept_id && ex.concept_id === b.concept_id) ||
-                                (b?.concept_key && ex.concept_key === b.concept_key) ||
-                                (b?.label && ex.label?.toLowerCase() === b.label?.toLowerCase())
-                              );
+                          } else if (/workmanship/i.test(label)) {
+                            const m = val.match(/(\d+)[- ]year/i);
+                            if (m) val = `${m[1]} years`;
+                          } else if (/legal defense|flood|ambulance|belonging|theft|key/i.test(label)) {
+                            let cleanVal = val.replace(/up to/gi, "").trim();
+                            let m = cleanVal.match(/RM\s*[\d,]+/i);
+                            if (!m) m = cleanVal.match(/[\d,]+/);
+                            if (m) val = cleanVal.includes("RM") ? m[0] : `RM ${m[0]}`;
+                            if (/total loss|theft allowance/i.test(label) && val.includes("%")) {
+                              const pctMatch = b?.value?.match(/\d+%/);
+                              if (pctMatch) val = pctMatch[0];
                             }
-                            const extractCost = (item: any): number | null => {
-                              if (!item) return null;
-                              if (item.typed_value?.hide_price) return null;
-                              const p = item.price ?? item.optional_price;
-                              if (p !== null && p !== undefined) {
-                                if (typeof p === "object") {
-                                  if (p.type === "formula") return null;
-                                  const amt = p.amount ?? p.value;
-                                  if (amt !== null && amt !== undefined && amt !== "") {
-                                    const s = String(amt);
-                                    if (s.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(s)) return null;
-                                    const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
-                                    if (Number.isFinite(n) && n > 0) return n;
-                                  }
-                                } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
-                                  return p;
-                                } else if (typeof p === "string") {
-                                  if (p.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(p)) return null;
-                                  const n = parseFloat(p.replace(/[^0-9.]/g, ""));
-                                  if (Number.isFinite(n) && n > 0) return n;
-                                }
-                              }
-                              if (item.detected_cost) {
-                                const s = String(item.detected_cost);
+                          }
+                        }
+                        const desc = b?.description || "";
+                        const assetUrl = b
+                          ? b.asset_url ||
+                          (b.asset_id ? `/business/assets/${b.asset_id}/content?profile=ui` : null) ||
+                          (conceptAssets?.[b.concept_key] || conceptAssets?.[b.concept_id] || null) ||
+                          (b.label ? conceptAssets?.[b.label.toLowerCase()] || conceptAssets?.[b.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")] || null : null) ||
+                          (assets.find((a) => a.id === b.asset_id)?.url || null)
+                          : null;
+                        const isAddonCard = Boolean(isAddons || b?.is_addon || b?.price || (b?.cost_status === "paid") || b?.detected_cost);
+                        const showAsset = getVis(b, isAddonCard, "showAsset", true);
+                        const showGroup = getVis(b, isAddonCard, "showGroup", true);
+                        const showCoverage = getVis(b, isAddonCard, "showCoverage", true);
+                        const showDescription = getVis(b, isAddonCard, "showDescription", true);
+                        const showCost = getVis(b, isAddonCard, "showCost", true);
+                        let extraMatch = null;
+                        if (benefitData?.extras) {
+                          extraMatch = benefitData.extras.find((ex: any) =>
+                            (b?.concept_id && ex.concept_id === b.concept_id) ||
+                            (b?.concept_key && ex.concept_key === b.concept_key) ||
+                            (b?.label && ex.label?.toLowerCase() === b.label?.toLowerCase())
+                          );
+                        }
+                        const extractCost = (item: any): number | null => {
+                          if (!item) return null;
+                          if (item.typed_value?.hide_price) return null;
+                          const p = item.price ?? item.optional_price;
+                          if (p !== null && p !== undefined) {
+                            if (typeof p === "object") {
+                              if (p.type === "formula") return null;
+                              const amt = p.amount ?? p.value;
+                              if (amt !== null && amt !== undefined && amt !== "") {
+                                const s = String(amt);
                                 if (s.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(s)) return null;
-                                const n = parseFloat(s.replace(/[^0-9.]/g, ""));
+                                const n = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : Number(amt);
                                 if (Number.isFinite(n) && n > 0) return n;
                               }
-                              return null;
-                            };
-                            const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
-                            // Paid extra strictly when it is a paid card AND not inside the Recommended Add-ons section
-                            const isPaidExtra = isPaidExtraBenefitCard(b) && !isAddons;
-                            // Free Added Coverage (Defaults) and Recommended Add-on Upgrades must NEVER show coverage amount or price badge
-                            const costBadge = (isPaidExtra && costNum !== null)
-                              ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              : null;
-
-                            if (!isPaidExtra) {
-                              val = "";
-                            } else {
-                              let rawLimit = b?.detected_limit || b?.coverage_limit;
-                              if (b?.typed_value?.hide_limit) {
-                                rawLimit = null;
-                                val = "";
-                              }
-                              if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
-                                const s = rawLimit.trim();
-                                if (/\d/.test(s) || /unlimited/i.test(s)) {
-                                  val = s.startsWith("RM") ? s : `RM ${s}`;
-                                }
-                              } else if (costNum !== null && val) {
-                                const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
-                                if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
-                                  val = "";
-                                }
-                              }
-                              if (val && !(/\d/.test(val) || /unlimited/i.test(val))) {
-                                val = "";
-                              }
-                              if (val === "RM 0" || val === "RM 0.00" || val === "0" || val === "0.00") {
-                                val = "";
-                              }
+                            } else if (typeof p === "number" && Number.isFinite(p) && p > 0) {
+                              return p;
+                            } else if (typeof p === "string") {
+                              if (p.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(p)) return null;
+                              const n = parseFloat(p.replace(/[^0-9.]/g, ""));
+                              if (Number.isFinite(n) && n > 0) return n;
                             }
+                          }
+                          if (item.detected_cost) {
+                            const s = String(item.detected_cost);
+                            if (s.includes("%") || /sum\s*insured|sum\s*covered|tariff/i.test(s)) return null;
+                            const n = parseFloat(s.replace(/[^0-9.]/g, ""));
+                            if (Number.isFinite(n) && n > 0) return n;
+                          }
+                          return null;
+                        };
+                        const costNum = extractCost(b) ?? (extraMatch ? extractCost(extraMatch) : null);
+                        // Paid extra strictly when it is a paid card AND not inside the Recommended Add-ons section
+                        const isPaidExtra = isPaidExtraBenefitCard(b) && !isAddons;
+                        // Free Added Coverage (Defaults) and Recommended Add-on Upgrades must NEVER show coverage amount or price badge
+                        const costBadge = (isPaidExtra && costNum !== null)
+                          ? `Cost : MYR ${costNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : null;
+
+                        if (!isPaidExtra) {
+                          val = "";
+                        } else {
+                          let rawLimit = b?.detected_limit || b?.coverage_limit;
+                          if (b?.typed_value?.hide_limit) {
+                            rawLimit = null;
+                            val = "";
+                          }
+                          if (rawLimit && typeof rawLimit === "string" && rawLimit.trim()) {
+                            const s = rawLimit.trim();
+                            if (/\d/.test(s) || /unlimited/i.test(s)) {
+                              val = s.startsWith("RM") ? s : `RM ${s}`;
+                            }
+                          } else if (costNum !== null && val) {
+                            const valNum = parseFloat(String(val).replace(/[^0-9.]/g, ""));
+                            if (Number.isFinite(valNum) && Math.abs(valNum - costNum) < 0.01) {
+                              val = "";
+                            }
+                          }
+                          if (val && !(/\d/.test(val) || /unlimited/i.test(val))) {
+                            val = "";
+                          }
+                          if (val === "RM 0" || val === "RM 0.00" || val === "0" || val === "0.00") {
+                            val = "";
+                          }
+                        }
 
                         const customIconSize = (element as any).iconSize ? Number((element as any).iconSize) : 0;
                         const cardIconSize = customIconSize > 0
@@ -1281,8 +1277,7 @@ export function CanvasElementView({
                         return (
                           <article
                             key={`benefit-card-${idx}`}
-                            className={`w-full flex flex-col overflow-hidden transition-all ${
-                              isDark
+                            className={`w-full flex flex-col overflow-hidden transition-all ${isDark
                                 ? "border border-slate-700 bg-slate-900 shadow-xs"
                                 : isMinimal
                                   ? "border border-neutral-400 bg-white/90 shadow-none hover:border-neutral-500"
@@ -1291,7 +1286,7 @@ export function CanvasElementView({
                                     : isGridTile
                                       ? "border border-neutral-400 bg-white shadow-none"
                                       : "border border-neutral-400 bg-white shadow-xs"
-                            }`}
+                              }`}
                             style={{
                               height: effectiveCardRowH > 0 ? `${effectiveCardRowH}px` : (cardRowH > 0 ? `${cardRowH}px` : "100%"),
                               maxHeight: effectiveCardRowH > 0 ? `${effectiveCardRowH}px` : (cardRowH > 0 ? `${cardRowH}px` : undefined),
@@ -1307,11 +1302,10 @@ export function CanvasElementView({
                           >
                             {showGroup && (
                               <div
-                                className={`font-bold leading-tight ${
-                                  cardTitleClamp === 1
+                                className={`font-bold leading-tight ${cardTitleClamp === 1
                                     ? "truncate"
                                     : "leading-tight break-words"
-                                } ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
+                                  } ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
                                 style={{
                                   fontSize: cardTitleSize,
                                   marginBottom: isMinimal ? 1 : 2,
@@ -1351,92 +1345,90 @@ export function CanvasElementView({
                                 </div>
                               )}
                               <div className="flex flex-col min-w-0 flex-1 justify-start">
-                                    {(() => {
-                                      const sectionPrefs = isAddonCard ? benefitData?.displayPreferences?.addons : benefitData?.displayPreferences?.defaults;
-                                      let computedHideCoverage = !showCoverage || element.hideCoverage || false;
-                                      let computedHideCost = !showCost || element.hideCost || false;
-                                      
-                                      if (sectionPrefs) {
-                                        if (sectionPrefs.custom) {
-                                          computedHideCoverage = computedHideCoverage || !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
-                                          computedHideCost = computedHideCost || !!b?.typed_value_override?.hideCost || !!b?.typed_value?.hideCost;
-                                        } else {
-                                          computedHideCoverage = computedHideCoverage || !sectionPrefs.coverage;
-                                          computedHideCost = computedHideCost || !sectionPrefs.price;
-                                        }
-                                      }
+                                {(() => {
+                                  const sectionPrefs = isAddonCard ? benefitData?.displayPreferences?.addons : benefitData?.displayPreferences?.defaults;
+                                  let computedHideCoverage = !showCoverage || element.hideCoverage || false;
+                                  let computedHideCost = !showCost || element.hideCost || false;
 
-                                      const customCovSize = (element as any).coverageSize ? Number((element as any).coverageSize) : density.value;
-                                      const customCovColor = (element as any).coverageColor;
-                                      const customDescSize = (element as any).descSize ? Number((element as any).descSize) : density.desc;
-                                      const customDescWeight = (element as any).descWeight;
-                                      const customDescColor = (element as any).descColor;
-                                      const customCostSize = (element as any).costSize ? Number((element as any).costSize) : Math.max(8.5, density.desc);
-                                      const customCostColor = (element as any).costColor;
-                                      const customCostBg = (element as any).costBgColor;
+                                  if (sectionPrefs) {
+                                    if (sectionPrefs.custom) {
+                                      computedHideCoverage = computedHideCoverage || !!b?.typed_value_override?.hideCoverage || !!b?.typed_value?.hideCoverage;
+                                      computedHideCost = computedHideCost || !!b?.typed_value_override?.hideCost || !!b?.typed_value?.hideCost;
+                                    } else {
+                                      computedHideCoverage = computedHideCoverage || !sectionPrefs.coverage;
+                                      computedHideCost = computedHideCost || !sectionPrefs.price;
+                                    }
+                                  }
 
-                                      const hasVal = Boolean(val && !computedHideCoverage);
-                                      const hasCost = Boolean(costBadge && !computedHideCost);
+                                  const customCovSize = (element as any).coverageSize ? Number((element as any).coverageSize) : density.value;
+                                  const customCovColor = (element as any).coverageColor;
+                                  const customDescSize = (element as any).descSize ? Number((element as any).descSize) : density.desc;
+                                  const customDescWeight = (element as any).descWeight;
+                                  const customDescColor = (element as any).descColor;
+                                  const customCostSize = (element as any).costSize ? Number((element as any).costSize) : Math.max(8.5, density.desc);
+                                  const customCostColor = (element as any).costColor;
+                                  const customCostBg = (element as any).costBgColor;
 
-                                      return (
-                                        <>
-                                          {(hasVal || hasCost) && (
-                                            <div className="flex items-center justify-between gap-1 min-w-0">
-                                              {hasVal ? (
-                                                <span
-                                                  className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
-                                                  style={{ fontSize: customCovSize, color: customCovColor || undefined }}
-                                                >
-                                                  {val}
-                                                </span>
-                                              ) : <span />}
-                                              {hasCost && (
-                                                <span
-                                                  className={`inline-block rounded px-1 py-0.5 font-bold whitespace-nowrap leading-tight border text-[8px] ${
-                                                    customCostBg || customCostColor
-                                                      ? ""
-                                                      : isDark
-                                                        ? "bg-red-950/40 text-red-300 border-red-800/50"
-                                                        : "bg-red-50 text-red-600 border-red-200"
-                                                  }`}
-                                                  style={{
-                                                    fontSize: customCostSize ? Math.min(customCostSize, 9) : 8.5,
-                                                    color: customCostColor || undefined,
-                                                    backgroundColor: customCostBg || undefined,
-                                                    borderColor: customCostBg || undefined,
-                                                  }}
-                                                >
-                                                  {costBadge}
-                                                </span>
-                                              )}
-                                            </div>
-                                          )}
-                                          {!isMinimal && desc && showDescription && (cardRowH <= 0 || cardRowH >= 46) && (
+                                  const hasVal = Boolean(val && !computedHideCoverage);
+                                  const hasCost = Boolean(costBadge && !computedHideCost);
+
+                                  return (
+                                    <>
+                                      {(hasVal || hasCost) && (
+                                        <div className="flex items-center justify-between gap-1 min-w-0">
+                                          {hasVal ? (
                                             <span
-                                              className={`leading-tight mt-0.5 ${
-                                                (element as any).descMaxLines > 0 ? `line-clamp-${(element as any).descMaxLines}` : ""
-                                              } ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
-                                              style={{ 
-                                                fontSize: customDescSize,
-                                                fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
-                                                color: customDescColor || undefined,
-                                                display: (element as any).descMaxLines > 0 ? "-webkit-box" : "block",
-                                                WebkitLineClamp: (element as any).descMaxLines > 0 ? (element as any).descMaxLines : undefined,
-                                                WebkitBoxOrient: "vertical",
-                                                overflow: "hidden",
+                                              className={`font-bold leading-tight truncate ${isDark ? "text-white" : "text-[var(--rl-text-strong)]"}`}
+                                              style={{ fontSize: customCovSize, color: customCovColor || undefined }}
+                                            >
+                                              {val}
+                                            </span>
+                                          ) : <span />}
+                                          {hasCost && (
+                                            <span
+                                              className={`inline-block rounded px-1 py-0.5 font-bold whitespace-nowrap leading-tight border text-[8px] ${customCostBg || customCostColor
+                                                  ? ""
+                                                  : isDark
+                                                    ? "bg-red-950/40 text-red-300 border-red-800/50"
+                                                    : "bg-red-50 text-red-600 border-red-200"
+                                                }`}
+                                              style={{
+                                                fontSize: customCostSize ? Math.min(customCostSize, 9) : 8.5,
+                                                color: customCostColor || undefined,
+                                                backgroundColor: customCostBg || undefined,
+                                                borderColor: customCostBg || undefined,
                                               }}
                                             >
-                                              {desc}
+                                              {costBadge}
                                             </span>
                                           )}
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-                              </article>
-                            );
-                          })}
+                                        </div>
+                                      )}
+                                      {!isMinimal && desc && showDescription && (cardRowH <= 0 || cardRowH >= 46) && (
+                                        <span
+                                          className={`leading-tight mt-0.5 ${(element as any).descMaxLines > 0 ? `line-clamp-${(element as any).descMaxLines}` : ""
+                                            } ${isDark ? "text-slate-400" : "text-[var(--rl-text-muted)]"}`}
+                                          style={{
+                                            fontSize: customDescSize,
+                                            fontWeight: customDescWeight ? (customDescWeight === "bold" ? 700 : customDescWeight === "semibold" ? 600 : customDescWeight === "medium" ? 500 : 400) : undefined,
+                                            color: customDescColor || undefined,
+                                            display: (element as any).descMaxLines > 0 ? "-webkit-box" : "block",
+                                            WebkitLineClamp: (element as any).descMaxLines > 0 ? (element as any).descMaxLines : undefined,
+                                            WebkitBoxOrient: "vertical",
+                                            overflow: "hidden",
+                                          }}
+                                        >
+                                          {desc}
+                                        </span>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
                     </div>
                   );
                 })()
@@ -1601,128 +1593,132 @@ export function CanvasElementView({
           const dispOpts = (benefitData?.displayOptions && Object.keys(benefitData.displayOptions).length > 0)
             ? benefitData.displayOptions
             : ((config as any)?.display_options || {});
-          const shouldRoundTotal = dispOpts?.round_total !== false;
+          const shouldRoundTotal = dispOpts?.round_total === true;
 
           const rawPNum = parseFloat(String(premium).replace(/[^0-9.]/g, "")) || 0;
           const pNum = (shouldRoundTotal && rawPNum > 0) ? Math.round(rawPNum) : rawPNum;
           const rtNum = parseFloat(String(roadtax).replace(/[^0-9.]/g, "")) || 0;
           const sfNum = parseFloat(String(runner).replace(/[^0-9.]/g, "")) || 0;
-          const extrasTotal = extras.reduce((acc, ex) => {
-            const price = ex?.price as { amount?: string | number; value?: string | number } | undefined;
-            const amt = typeof price === "object" && price !== null ? (price.amount ?? price.value) : price;
-            const num = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : (typeof amt === "number" ? amt : 0);
-            return acc + (Number.isFinite(num) ? num : 0);
-          }, 0);
+            const extrasTotal = extras.reduce((acc, ex: any) => {
+              if (ex?.included_in_premium === true) {
+                const unapplied = parseFloat(String(ex?.unapplied_amount ?? "0").replace(/[^0-9.-]/g, "")) || 0;
+                return acc + Math.max(0, unapplied);
+              }
+              const price = ex?.price as { amount?: string | number; value?: string | number } | undefined;
+              const amt = typeof price === "object" && price !== null ? (price.amount ?? price.value) : price;
+              const num = typeof amt === "string" ? parseFloat(amt.replace(/,/g, "")) : (typeof amt === "number" ? amt : 0);
+              return acc + (Number.isFinite(num) ? Math.max(0, num) : 0);
+            }, 0);
 
-          let total = "";
-          if (pNum > 0) {
-            const rawSum = pNum + rtNum + sfNum + extrasTotal;
-            const finalSum = shouldRoundTotal ? Math.round(rawSum) : rawSum;
-            total = finalSum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          } else {
-            const rawTot = variableValues?.total_premium_adjusted || variableValues?.total_amount || "";
-            if (rawTot && shouldRoundTotal) {
-              const cleanTot = parseFloat(String(rawTot).replace(/[^0-9.]/g, ""));
-              if (Number.isFinite(cleanTot)) {
-                total = Math.round(cleanTot).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            let total = "";
+            if (pNum > 0) {
+              const rawSum = pNum + rtNum + sfNum + extrasTotal;
+              const finalSum = shouldRoundTotal ? Math.round(rawSum) : rawSum;
+              total = finalSum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            } else {
+              const rawTot = variableValues?.total_premium_adjusted || variableValues?.total_amount || "";
+              if (rawTot && shouldRoundTotal) {
+                const cleanTot = parseFloat(String(rawTot).replace(/[^0-9.]/g, ""));
+                if (Number.isFinite(cleanTot)) {
+                  total = Math.round(cleanTot).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                } else {
+                  total = rawTot;
+                }
               } else {
                 total = rawTot;
               }
-            } else {
-              total = rawTot;
             }
-          }
-          const combinedRoadtaxVal = rtNum + sfNum;
-          const displayRoadtax = combinedRoadtaxVal > 0 ? combinedRoadtaxVal.toFixed(2) : (roadtax || "");
+            const combinedRoadtaxVal = rtNum + sfNum;
+            const displayRoadtax = combinedRoadtaxVal > 0 ? combinedRoadtaxVal.toFixed(2) : (roadtax || "");
 
-          if (extrasMode === "lump_sum" && extrasTotal > 0) {
-            rows.push({
-              kind: "extra_lump",
-              label: labels.extras || "Extras / 附加项目",
-              value: `RM ${extrasTotal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-            });
-          }
+            if (extrasMode === "lump_sum" && extrasTotal > 0) {
+              rows.push({
+                kind: "extra_lump",
+                label: labels.extras || "Extras / 附加项目",
+                value: `RM ${extrasTotal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+              });
+            }
 
-          const isV4 = Boolean(
-            (element as any).v4_mode ||
-            (element as any).isV4 ||
-            (config as any)?.v4_mode ||
-            (config as any)?.template_name?.toLowerCase?.()?.includes("v4") ||
-            (config as any)?.name?.toLowerCase?.()?.includes("v4") ||
-            (labels as any)?.v4_mode
-          );
+            const isV4 = Boolean(
+              (element as any).v4_mode ||
+              (element as any).isV4 ||
+              (config as any)?.v4_mode ||
+              (config as any)?.template_name?.toLowerCase?.()?.includes("v4") ||
+              (config as any)?.name?.toLowerCase?.()?.includes("v4") ||
+              (labels as any)?.v4_mode
+            );
 
-          let displayPremium = premium ? `RM ${premium}` : "";
-          if (isV4) {
-            const cleanTotalNum = parseFloat(String(total || "0").replace(/[^0-9.]/g, "")) || 0;
-            const v4PremiumVal = Math.max(0, cleanTotalNum - combinedRoadtaxVal);
-            displayPremium = v4PremiumVal > 0
-              ? `RM ${v4PremiumVal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : (premium ? `RM ${premium}` : "");
-          } else if (extrasMode === "none") {
-            const totalPremNum = pNum + extrasTotal;
-            displayPremium = totalPremNum > 0 ? `RM ${totalPremNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (premium ? `RM ${premium}` : "");
-          } else if (pNum > 0) {
-            displayPremium = `RM ${pNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-          }
+            let displayPremium = premium ? `RM ${premium}` : "";
+            if (isV4) {
+              const cleanTotalNum = parseFloat(String(total || "0").replace(/[^0-9.]/g, "")) || 0;
+              const v4PremiumVal = Math.max(0, cleanTotalNum - combinedRoadtaxVal);
+              displayPremium = v4PremiumVal > 0
+                ? `RM ${v4PremiumVal.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : (premium ? `RM ${premium}` : "");
+            } else if (extrasMode === "none") {
+              const totalPremNum = pNum + extrasTotal;
+              displayPremium = totalPremNum > 0 ? `RM ${totalPremNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (premium ? `RM ${premium}` : "");
+            } else if (pNum > 0) {
+              displayPremium = `RM ${pNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            }
 
-          rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: displayPremium });
-          if (!isV4) {
-            rows.push({ kind: "divider", label: "", value: "" });
-          }
-          rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax and Runner Fee / 路税及服务费", value: displayRoadtax ? `RM ${displayRoadtax}` : "" });
-          if (isV4) {
-            rows.push({ kind: "divider", label: "", value: "" });
-          }
-          rows.push({ kind: "total", label: (labels as any).total_premium || labels.total || "Total Payable / 应付总额", value: total ? `RM ${total}` : "" });
-          const rowHeight = Number(element.rowHeight) || 14;
-          return (
-            <div className="relative w-full h-full flex flex-col justify-start">
-              {rows.map((row, index) => {
-                if (row.kind === "divider") {
-                  return <div key={`divider-${index}`} className="w-full my-0.5" style={{ height: 1, background: "#E2E8F0" }} />;
-                }
-                if (row.kind === "divider_dark") {
-                  return <div key={`divider-${index}`} className="w-full my-1" style={{ height: 1, background: "#111827" }} />;
-                }
-                const labelStyle =
-                  row.kind === "total"
-                    ? { fontSize: 10.5, fontWeight: 800, color: "#0F172A" }
-                    : row.kind === "extra_lump"
-                      ? { fontSize: 9.5, fontWeight: 700, color: "#DC2626" }
-                      : row.kind === "extras_header"
-                        ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626", textTransform: "uppercase" as const, letterSpacing: "0.5px" }
-                        : row.kind === "extra"
-                          ? { fontSize: 9, fontWeight: 600, color: "#B91C1C" }
-                          : { fontSize: 9, fontWeight: 600, color: "#334155" };
-                const valueStyle =
-                  row.kind === "total"
-                    ? { fontSize: 11.5, fontWeight: 800, color: "#DC2626" }
-                    : row.kind === "extra_lump"
-                      ? { fontSize: 10, fontWeight: 700, color: isV4 ? "#94A3B8" : "#0F172A" }
-                      : row.kind === "extras_header"
-                        ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626" }
-                        : row.kind === "extra"
-                          ? { fontSize: 9.5, fontWeight: 700, color: isV4 ? "#94A3B8" : "#0F172A" }
-                          : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
-                if (row.kind === "extra") {
+            rows.push({ kind: "premium", label: labels.premium || "Coverage Premium / 保费", value: displayPremium });
+            if (!isV4) {
+              rows.push({ kind: "divider", label: "", value: "" });
+            }
+            rows.push({ kind: "roadtax", label: labels.roadtax || "Roadtax and Runner Fee / 路税及服务费", value: displayRoadtax ? `RM ${displayRoadtax}` : "" });
+            if (isV4) {
+              rows.push({ kind: "divider", label: "", value: "" });
+            }
+            rows.push({ kind: "total", label: (labels as any).total_premium || labels.total || "Total Payable / 应付总额", value: total ? `RM ${total}` : "" });
+            const rowHeight = Number(element.rowHeight) || 14;
+            return (
+              <div className="relative w-full h-full flex flex-col justify-start">
+                {rows.map((row, index) => {
+                  if (row.kind === "divider") {
+                    return <div key={`divider-${index}`} className="w-full my-0.5" style={{ height: 1, background: "#E2E8F0" }} />;
+                  }
+                  if (row.kind === "divider_dark") {
+                    return <div key={`divider-${index}`} className="w-full my-1" style={{ height: 1, background: "#111827" }} />;
+                  }
+                  const labelStyle =
+                    row.kind === "total"
+                      ? { fontSize: 10.5, fontWeight: 800, color: "#0F172A" }
+                      : row.kind === "extra_lump"
+                        ? { fontSize: 9.5, fontWeight: 700, color: "#DC2626" }
+                        : row.kind === "extras_header"
+                          ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626", textTransform: "uppercase" as const, letterSpacing: "0.5px" }
+                          : row.kind === "extra"
+                            ? { fontSize: 9, fontWeight: 600, color: "#B91C1C" }
+                            : { fontSize: 9, fontWeight: 600, color: "#334155" };
+                  const valueStyle =
+                    row.kind === "total"
+                      ? { fontSize: 11.5, fontWeight: 800, color: "#DC2626" }
+                      : row.kind === "extra_lump"
+                        ? { fontSize: 10, fontWeight: 700, color: isV4 ? "#94A3B8" : "#0F172A" }
+                        : row.kind === "extras_header"
+                          ? { fontSize: 8.5, fontWeight: 700, color: "#DC2626" }
+                          : row.kind === "extra"
+                            ? { fontSize: 9.5, fontWeight: 700, color: isV4 ? "#94A3B8" : "#0F172A" }
+                            : { fontSize: 9.5, fontWeight: 700, color: "#0F172A" };
+                  if (row.kind === "extra") {
+                    return (
+                      <div key={`row-${index}`} className="flex items-center justify-between w-full pl-3" style={{ height: rowHeight }}>
+                        <span style={labelStyle} className="truncate flex-1 min-w-0 pr-2">{row.label}</span>
+                        <span style={valueStyle} className="whitespace-nowrap text-right">{row.value}</span>
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={`row-${index}`} className="flex items-center justify-between w-full pl-3" style={{ height: rowHeight }}>
-                      <span style={labelStyle} className="truncate flex-1 min-w-0 pr-2">{row.label}</span>
-                      <span style={valueStyle} className="whitespace-nowrap text-right">{row.value}</span>
+                    <div key={`row-${index}`} className="flex items-center justify-between w-full" style={{ height: rowHeight }}>
+                      <span style={labelStyle}>{row.label}</span>
+                      <span style={valueStyle}>{row.value}</span>
                     </div>
                   );
-                }
-                return (
-                  <div key={`row-${index}`} className="flex items-center justify-between w-full" style={{ height: rowHeight }}>
-                    <span style={labelStyle}>{row.label}</span>
-                    <span style={valueStyle}>{row.value}</span>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()
+                })}
+              </div>
+            );
+          })()
       ) : null}
       {isSpecial ? (
         <>
@@ -1761,10 +1757,10 @@ export function CanvasElementView({
               type="button"
               key={handle}
               className={`absolute ${pos} h-3 w-3 border border-[var(--rl-red)] bg-white ${handle.includes("n") || handle.includes("s")
-                  ? handle.includes("e") || handle.includes("w")
-                    ? "cursor-nwse-resize"
-                    : "cursor-ns-resize"
-                  : "cursor-ew-resize"
+                ? handle.includes("e") || handle.includes("w")
+                  ? "cursor-nwse-resize"
+                  : "cursor-ns-resize"
+                : "cursor-ew-resize"
                 }`}
               aria-label={`Resize ${element.name || element.type} from ${handle}`}
               onPointerDown={(event) => onResizePointerDown(event, handle)}
@@ -1854,7 +1850,7 @@ export function balanceBenefitGridElements(
     available_addons?: BenefitItem[];
     extras?: BenefitItem[];
     groups?: unknown[];
-    displayOptions?: { extras_mode?: string; [key: string]: unknown };
+    displayOptions?: { extras_mode?: string;[key: string]: unknown };
   },
 ): CanvasElement[] {
   const extras = benefitData?.extras || [];

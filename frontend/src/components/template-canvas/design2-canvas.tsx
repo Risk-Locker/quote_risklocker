@@ -220,7 +220,7 @@ function Design2Footer({
         height: "108px",
         background: "#E52320",
         color: "#FFFFFF",
-        padding: "0 44px",
+        padding: "0 42px",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
@@ -393,99 +393,99 @@ export function Design2CanvasView({
           overflow: "hidden",
         }}
       >
-        <div style={{ flex: "1 1 auto", minHeight: 0, padding: "30px 44px 12px 44px", display: "flex", flexDirection: "column" }}>
-          {/* Header */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center" }}>
-              <img
-                src="/assets/brand/logo-horizontal-black.png"
-                alt="RISK LOCKER"
-                style={{ height: "46px", maxWidth: "215px", objectFit: "contain", display: "block" }}
-              />
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: "17.3px", fontWeight: 800, letterSpacing: "-0.3px", lineHeight: 1.15 }}>
-                  <span style={{ color: "#535353", fontWeight: 700 }}>Motor Insurance</span>
-                  <span style={{ color: "#94A3B8", fontWeight: 300, margin: "0 4px" }}>|</span>
-                  <span style={{ color: "#E52320", fontWeight: 800 }}>Quotation</span>
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "auto auto",
-                    justifyContent: "end",
-                    columnGap: "6px",
-                    rowGap: "1px",
-                    marginTop: "3px",
-                    fontSize: "8.6px",
-                    lineHeight: 1.3,
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: "#334155" }}>Quotation Ref :</span>
-                  <span style={{ fontWeight: 700, color: "#010000" }}>{quoteRef}</span>
-                  <span style={{ fontWeight: 600, color: "#334155" }}>Vehicle No :</span>
-                  <span style={{ fontWeight: 700, color: "#010000" }}>{vehPlate}</span>
-                  <span style={{ fontWeight: 600, color: "#334155" }}>Insurer :</span>
-                  <span style={{ fontWeight: 700, color: "#010000", textTransform: "uppercase" }}>{insurer}</span>
-                </div>
+          <div style={{ flex: "1 1 auto", minHeight: 0, padding: "22px 42px 10px 42px", display: "flex", flexDirection: "column" }}>
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <img
+                  src="/assets/brand/logo-horizontal-black.png"
+                  alt="RISK LOCKER"
+                  style={{ height: "46px", maxWidth: "215px", objectFit: "contain", display: "block" }}
+                />
               </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-                {logoSrc ? (
-                  <img
-                    src={logoSrc}
-                    alt={insurer}
-                    onError={() => {
-                      if (localCompanyLogo && rawLogoSrc !== localCompanyLogo) {
-                        setRawLogoSrc(localCompanyLogo);
-                      } else {
-                        setRawLogoSrc("");
-                      }
-                    }}
-                    style={{ maxHeight: "38px", maxWidth: "132px", width: "auto", height: "auto", objectFit: "contain", display: "block" }}
-                  />
-                ) : (
-                  <div style={{ fontSize: "12px", fontWeight: 900, color: "#0F172A", textTransform: "uppercase" }}>
-                    {insurer.split(" ")[0]}
+              <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: "17.3px", fontWeight: 800, letterSpacing: "-0.3px", lineHeight: 1.15 }}>
+                    <span style={{ color: "#535353", fontWeight: 700 }}>Motor Insurance</span>
+                    <span style={{ color: "#94A3B8", fontWeight: 300, margin: "0 4px" }}>|</span>
+                    <span style={{ color: "#E52320", fontWeight: 800 }}>Quotation</span>
                   </div>
-                )}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "auto auto",
+                      justifyContent: "end",
+                      columnGap: "6px",
+                      rowGap: "1px",
+                      marginTop: "3px",
+                      fontSize: "9.2px",
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: "#334155" }}>Quotation Ref :</span>
+                    <span style={{ fontWeight: 700, color: "#010000" }}>{quoteRef}</span>
+                    <span style={{ fontWeight: 600, color: "#334155" }}>Vehicle No :</span>
+                    <span style={{ fontWeight: 700, color: "#010000" }}>{vehPlate}</span>
+                    <span style={{ fontWeight: 600, color: "#334155" }}>Insurer :</span>
+                    <span style={{ fontWeight: 700, color: "#010000", textTransform: "uppercase" }}>{insurer}</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                  {logoSrc ? (
+                    <img
+                      src={logoSrc}
+                      alt={insurer}
+                      onError={() => {
+                        if (localCompanyLogo && rawLogoSrc !== localCompanyLogo) {
+                          setRawLogoSrc(localCompanyLogo);
+                        } else {
+                          setRawLogoSrc("");
+                        }
+                      }}
+                      style={{ maxHeight: "38px", maxWidth: "132px", width: "auto", height: "auto", objectFit: "contain", display: "block" }}
+                    />
+                  ) : (
+                    <div style={{ fontSize: "12px", fontWeight: 900, color: "#0F172A", textTransform: "uppercase" }}>
+                      {insurer.split(" ")[0]}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Structural Hairline 1: Header Bottom Divider */}
-          <div style={{ height: "1px", background: "#64748B", margin: "13px 0 16px 0", flexShrink: 0 }} />
+            {/* Structural Hairline 1: Header Bottom Divider */}
+            <div style={{ height: "1px", background: "#64748B", margin: "9px 0 11px 0", flexShrink: 0 }} />
 
-          {/* Upper Section: 2 Columns separated by Vertical Center Hairline */}
-          <div style={{ display: "flex", alignItems: "stretch" }}>
-            {/* Left Column (Specs + Premium) */}
-            <div style={{ flex: 1.02, paddingRight: "18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-              <div>
-                <div style={{ fontSize: "14px", fontWeight: 800, color: "#E52320", marginBottom: "6px", lineHeight: 1.2 }}>
-                  Vehicle Information <span style={{ fontSize: "13px", fontWeight: 700, color: "#544F4E" }}>车辆资料</span>
-                </div>
-                {[
-                  { label: "Customer / 客户姓名", val: custName },
-                  { label: "Period Of Insurance / 保障期限", val: period },
-                  { label: "Coverage Type / 保障种类", val: covType },
-                  { label: "Car Model / 车型", val: carModel },
-                  { label: "NCD / 无索偿折扣", val: ncdDisplay },
-                  { label: "Valuation Type / 估价方式", val: valType },
-                  { label: "Policy Excess / 自负额", val: formatMoney(excess) },
-                  { label: "Vehicle Sum Insured / 车辆保额", val: formatMoney(sumInsured) },
-                ].map((row, idx) => (
+            {/* Upper Section: 2 Columns separated by Vertical Center Hairline */}
+            <div style={{ display: "flex", alignItems: "stretch" }}>
+              {/* Left Column (Specs + Premium) */}
+              <div style={{ flex: 1.02, paddingRight: "18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                <div>
+                    <div style={{ fontSize: "14.5px", fontWeight: 800, color: "#E52320", marginBottom: "5px", lineHeight: 1.2 }}>
+                      Vehicle Information <span style={{ fontSize: "13.5px", fontWeight: 700, color: "#544F4E" }}>车辆资料</span>
+                    </div>
+                    {[
+                      { label: "Customer / 客户姓名", val: custName },
+                      { label: "Period Of Insurance / 保障期限", val: period },
+                      { label: "Coverage Type / 保障种类", val: covType },
+                      { label: "Car Model / 车型", val: carModel },
+                      { label: "NCD / 无索偿折扣", val: ncdDisplay },
+                      { label: "Valuation Type / 估价方式", val: valType },
+                      { label: "Policy Excess / 自负额", val: formatMoney(excess) },
+                      { label: "Vehicle Sum Insured / 车辆保额", val: formatMoney(sumInsured) },
+                    ].map((row, idx) => (
                   <div
                     key={idx}
                     style={{
                       display: "flex",
                       alignItems: "flex-end",
-                      fontSize: "9px",
-                      padding: "6px 0 3.5px 0",
-                      minHeight: "26.5px",
+                      fontSize: "9.6px",
+                      padding: "4.5px 0 3px 0",
+                      minHeight: "24.5px",
                       boxSizing: "border-box",
                     }}
                   >
-                    <div style={{ width: "168px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
+                    <div style={{ width: "174px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
                       {row.label}
                     </div>
                     <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
@@ -506,12 +506,12 @@ export function Design2CanvasView({
                 ))}
               </div>
 
-              <div style={{ marginTop: "18px" }}>
-                <div style={{ fontSize: "14px", fontWeight: 800, color: "#E52320", marginBottom: "5px", lineHeight: 1.2 }}>
-                  Premium Summary <span style={{ fontSize: "13px", fontWeight: 700, color: "#544F4E" }}>保费</span>
+              <div style={{ marginTop: "12px" }}>
+                <div style={{ fontSize: "14.5px", fontWeight: 800, color: "#E52320", marginBottom: "4px", lineHeight: 1.2 }}>
+                  Premium Summary <span style={{ fontSize: "13.5px", fontWeight: 700, color: "#544F4E" }}>保费</span>
                 </div>
-                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "9px", padding: "6px 0 3.5px 0", minHeight: "26.5px", boxSizing: "border-box" }}>
-                  <div style={{ width: "168px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
+                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "9.6px", padding: "4.5px 0 3px 0", minHeight: "24.5px", boxSizing: "border-box" }}>
+                  <div style={{ width: "174px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
                     Insurance Premium / 保费
                   </div>
                   <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
@@ -519,8 +519,8 @@ export function Design2CanvasView({
                     {formatMoney(premium)}
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "9px", padding: "6px 0 3.5px 0", minHeight: "26.5px", boxSizing: "border-box" }}>
-                  <div style={{ width: "168px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
+                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "9.6px", padding: "4.5px 0 3px 0", minHeight: "24.5px", boxSizing: "border-box" }}>
+                  <div style={{ width: "174px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
                     Roadtax and Runner Fee / 路税及服务费
                   </div>
                   <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
@@ -528,9 +528,9 @@ export function Design2CanvasView({
                     {rtCombined}
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "22px" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 800, color: "#E52320", whiteSpace: "nowrap" }}>TOTAL PAYABLE 应付总额 :</div>
-                  <div style={{ fontSize: "21px", fontWeight: 900, color: "#E52320", letterSpacing: "-0.4px", lineHeight: 1, whiteSpace: "nowrap" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "14px" }}>
+                  <div style={{ fontSize: "13.5px", fontWeight: 800, color: "#E52320", whiteSpace: "nowrap" }}>TOTAL PAYABLE 应付总额 :</div>
+                  <div style={{ fontSize: "22px", fontWeight: 900, color: "#E52320", letterSpacing: "-0.4px", lineHeight: 1, whiteSpace: "nowrap" }}>
                     {formatMoney(totalPayable)}
                   </div>
                 </div>
@@ -560,7 +560,7 @@ export function Design2CanvasView({
                       color: "#FFFFFF",
                       height: "40px",
                       padding: "0 15px",
-                      fontSize: "10.5px",
+                      fontSize: "11.5px",
                       fontWeight: 800,
                       display: "flex",
                       alignItems: "center",
@@ -570,7 +570,7 @@ export function Design2CanvasView({
                     <FreeCoverageGiftSvg width={28} height={24} />
                     <span>{insurer.split(" ")[0]} Free Added Coverage</span>
                   </div>
-                  <div style={{ padding: "16px 15px 12px 15px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 11px", alignContent: "start" }}>
+                  <div style={{ padding: "14px 14px 10px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 10px", alignContent: "start" }}>
                     {freeItems.length > 0 ? (
                       freeItems.map((fi, idx) => (
                         <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: "6px" }}>
@@ -578,13 +578,13 @@ export function Design2CanvasView({
                             <GreenTickSvg size={15} />
                           </div>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: "9.8px", fontWeight: 800, color: "#0F172A", lineHeight: 1.18 }}>{fi.title}</div>
+                            <div style={{ fontSize: "10.6px", fontWeight: 800, color: "#0F172A", lineHeight: 1.18 }}>{fi.title}</div>
                             {fi.description && (
                               <div
                                 style={{
-                                  fontSize: "8.2px",
+                                  fontSize: "9.0px",
                                   color: "#1E293B",
-                                  lineHeight: 1.25,
+                                  lineHeight: 1.24,
                                   marginTop: "2px",
                                   overflow: "hidden",
                                   display: "-webkit-box",
@@ -599,25 +599,25 @@ export function Design2CanvasView({
                         </div>
                       ))
                     ) : (
-                      <div style={{ gridColumn: "1 / -1", fontSize: "8px", color: "#52525B" }}>
+                      <div style={{ gridColumn: "1 / -1", fontSize: "9.0px", color: "#52525B" }}>
                         Standard comprehensive policy benefits included under underwriter terms.
                       </div>
                     )}
                   </div>
                 </div>
 
-                <div style={{ padding: "10px 14px 14px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "6px" }}>
+                <div style={{ padding: "8px 14px 12px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "6px" }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: "10.8px", fontWeight: 800, color: "#E52320", marginBottom: "4px", lineHeight: 1.2, whiteSpace: "nowrap" }}>
-                      Company Bank Details <span style={{ fontSize: "9.8px", fontWeight: 700, color: "#544F4E" }}>公司银行戶口</span>
+                    <div style={{ fontSize: "11.4px", fontWeight: 800, color: "#E52320", marginBottom: "4px", lineHeight: 1.2, whiteSpace: "nowrap" }}>
+                      Company Bank Details <span style={{ fontSize: "10.2px", fontWeight: 700, color: "#544F4E" }}>公司银行戶口</span>
                     </div>
-                    <div style={{ fontSize: "11.4px", fontWeight: 800, color: "#0F172A", lineHeight: 1.28 }}>
+                    <div style={{ fontSize: "11.8px", fontWeight: 800, color: "#0F172A", lineHeight: 1.28 }}>
                       {getVal(fields, "agency_account_name", String(config?.agency_account_name || "RISKLOCKER SDN. BHD."))}
                     </div>
-                    <div style={{ fontSize: "11.2px", fontWeight: 400, color: "#1E293B", lineHeight: 1.28 }}>
+                    <div style={{ fontSize: "11.5px", fontWeight: 400, color: "#1E293B", lineHeight: 1.28 }}>
                       {getVal(fields, "bank_name", String(config?.bank_name || "Hong Leong Bank"))}
                     </div>
-                    <div style={{ fontSize: "11.4px", fontWeight: 400, color: "#1E293B", letterSpacing: "0.2px", lineHeight: 1.28 }}>
+                    <div style={{ fontSize: "11.8px", fontWeight: 400, color: "#1E293B", letterSpacing: "0.2px", lineHeight: 1.28 }}>
                       {getVal(fields, "bank_account_no", String(config?.bank_account_no || "12300318500"))}
                     </div>
                   </div>
@@ -658,11 +658,11 @@ export function Design2CanvasView({
           </div>
 
           {/* Structural Hairline 3: Mid-Page Horizontal Divider */}
-          <div style={{ height: "1px", background: "#64748B", margin: "18px 0 12px 0", flexShrink: 0 }} />
+          <div style={{ height: "1px", background: "#64748B", margin: "12px 0 9px 0", flexShrink: 0 }} />
 
           {/* Lower Section: Add-On Upgrades ++ */}
           <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "11px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
               <div style={{ fontSize: "24.5px", fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1 }}>
                 <span style={{ color: "#E52320" }}>Add-On</span>{" "}
                 <span style={{ color: "#1D1D1B" }}>Upgrades</span>{" "}
@@ -673,7 +673,7 @@ export function Design2CanvasView({
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "7px 7px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6.5px 7px" }}>
               {page1Cards.map((card: UnifiedAddonCard) => (
                 <div
                   key={card.id}
@@ -683,12 +683,12 @@ export function Design2CanvasView({
                     boxShadow: "0 1px 2px rgba(15, 23, 42, 0.045)",
                     display: "flex",
                     alignItems: "stretch",
-                    height: "66px",
+                    height: "71px",
                     boxSizing: "border-box",
                     overflow: "hidden",
                   }}
                 >
-                  <div style={{ flex: "0 0 38px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "3px" }}>
+                  <div style={{ flex: "0 0 36px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "2px" }}>
                     <Design2CardIconMedia assetId={card.asset_id} iconHint={card.icon_hint} size={38} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0, padding: "4px 5px 3px 2px", display: "flex", flexDirection: "column", justifyContent: "space-between", overflow: "hidden" }}>
@@ -696,8 +696,8 @@ export function Design2CanvasView({
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "2px" }}>
                         <div
                           style={{
-                            fontSize: "8.2px",
-                            fontWeight: 750,
+                            fontSize: "9.2px",
+                            fontWeight: 800,
                             color: "#0F172A",
                             lineHeight: 1.15,
                             wordBreak: "break-word",
@@ -709,19 +709,19 @@ export function Design2CanvasView({
                         >
                           {card.title}
                         </div>
-                        <div style={{ fontSize: "6.8px", fontWeight: 700, color: "#334155", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
+                        <div style={{ fontSize: "7.6px", fontWeight: 700, color: "#334155", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
                           {card.serial_number}
                         </div>
                       </div>
                       {card.value && (
-                        <div style={{ fontSize: "7.6px", fontWeight: 800, color: "#15803D", marginTop: "1px", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div style={{ fontSize: "8.4px", fontWeight: 800, color: "#15803D", marginTop: "1px", lineHeight: 1.12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {card.value}
                         </div>
                       )}
                       {card.description && (
                         <div
                           style={{
-                            fontSize: "7.0px",
+                            fontSize: "7.9px",
                             color: "#0F172A",
                             lineHeight: 1.18,
                             marginTop: "1px",
@@ -816,32 +816,32 @@ export function Design2CanvasView({
                         background: "#F8F9FC",
                         borderRadius: "6px",
                         boxShadow: "0 1px 2px rgba(15, 23, 42, 0.05)",
-                        height: "62px",
+                        height: "68px",
                         display: "flex",
                         alignItems: "stretch",
                         overflow: "hidden",
                       }}
                     >
-                      <div style={{ flex: "0 0 40px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "4px" }}>
+                      <div style={{ flex: "0 0 38px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "3px" }}>
                         <Design2CardIconMedia assetId={card.asset_id} iconHint={card.icon_hint} size={36} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0, padding: "4px 7px 4px 2px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                         <div>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "3px" }}>
-                            <div style={{ fontSize: "7.4px", fontWeight: 700, color: "#0F172A", lineHeight: 1.12, paddingTop: "2px", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                            <div style={{ fontSize: "8.6px", fontWeight: 750, color: "#0F172A", lineHeight: 1.14, paddingTop: "1px", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
                               {card.title}
                             </div>
-                            <div style={{ fontSize: "6.2px", fontWeight: 600, color: "#94A3B8", flexShrink: 0, lineHeight: 1 }}>
+                            <div style={{ fontSize: "7.2px", fontWeight: 600, color: "#94A3B8", flexShrink: 0, lineHeight: 1 }}>
                               {card.serial_number}
                             </div>
                           </div>
                           {card.value && (
-                            <div style={{ fontSize: "7px", fontWeight: 800, color: "#5ABA00", marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            <div style={{ fontSize: "7.8px", fontWeight: 800, color: "#15803D", marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                               {card.value}
                             </div>
                           )}
                           {card.description && (
-                            <div style={{ fontSize: "6.2px", color: "#475569", lineHeight: 1.15, marginTop: "1px", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                            <div style={{ fontSize: "7.4px", color: "#334155", lineHeight: 1.18, marginTop: "1px", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
                               {card.description}
                             </div>
                           )}
@@ -875,13 +875,13 @@ export function Design2CanvasView({
                         <Design2BenefitIconSvg hint={row.hint} size={20} />
                       </div>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: "8.8px", fontWeight: 800, color: "#0F172A" }}>
-                          {row.title} {formatAddonValue(row.value) && <span style={{ color: "#5ABA00", fontSize: "7.8px" }}>({formatAddonValue(row.value)})</span>}
+                        <div style={{ fontSize: "9.8px", fontWeight: 800, color: "#0F172A" }}>
+                          {row.title} {formatAddonValue(row.value) && <span style={{ color: "#15803D", fontSize: "8.6px" }}>({formatAddonValue(row.value)})</span>}
                         </div>
-                        <div style={{ fontSize: "7.2px", color: "#475569", lineHeight: 1.25, marginTop: "1px" }}>{row.description}</div>
+                        <div style={{ fontSize: "8.2px", color: "#334155", lineHeight: 1.28, marginTop: "1px" }}>{row.description}</div>
                       </div>
                     </div>
-                    <span style={{ fontSize: "6.8px", fontWeight: 800, padding: "2px 6px", borderRadius: "4px", whiteSpace: "nowrap", background: "#ECFDF5", color: "#15803D", border: "1px solid #A7F3D0" }}>
+                    <span style={{ fontSize: "7.6px", fontWeight: 800, padding: "2px 6px", borderRadius: "4px", whiteSpace: "nowrap", background: "#ECFDF5", color: "#15803D", border: "1px solid #A7F3D0" }}>
                       {row.badge}
                     </span>
                   </div>
@@ -892,11 +892,11 @@ export function Design2CanvasView({
             {(() => {
               const optionalCards = addonCards.filter((c) => !c.is_selected);
               const overflowGridRows = overflowCards.length > 0 ? Math.ceil(overflowCards.length / 4) : 0;
-              const overflowH = overflowGridRows * 69 + (overflowCards.length > 0 ? 34 : 0);
+              const overflowH = overflowGridRows * 75 + (overflowCards.length > 0 ? 34 : 0);
               const activeGridRows = selectedScheduleRows.length > 0 ? Math.ceil(Math.min(selectedScheduleRows.length, 12) / 2) : 0;
-              const activeH = activeGridRows * 46 + (selectedScheduleRows.length > 0 ? 32 : 0);
+              const activeH = activeGridRows * 50 + (selectedScheduleRows.length > 0 ? 32 : 0);
               const remainingBudget = Math.max(0, 875 - overflowH - activeH - 28);
-              const optLimit = Math.max(0, Math.floor(remainingBudget / 38) * 2);
+              const optLimit = Math.max(0, Math.floor(remainingBudget / 42) * 2);
               const optSlice = optionalCards.slice(0, optLimit);
               if (optSlice.length === 0) return null;
               return (
@@ -915,13 +915,13 @@ export function Design2CanvasView({
                             <Design2BenefitIconSvg hint={oc.icon_hint} size={18} />
                           </div>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: "7.8px", fontWeight: 700, color: "#0F172A" }}>
-                              {oc.serial_number} · {oc.title} {formatAddonValue(oc.value) && <span style={{ color: "#5ABA00" }}>({formatAddonValue(oc.value)})</span>}
+                            <div style={{ fontSize: "8.5px", fontWeight: 700, color: "#0F172A" }}>
+                              {oc.serial_number} · {oc.title} {formatAddonValue(oc.value) && <span style={{ color: "#15803D" }}>({formatAddonValue(oc.value)})</span>}
                             </div>
-                            {oc.description && <div style={{ fontSize: "6.6px", color: "#64748B", lineHeight: 1.25 }}>{oc.description}</div>}
+                            {oc.description && <div style={{ fontSize: "7.4px", color: "#475569", lineHeight: 1.25 }}>{oc.description}</div>}
                           </div>
                         </div>
-                        <span style={{ fontSize: "6.4px", fontWeight: 700, padding: "1.5px 4.5px", borderRadius: "3px", whiteSpace: "nowrap", background: "#F8FAFC", color: "#475569", border: "1px solid #E2E8F0" }}>
+                        <span style={{ fontSize: "7.0px", fontWeight: 700, padding: "1.5px 4.5px", borderRadius: "3px", whiteSpace: "nowrap", background: "#F8FAFC", color: "#475569", border: "1px solid #E2E8F0" }}>
                           OPTIONAL
                         </span>
                       </div>

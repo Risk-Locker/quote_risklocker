@@ -456,6 +456,16 @@ def _propagate_to_comparison_entries(
         ce.total_payable = prem_dec + eff_rt + eff_rf
         ce.version = (ce.version or 1) + 1
 
+    if getattr(tenure, "covernote_session_id", None):
+        cn_sess = db.get(SessionModel, tenure.covernote_session_id)
+        if cn_sess and cn_sess.draft and isinstance(cn_sess.draft.fields, dict):
+            raw_prem = cn_sess.draft.fields.get("premium") or cn_sess.draft.fields.get("premium_due")
+            val_prem = raw_prem.get("value") if isinstance(raw_prem, dict) else raw_prem
+            if val_prem is not None and str(val_prem).strip():
+                cn_prem_dec = _to_decimal(val_prem)
+                if cn_prem_dec > Decimal("0.00"):
+                    tenure.won_premium = float(cn_prem_dec + eff_rt + eff_rf)
+
 
 def sync_tenure_identity_transaction(
     db: Session,

@@ -1463,10 +1463,40 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         cn_sum = _extract_vehicle_sum_insured(cn_f, s_obj=cn_session)
         cn_prem = _extract_vehicle_motor_premium(cn_f)
         cn_val_type, cn_agreed = _extract_valuation_type(cn_f, s_obj=cn_session)
-        cn_tot_pay = float(tenure.won_premium) if tenure.won_premium is not None else (cn_prem + float(tenure.road_tax) + float(tenure.runner_fee))
+        cn_eff_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+        cn_eff_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+        cn_tot_pay = float(tenure.won_premium) if tenure.won_premium is not None else round(cn_prem + cn_eff_rt + cn_eff_rf, 2)
         cn_b_res = _resolve_comparison_benefits(
             db, cn_session, getattr(cn_session, "company_id", None), cn_f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
         )
+        cn_excess = _extract_excess(cn_f, s_obj=cn_session)
+        cn_all_sels = benefit_prefetch.get("all_selections_by_draft", {}).get(cn_session.draft_id, []) if cn_session.draft_id else []
+        cn_bet_active = any(
+            getattr(sel, "state", None) == "current" and "betterment" in f"{getattr(sel, 'selection_key', '') or ''} {getattr(sel, 'label_override', '') or ''}".lower()
+            for sel in cn_all_sels
+        )
+        cn_bet_inactive = any(
+            getattr(sel, "state", None) != "current" and "betterment" in f"{getattr(sel, 'selection_key', '') or ''} {getattr(sel, 'label_override', '') or ''}".lower()
+            for sel in cn_all_sels
+        )
+        cn_raw_w = _extract_val(cn_f.get("waiver_of_betterment"))
+        if cn_bet_active:
+            cn_waiver_bet = True
+        elif cn_bet_inactive:
+            cn_waiver_bet = False
+        elif isinstance(cn_f.get("waiver_of_betterment"), dict) and cn_f["waiver_of_betterment"].get("status") == "manual_override":
+            cn_waiver_bet = str(cn_raw_w or "").strip().lower() == "included"
+        else:
+            cn_has_peril = check_has_betterment_peril(cn_f, cn_b_res.get("combined_text", ""), cn_raw_w)
+            cn_waiver_bet = bool(cn_has_peril)
+        if cn_waiver_bet:
+            cn_bet_rate = 0.0
+            cn_bet_disp = "No (0%)"
+        else:
+            cn_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
+            cn_q_yr = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year
+            cn_bet_rate, cn_bet_disp = get_standard_betterment_rate(max(0, cn_q_yr - (cn_yom or cn_q_yr)))
+
         s_date = cn_session.coverage_start_date or tenure.coverage_start_date
         e_date = cn_session.coverage_end_date or tenure.coverage_end_date
         s_fmt = s_date.strftime("%d/%m/%Y") if s_date else ""
@@ -1487,12 +1517,22 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "motor_premium": cn_prem,
             "rounded_motor_premium": float(round(float(cn_prem))),
             "exact_motor_premium": float(cn_prem),
+            "road_tax": cn_eff_rt,
+            "runner_fee": cn_eff_rf,
+            "include_road_tax": (tenure.include_road_tax is not False),
+            "include_runner_fee": (tenure.include_runner_fee is not False),
             "total_payable": cn_tot_pay,
-            "rounded_total_payable": float(round(float(cn_prem))) + float(tenure.road_tax) + float(tenure.runner_fee),
+            "rounded_total_payable": float(round(float(cn_prem))) + cn_eff_rt + cn_eff_rf,
             "exact_total_payable": cn_tot_pay,
+            "excess": cn_excess,
+            "waiver_betterment": cn_waiver_bet,
+            "betterment_rate": cn_bet_rate,
+            "betterment_display": cn_bet_disp,
             "windscreen_sum_insured": cn_b_res.get("windscreen_sum_insured"),
+            "towing_limit": cn_b_res.get("towing_km") or "Unlimited",
             "towing_km": cn_b_res.get("towing_km") or "Unlimited",
             "special_perils": cn_b_res.get("special_perils"),
+            "llp_llop": cn_b_res.get("llp_llop"),
             "canonical_perils_formatted": cn_b_res.get("canonical_perils_formatted") or "Standard Comprehensive Policy",
             "uploaded_file_id": cn_session.uploaded_file_id,
             "uploaded_file_name": cn_session.uploaded_file.original_filename if cn_session.uploaded_file else f"{cn_comp}.pdf",
@@ -1918,52 +1958,35 @@ def save_comparison_entry(
         if not entry.is_manual or entry.rate_percentage is None or float(entry.rate_percentage) == 0.0 or ("basic_figure_amount" not in payload and "basic_premium" not in payload and "motor_premium" in payload):
             entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
 
-    # Sync to linked QuotationDraft (Task 1.1: Canonical Key Alignment)
+    # Sync to linked QuotationDraft & DraftBenefitSelections (Task 1.1: Canonical Key Alignment)
     if entry.session_id:
-        s_obj = db.get(SessionModel, entry.session_id)
-        if s_obj and s_obj.draft:
-            d_fields = dict(s_obj.draft.fields or {})
-            if "company_name" in payload:
-                comp_val = _safe_str(payload["company_name"])
-                d_fields["insurance_company"] = {"value": comp_val, "status": "manual_override"}
-                d_fields["insurer_name"] = {"value": comp_val, "status": "manual_override"}
-                s_obj.detected_company = comp_val
-            if "sum_insured" in payload:
-                d_fields["sum_insured"] = {"value": f"{_to_float(payload['sum_insured']):.2f}", "status": "manual_override"}
-            if "agreed_value" in payload or "valuation_type" in payload:
-                val_type_str = "Agreed Value" if entry.agreed_value else "Market Value"
-                d_fields["valuation_type"] = {"value": val_type_str, "status": "manual_override"}
-            if "motor_premium" in payload:
-                prem_str = f"{_to_float(payload['motor_premium']):.2f}"
-                d_fields["premium"] = {"value": prem_str, "status": "manual_override"}
-                d_fields["premium_due"] = {"value": prem_str, "status": "manual_override"}
-            if "towing_limit" in payload:
-                tow_str = _safe_str(payload["towing_limit"])
-                d_fields["towing"] = {"value": tow_str, "status": "manual_override"}
-                d_fields["towing_limit"] = {"value": tow_str, "status": "manual_override"}
-            if "waiver_betterment" in payload:
-                d_fields["waiver_of_betterment"] = {"value": "Included" if payload["waiver_betterment"] else "Not Included", "status": "manual_override"}
-            if "excess" in payload:
-                ex_str = f"{_to_float(payload['excess']):.2f}"
-                d_fields["excess_amount"] = {"value": ex_str, "status": "manual_override"}
-                d_fields["excess"] = {"value": ex_str, "status": "manual_override"}
-            if "windscreen_sum_insured" in payload:
-                ws_val = _to_float(payload["windscreen_sum_insured"])
-                ws_str = f"{ws_val:.2f}" if ws_val > 0 else ""
-                d_fields["windscreen_sum_insured"] = {"value": ws_str, "status": "manual_override"}
-                d_fields["windscreen"] = {"value": ws_str, "status": "manual_override"}
-            if "special_perils" in payload:
-                d_fields["special_perils"] = {"value": _safe_str(payload["special_perils"]), "status": "manual_override"}
-            if "llp_llop" in payload:
-                d_fields["llp_llop"] = {"value": _safe_str(payload["llp_llop"]), "status": "manual_override"}
+        from app.services.marketing_comparison.workspace_sync import sync_session_draft_from_comparison
 
-            # Recompute draft fees and total payable
-            d_fields["roadtax"] = {"value": f"{eff_rt:.2f}", "status": "manual_override"}
-            d_fields["service_fee"] = {"value": f"{eff_rf:.2f}", "status": "manual_override"}
-            d_fields["total_amount"] = {"value": f"{entry.total_payable:.2f}", "status": "manual_override"}
-
-            s_obj.draft.fields = d_fields
-            flag_modified(s_obj.draft, "fields")
+        prem_delta_dec = sync_session_draft_from_comparison(
+            db,
+            tenure,
+            entry.session_id,
+            edited_fields=list(payload.keys()),
+            field_values={
+                "company_name": entry.company_name,
+                "sum_insured": entry.sum_insured,
+                "agreed_value": entry.agreed_value,
+                "valuation_type": entry.valuation_type,
+                "motor_premium": entry.motor_premium,
+                "towing_limit": entry.towing_limit,
+                "waiver_betterment": entry.waiver_betterment,
+                "excess": entry.excess,
+                "windscreen_sum_insured": entry.windscreen_sum_insured,
+                "special_perils": entry.special_perils or "Not Included",
+                "llp_llop": entry.llp_llop or "Not Included",
+            },
+            explicit_motor_premium=("motor_premium" in payload),
+        )
+        if prem_delta_dec != Decimal("0.00") and "motor_premium" not in payload:
+            entry.motor_premium = round(max(0.0, float(entry.motor_premium or 0.0) + float(prem_delta_dec)), 2)
+            entry.total_payable = round(float(entry.motor_premium) + eff_rt + eff_rf, 2)
+            if float(entry.sum_insured or 0.0) > 0:
+                entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
 
     db.commit()
     return get_marketing_comparison(db, tenure_id)

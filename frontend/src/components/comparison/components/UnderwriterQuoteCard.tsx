@@ -84,21 +84,20 @@ export function UnderwriterQuoteCard({
     overrides.includes(field) || (field === "towing_limit" && overrides.includes("towing_km"));
   const isSpecialPerilsIncluded = Boolean(
     entry.special_perils &&
-      !["not included", "not covered", "none", "nil", "no", "-", "—", "tiada", "tidak termasuk"].includes(
-        entry.special_perils.trim().toLowerCase()
-      )
+    !["not included", "not covered", "none", "nil", "no", "-", "—", "tiada", "tidak termasuk"].includes(
+      entry.special_perils.trim().toLowerCase()
+    )
   );
 
   return (
     <div
       key={entry.id}
-      className={`w-[275px] shrink-0 rounded-2xl bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${
-        isViewingPdf
+      className={`w-[275px] shrink-0 rounded-2xl bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${isViewingPdf
           ? "border-2 border-[#1b1717] ring-4 ring-[#1b1717]/15 shadow-xl scale-[1.01]"
           : isWinner
-          ? "border-2 border-[#1b1717] shadow-lg ring-1 ring-black/5"
-          : "border border-[#e5e5ea] shadow-xs hover:border-neutral-400"
-      }`}
+            ? "border-2 border-[#1b1717] shadow-lg ring-1 ring-black/5"
+            : "border border-[#e5e5ea] shadow-xs hover:border-neutral-400"
+        }`}
     >
       {/* Equal Height Standardized Top Slot (h-8) for Perfect Grid Row Alignment */}
       {isWinner ? (
@@ -146,9 +145,8 @@ export function UnderwriterQuoteCard({
               <button
                 type="button"
                 onClick={() => onToggleHideEntry(entry)}
-                className={`p-1 rounded text-neutral-400 hover:text-[#1b1717] hover:bg-neutral-100 transition-colors cursor-pointer ${
-                  entry.is_hidden ? "text-neutral-400 bg-neutral-100" : ""
-                }`}
+                className={`p-1 rounded text-neutral-400 hover:text-[#1b1717] hover:bg-neutral-100 transition-colors cursor-pointer ${entry.is_hidden ? "text-neutral-400 bg-neutral-100" : ""
+                  }`}
                 title={entry.is_hidden ? "Unhide this quotation card" : "Hide this card from comparison & snapshot"}
               >
                 {entry.is_hidden ? <EyeSlash size={15} weight="bold" /> : <Eye size={15} />}
@@ -171,11 +169,10 @@ export function UnderwriterQuoteCard({
                         onSetManualRank(entry, num);
                         onSetEditingRankEntryId(null);
                       }}
-                      className={`w-6 h-6 flex items-center justify-center text-[11px] font-bold rounded border cursor-pointer transition-colors ${
-                        currentRank === num
+                      className={`w-6 h-6 flex items-center justify-center text-[11px] font-bold rounded border cursor-pointer transition-colors ${currentRank === num
                           ? "bg-[#1b1717] text-white border-[#1b1717] font-black"
                           : "bg-white text-[#454545] border-[#e5e5ea] hover:bg-neutral-100"
-                      }`}
+                        }`}
                     >
                       {num}
                     </button>
@@ -200,11 +197,10 @@ export function UnderwriterQuoteCard({
                       type="button"
                       disabled={!canEdit}
                       onClick={() => canEdit && onSetEditingRankEntryId(entry.id)}
-                      className={`rounded font-bold px-2 py-0.5 text-[11px] transition-colors ${
-                        r === 1
+                      className={`rounded font-bold px-2 py-0.5 text-[11px] transition-colors ${r === 1
                           ? "bg-amber-100 text-amber-950 border border-amber-300"
                           : "bg-neutral-100 text-neutral-800 border border-neutral-300"
-                      } ${canEdit ? "hover:bg-amber-200 cursor-pointer" : "cursor-default"}`}
+                        } ${canEdit ? "hover:bg-amber-200 cursor-pointer" : "cursor-default"}`}
                       title={canEdit ? "Click to change rank" : "Only 1 quotation visible"}
                     >
                       Rank #{r}
@@ -226,11 +222,10 @@ export function UnderwriterQuoteCard({
           {/* Row 2.5: Logical Underwriter Ranking Explanation Callout */}
           {(entry.ranking_explanation || entry.notes) ? (
             <div
-              className={`mt-2 rounded-md px-2 py-1.5 text-[10px] leading-snug border ${
-                (visibleRanksMap[entry.id] ?? entry.rank ?? 1) === 1
+              className={`mt-2 rounded-md px-2 py-1.5 text-[10px] leading-snug border ${(visibleRanksMap[entry.id] ?? entry.rank ?? 1) === 1
                   ? "bg-amber-50/90 border-amber-200 text-amber-950 font-semibold"
                   : "bg-neutral-50 border-neutral-200/80 text-[#454545]"
-              }`}
+                }`}
               title={entry.ranking_explanation || entry.notes || undefined}
             >
               <span className="line-clamp-2">{entry.ranking_explanation || entry.notes}</span>
@@ -252,17 +247,16 @@ export function UnderwriterQuoteCard({
                         key={q.id}
                         type="button"
                         onClick={() => onSelectActiveVersion(group.companyName, q.id)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                          isThisSelected
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 ${isThisSelected
                             ? "bg-[#1b1717] text-white shadow-xs"
                             : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/60"
-                        }`}
+                          }`}
                         title={`v${q.version || 1} • RM ${formatMoneyWithRounding(
                           roundingMode === "whole"
                             ? (q.whole_total_payable ?? q.total_payable)
                             : (roundingMode === "5cent" || roundingMode === "bnm5")
-                            ? (q.bnm_5cent_total_payable ?? q.exact_total_payable ?? q.total_payable)
-                            : (q.exact_total_payable ?? q.total_payable),
+                              ? (q.bnm_5cent_total_payable ?? q.exact_total_payable ?? q.total_payable)
+                              : (q.exact_total_payable ?? q.total_payable),
                           roundingMode
                         )}${isLatest ? " (Latest)" : ""}`}
                       >
@@ -326,9 +320,23 @@ export function UnderwriterQuoteCard({
               Sum Insured
             </span>
             <div className="flex items-baseline gap-1.5">
-              <p className="font-mono text-base font-bold text-[#1b1717]">
-                RM {entry.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
-              </p>
+              {onPatchEntryField ? (
+                <InlineComparisonFieldEditor
+                  field="sum_insured"
+                  label="Sum Insured (RM)"
+                  currentValue={entry.sum_insured}
+                  isOverridden={isFieldOverridden("sum_insured")}
+                  onSave={(patch) => onPatchEntryField(entry, patch)}
+                >
+                  <p className="font-mono text-base font-bold text-[#1b1717]">
+                    RM {entry.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                  </p>
+                </InlineComparisonFieldEditor>
+              ) : (
+                <p className="font-mono text-base font-bold text-[#1b1717]">
+                  RM {entry.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                </p>
+              )}
               <span className="text-xs text-[#6e6e73]">
                 {entry.valuation_type === "agreed_value" ? "[A]" : "[M]"}
               </span>
@@ -339,32 +347,59 @@ export function UnderwriterQuoteCard({
             <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
               Motor Premium
             </span>
-            <p
-              className="font-mono text-sm font-bold text-[#1b1717]"
-              title={
-                entry.exact_motor_premium
-                  ? `Exact cents: RM ${entry.exact_motor_premium.toFixed(2)}`
-                  : undefined
-              }
-            >
-              RM {formatMoneyWithRounding(
-                roundingMode === "whole"
-                  ? (entry.whole_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
-                  : (roundingMode === "5cent" || roundingMode === "bnm5")
-                  ? (entry.bnm_5cent_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
-                  : (entry.exact_motor_premium ?? entry.motor_premium),
-                roundingMode
-              )}
-            </p>
+            {onPatchEntryField ? (
+              <InlineComparisonFieldEditor
+                field="motor_premium"
+                label="Motor Premium (RM)"
+                currentValue={entry.exact_motor_premium ?? entry.motor_premium}
+                isOverridden={isFieldOverridden("motor_premium")}
+                onSave={(patch) => onPatchEntryField(entry, patch)}
+              >
+                <p
+                  className="font-mono text-sm font-bold text-[#1b1717]"
+                  title={
+                    entry.exact_motor_premium
+                      ? `Exact cents: RM ${entry.exact_motor_premium.toFixed(2)}`
+                      : undefined
+                  }
+                >
+                  RM {formatMoneyWithRounding(
+                    roundingMode === "whole"
+                      ? (entry.whole_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
+                      : (roundingMode === "5cent" || roundingMode === "bnm5")
+                        ? (entry.bnm_5cent_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
+                        : (entry.exact_motor_premium ?? entry.motor_premium),
+                    roundingMode
+                  )}
+                </p>
+              </InlineComparisonFieldEditor>
+            ) : (
+              <p
+                className="font-mono text-sm font-bold text-[#1b1717]"
+                title={
+                  entry.exact_motor_premium
+                    ? `Exact cents: RM ${entry.exact_motor_premium.toFixed(2)}`
+                    : undefined
+                }
+              >
+                RM {formatMoneyWithRounding(
+                  roundingMode === "whole"
+                    ? (entry.whole_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
+                    : (roundingMode === "5cent" || roundingMode === "bnm5")
+                      ? (entry.bnm_5cent_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
+                      : (entry.exact_motor_premium ?? entry.motor_premium),
+                  roundingMode
+                )}
+              </p>
+            )}
           </div>
 
           {/* Total Payable Box */}
           <div
-            className={`rounded-xl p-3.5 border transition-colors h-[92px] flex flex-col justify-between ${
-              isWinner
+            className={`rounded-xl p-3.5 border transition-colors h-[92px] flex flex-col justify-between ${isWinner
                 ? "border-2 border-[#1b1717] bg-[#f5f5f7]"
                 : "border border-[#e5e5ea] bg-[#f5f5f7]/80"
-            }`}
+              }`}
           >
             <span className="text-[11px] uppercase font-bold text-[#454545] block">
               Total Payable
@@ -377,8 +412,8 @@ export function UnderwriterQuoteCard({
                       roundingMode === "whole"
                         ? (entry.whole_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
                         : (roundingMode === "5cent" || roundingMode === "bnm5")
-                        ? (entry.bnm_5cent_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
-                        : (entry.exact_total_payable ?? entry.total_payable),
+                          ? (entry.bnm_5cent_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
+                          : (entry.exact_total_payable ?? entry.total_payable),
                       roundingMode
                     )}
                   </span>
@@ -398,8 +433,8 @@ export function UnderwriterQuoteCard({
                     roundingMode === "whole"
                       ? (entry.whole_net_total_payable ?? entry.net_total_payable ?? Math.max(0, (entry.whole_total_payable ?? entry.total_payable) - (entry.effective_discount ?? tenure.quotation_discount ?? 0)))
                       : (roundingMode === "5cent" || roundingMode === "bnm5")
-                      ? (entry.bnm_5cent_net_total_payable ?? entry.net_total_payable ?? Math.max(0, (entry.bnm_5cent_total_payable ?? entry.total_payable) - (entry.effective_discount ?? tenure.quotation_discount ?? 0)))
-                      : (entry.net_total_payable ?? Math.max(0, (entry.exact_total_payable ?? entry.total_payable) - (entry.effective_discount ?? tenure.quotation_discount ?? 0))),
+                        ? (entry.bnm_5cent_net_total_payable ?? entry.net_total_payable ?? Math.max(0, (entry.bnm_5cent_total_payable ?? entry.total_payable) - (entry.effective_discount ?? tenure.quotation_discount ?? 0)))
+                        : (entry.net_total_payable ?? Math.max(0, (entry.exact_total_payable ?? entry.total_payable) - (entry.effective_discount ?? tenure.quotation_discount ?? 0))),
                     roundingMode
                   )}
                 </p>
@@ -417,8 +452,8 @@ export function UnderwriterQuoteCard({
                   roundingMode === "whole"
                     ? (entry.whole_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
                     : (roundingMode === "5cent" || roundingMode === "bnm5")
-                    ? (entry.bnm_5cent_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
-                    : (entry.exact_total_payable ?? entry.total_payable),
+                      ? (entry.bnm_5cent_total_payable ?? entry.exact_total_payable ?? entry.total_payable)
+                      : (entry.exact_total_payable ?? entry.total_payable),
                   roundingMode
                 )}
               </p>
@@ -427,10 +462,10 @@ export function UnderwriterQuoteCard({
               {tenure.include_road_tax === false && tenure.include_runner_fee === false
                 ? "(Excl. Roadtax & Runner fee)"
                 : tenure.include_road_tax === false
-                ? `(Incl. RM ${tenure.runner_fee.toFixed(2)} Runner fee only)`
-                : tenure.include_runner_fee === false
-                ? `(Incl. RM ${tenure.road_tax.toFixed(2)} Roadtax only)`
-                : `(Incl. RM ${tenure.fixed_costs_total.toFixed(2)} Roadtax & Runner fee)`}
+                  ? `(Incl. RM ${tenure.runner_fee.toFixed(2)} Runner fee only)`
+                  : tenure.include_runner_fee === false
+                    ? `(Incl. RM ${tenure.road_tax.toFixed(2)} Roadtax only)`
+                    : `(Incl. RM ${tenure.fixed_costs_total.toFixed(2)} Roadtax & Runner fee)`}
             </span>
           </div>
         </div>
@@ -466,9 +501,23 @@ export function UnderwriterQuoteCard({
           {/* Agreed Value */}
           <div className="h-8 flex items-center justify-between pt-2">
             <span className="text-[#6e6e73]">Agreed Value:</span>
-            <span className={`font-bold ${entry.agreed_value ? "text-emerald-700" : "text-[#6e6e73]"}`}>
-              {entry.agreed_value ? "Yes" : "No"}
-            </span>
+            {onPatchEntryField ? (
+              <InlineComparisonFieldEditor
+                field="agreed_value"
+                label="Agreed Value"
+                currentValue={entry.agreed_value ? "Yes" : "No"}
+                isOverridden={isFieldOverridden("agreed_value") || isFieldOverridden("valuation_type")}
+                onSave={(patch) => onPatchEntryField(entry, patch)}
+              >
+                <span className={`font-bold ${entry.agreed_value ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                  {entry.agreed_value ? "Yes" : "No"}
+                </span>
+              </InlineComparisonFieldEditor>
+            ) : (
+              <span className={`font-bold ${entry.agreed_value ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                {entry.agreed_value ? "Yes" : "No"}
+              </span>
+            )}
           </div>
 
           {/* Betterment Co-pay / Waiver */}
@@ -476,16 +525,35 @@ export function UnderwriterQuoteCard({
             <div className="flex items-center gap-1 text-[#6e6e73]">
               <span>Betterment:</span>
             </div>
-            <span
-              className={`font-bold cursor-help ${
-                (entry.betterment_display && entry.betterment_display.startsWith("No")) || entry.waiver_betterment
-                  ? "text-emerald-700"
-                  : "text-amber-700"
-              }`}
-              title="Malaysian Tariff Scale: <5 yrs: 0%, 5 yrs: 15%, 6 yrs: 20%, 7 yrs: 25%, 8 yrs: 30%, 9 yrs: 35%, 10+ yrs: 40%"
-            >
-              {entry.betterment_display || (entry.waiver_betterment ? "No (0%)" : "Yes")}
-            </span>
+            {onPatchEntryField ? (
+              <InlineComparisonFieldEditor
+                field="waiver_betterment"
+                label="Betterment"
+                currentValue={entry.waiver_betterment ? "No (0%)" : entry.betterment_display || "Yes"}
+                isOverridden={isFieldOverridden("waiver_betterment")}
+                onSave={(patch) => onPatchEntryField(entry, patch)}
+              >
+                <span
+                  className={`font-bold ${(entry.betterment_display && entry.betterment_display.startsWith("No")) || entry.waiver_betterment
+                      ? "text-emerald-700"
+                      : "text-amber-700"
+                    }`}
+                  title="Malaysian Tariff Scale: <5 yrs: 0%, 5 yrs: 15%, 6 yrs: 20%, 7 yrs: 25%, 8 yrs: 30%, 9 yrs: 35%, 10+ yrs: 40%"
+                >
+                  {entry.betterment_display || (entry.waiver_betterment ? "No (0%)" : "Yes")}
+                </span>
+              </InlineComparisonFieldEditor>
+            ) : (
+              <span
+                className={`font-bold cursor-help ${(entry.betterment_display && entry.betterment_display.startsWith("No")) || entry.waiver_betterment
+                    ? "text-emerald-700"
+                    : "text-amber-700"
+                  }`}
+                title="Malaysian Tariff Scale: <5 yrs: 0%, 5 yrs: 15%, 6 yrs: 20%, 7 yrs: 25%, 8 yrs: 30%, 9 yrs: 35%, 10+ yrs: 40%"
+              >
+                {entry.betterment_display || (entry.waiver_betterment ? "No (0%)" : "Yes")}
+              </span>
+            )}
           </div>
 
           {/* Excess */}
@@ -513,11 +581,10 @@ export function UnderwriterQuoteCard({
             <span className="text-[#6e6e73]">Rate:</span>
             <span
               className="font-mono font-bold text-[#1b1717] cursor-help"
-              title={`${entry.basic_figure_name || (entry.is_takaful ? "Basic Contribution" : "Basic Premium")} (RM ${(entry.basic_figure_amount || 0).toFixed(2)}) ÷ Sum Insured (RM ${entry.sum_insured.toFixed(2)}) = ${
-                entry.sum_insured > 0 && entry.basic_figure_amount != null
+              title={`${entry.basic_figure_name || (entry.is_takaful ? "Basic Contribution" : "Basic Premium")} (RM ${(entry.basic_figure_amount || 0).toFixed(2)}) ÷ Sum Insured (RM ${entry.sum_insured.toFixed(2)}) = ${entry.sum_insured > 0 && entry.basic_figure_amount != null
                   ? (entry.basic_figure_amount / entry.sum_insured).toFixed(6)
                   : entry.rate_factor_formatted || "—"
-              }`}
+                }`}
             >
               {entry.sum_insured > 0 && entry.basic_figure_amount != null
                 ? (entry.basic_figure_amount / entry.sum_insured).toFixed(6)
@@ -552,11 +619,10 @@ export function UnderwriterQuoteCard({
               )}
               {entry.windscreen_sum_insured && tenure.windscreen_target ? (
                 <span
-                  className={`block text-[10px] font-bold ${
-                    entry.windscreen_sum_insured >= tenure.windscreen_target
+                  className={`block text-[10px] font-bold ${entry.windscreen_sum_insured >= tenure.windscreen_target
                       ? "text-emerald-700"
                       : "text-amber-600"
-                  }`}
+                    }`}
                 >
                   {entry.windscreen_sum_insured >= tenure.windscreen_target
                     ? "✓ Target Met"
@@ -652,11 +718,10 @@ export function UnderwriterQuoteCard({
                 companyName: entry.company_name,
               })
             }
-            className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer ${
-              isViewingPdf
+            className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer ${isViewingPdf
                 ? "bg-[#1b1717] text-white border border-[#1b1717]"
                 : "bg-white hover:bg-neutral-100 text-[#1b1717] border border-[#e5e5ea]"
-            }`}
+              }`}
             title="View uploaded underwriter quotation PDF to verify values"
           >
             <FilePdf size={15} weight="bold" className={isViewingPdf ? "text-amber-300" : "text-[#ed1c24]"} />
@@ -668,11 +733,10 @@ export function UnderwriterQuoteCard({
         <Button
           variant={isWinner ? "primary" : "secondary"}
           size="sm"
-          className={`w-full text-xs font-bold transition-all group ${
-            isWinner
+          className={`w-full text-xs font-bold transition-all group ${isWinner
               ? "bg-[#1b1717] hover:bg-black text-white"
               : "border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717]"
-          }`}
+            }`}
           loading={selectingWinnerId === entry.id}
           icon={<Star weight={isWinner ? "fill" : "bold"} size={14} className={isWinner ? "text-amber-400" : ""} />}
           onClick={() => onSelectWinner(entry.id)}
@@ -694,11 +758,10 @@ export function UnderwriterQuoteCard({
             href={`/sessions/${entry.session_id}/review` as Route}
             target="_blank"
             rel="noopener noreferrer"
-            className={`flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg text-xs font-bold transition-all shadow-2xs ${
-              isWinner
+            className={`flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg text-xs font-bold transition-all shadow-2xs ${isWinner
                 ? "text-[#ed1c24] bg-rose-50 hover:bg-rose-100 border border-rose-200"
                 : "text-[#1b1717] bg-white hover:bg-neutral-100 border border-[#e5e5ea]"
-            }`}
+              }`}
             title="Open quotation in the unified Quotation Workspace to review benefits, edit draft fields, and preview/generate customer PDF"
           >
             <FilePdf size={14} weight="bold" className={isWinner ? "text-[#ed1c24]" : "text-[#454545]"} />

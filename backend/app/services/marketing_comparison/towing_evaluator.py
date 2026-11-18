@@ -295,5 +295,5 @@ def resolve_insurer_towing_limit(
         return "RM 300"
 
     if is_rm_based:
-        return "RM 200"
+        return "-"
     return "50 km"

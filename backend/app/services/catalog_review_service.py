@@ -968,6 +968,8 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 elif matched.optional_price:
                     price_dict = deepcopy(matched.optional_price)
 
+                from app.domain.benefit_pricing import parse_money_decimal as _parse_dec_amt
+                _applied_str = f"{_parse_dec_amt(price_dict):.2f}" if (has_pos_cost or price_dict) else "0.00"
                 new_selection = DraftBenefitSelection(
                     id=selection_id,
                     draft_id=draft.id,
@@ -979,7 +981,13 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     cost_status="paid" if has_pos_cost else (current.cost_status or "included"),
                     label_override=matched.label_override if (matched and matched.label_override) else None,
                     typed_value_override=extracted if not _value_matches(matched.typed_value, extracted) else None,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_upgrade", "is_detected": True, "extracted_label": line.raw_label},
+                    evidence_snapshot={
+                        "source_line_id": line.id,
+                        "source": "extracted_upgrade",
+                        "is_detected": True,
+                        "extracted_label": line.raw_label,
+                        "applied_to_premium": _applied_str,
+                    },
                     sort_order=int(matched.sort_order or 0),
                     selected_by=draft.owner_id,
                     price=price_dict,
@@ -998,6 +1006,9 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         if val_num > 0:
                             current.cost_status = "paid"
                             current.price = {"amount": val_num, "value": val_num, "currency": "MYR"}
+                            curr_ev = dict(current.evidence_snapshot or {})
+                            curr_ev["applied_to_premium"] = f"{val_num:.2f}"
+                            current.evidence_snapshot = curr_ev
                     except ValueError:
                         pass
                 applied += 1
@@ -1078,6 +1089,8 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 else:
                     cost_status = "unknown"
 
+                from app.domain.benefit_pricing import parse_money_decimal as _parse_dec_amt
+                _applied_addon_str = f"{_parse_dec_amt(price_dict):.2f}" if (cost_status == "paid" and price_dict) else "0.00"
                 new_selection = DraftBenefitSelection(
                     id=selection_id,
                     draft_id=draft.id,
@@ -1089,7 +1102,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     cost_status=cost_status,
                     label_override=matched.label_override if (matched and matched.label_override) else None,
                     typed_value_override=typed_val if (typed_val and not _value_matches(matched.typed_value, typed_val)) else None,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_addon", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost},
+                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_addon", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost, "applied_to_premium": _applied_addon_str},
                     sort_order=int(matched.sort_order or 0),
                     selected_by=draft.owner_id,
                     price=price_dict,
@@ -1131,6 +1144,8 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 else:
                     custom_label = (line.raw_label or "").strip() or "Custom Benefit"
 
+                from app.domain.benefit_pricing import parse_money_decimal as _parse_dec_amt
+                _applied_custom_str = f"{_parse_dec_amt(price_dict):.2f}" if (has_pos_cost and price_dict) else "0.00"
                 new_selection = DraftBenefitSelection(
                     id=selection_id,
                     draft_id=draft.id,
@@ -1142,7 +1157,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     cost_status="paid" if has_pos_cost else "included",
                     label_override=custom_label,
                     typed_value_override=typed_val,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost},
+                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost, "applied_to_premium": _applied_custom_str},
                     sort_order=50 + applied,
                     selected_by=draft.owner_id,
                     price=price_dict,
