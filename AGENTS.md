@@ -1,4 +1,4 @@
-﻿# Project rules (lean)
+# Project rules (lean)
 
 Stack: FastAPI + PostgreSQL (backend/app), Next.js 15 (frontend/src), SQL migrations in migrations/.
 
@@ -17,6 +17,7 @@ Stack: FastAPI + PostgreSQL (backend/app), Next.js 15 (frontend/src), SQL migrat
 
 ## Verify
 - Run only the relevant test or `cd frontend; npx tsc --noEmit`. Report result in 1-2 lines.
+- **Strict readiness gate:** NEVER say "all okay", "perfect", "0 issues", or "deploy will work" unless you have actually run and observed the full CI/test suite (`pytest -q`, `npx tsc --noEmit`, `npm run lint`, `npm run build`) pass with 0 failures in the current state. If any check was skipped or failed, state that explicitly.
 
 ## Output
 - Be brief: no preamble or recap; state changes and test result only.

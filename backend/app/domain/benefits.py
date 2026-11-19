@@ -143,7 +143,7 @@ class BenefitValue(BaseModel):
         elif self.type == "formula":
             if not (self.expression or "").strip():
                 raise ValueError("Formula requires an expression.")
-        elif self.type in {"custom", "text", "string"}:
+        elif self.type in {"text", "string"}:
             # Allow empty display_text when user explicitly clears/hides coverage or stores description overrides
             pass
         elif self.type == "region" and not self.region:
@@ -154,6 +154,8 @@ class BenefitValue(BaseModel):
             raise ValueError("Package-plan values require a plan key.")
         elif self.type in {"occurrence", "duration", "count", "boolean"} and self.value is None:
             raise ValueError(f"{self.type} requires a value.")
+        elif self.type == "custom" and not (self.display_text and self.display_text.strip()):
+            raise ValueError("Custom value requires display_text.")
         return self
 
 
