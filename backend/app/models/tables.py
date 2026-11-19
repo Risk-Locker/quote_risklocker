@@ -110,6 +110,7 @@ class InsuranceCompany(Base, TimestampMixin):
     logo_path: Mapped[str | None] = mapped_column(String(600), nullable=True)
     logo_asset_id: Mapped[str | None] = mapped_column(ForeignKey("business_assets.id", ondelete="SET NULL"), nullable=True, index=True)
     detection_phrases: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    policy_rules: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=AccountStatus.ACTIVE.value, index=True)
 
 
@@ -399,6 +400,7 @@ class TenureComparisonEntry(Base, TimestampMixin):
     special_perils: Mapped[str | None] = mapped_column(String(50), nullable=True)
     llp_llop: Mapped[str | None] = mapped_column(String(50), nullable=True)
     personal_accident: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    extra_addons: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"), nullable=False)
     rank: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     manual_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     betterment_rate: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)

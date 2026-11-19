@@ -544,9 +544,9 @@ def test_m2_design2_typography_enlarged_and_fits_a4_height():
         },
         render_context={"current_benefits": addons[:4], "available_addons": addons[4:]},
     )
-    assert "font-size: 9.2px" in html
-    assert "font-size: 7.9px" in html
-    assert "height: 71px" in html
+    assert "font-size: 10.0px" in html
+    assert "font-size: 8.6px" in html
+    assert "height: 73px" in html
     assert "1123px" in html
 
 

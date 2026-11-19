@@ -681,12 +681,22 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
 
     default_cost = CostStatus.INCLUDED if desired_state == "current" else CostStatus.PAID
     cost_status = normalize_cost_status(operation.get("cost_status"), default=default_cost).value
+    has_typed_op = "typed_value" in operation or "typed_value_override" in operation
     typed_override = None
-    if "typed_value" in operation and operation.get("typed_value") is not None:
-        try:
-            typed_override = BenefitValue.model_validate(operation["typed_value"]).model_dump(mode="json", exclude_none=True)
-        except ValidationError as exc:
-            raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
+    if has_typed_op:
+        raw_op_typed = operation.get("typed_value") if "typed_value" in operation else operation.get("typed_value_override")
+        if raw_op_typed is None:
+            typed_override = {"type": "custom", "display_text": "", "hide_limit": True}
+        else:
+            try:
+                typed_override = BenefitValue.model_validate(raw_op_typed).model_dump(mode="json", exclude_none=True)
+                if isinstance(raw_op_typed, dict):
+                    if "display_text" in raw_op_typed and raw_op_typed.get("display_text") == "":
+                        typed_override["display_text"] = ""
+                    if "hide_limit" in raw_op_typed and raw_op_typed.get("hide_limit") is not None:
+                        typed_override["hide_limit"] = bool(raw_op_typed.get("hide_limit"))
+            except ValidationError as exc:
+                raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
 
     price = operation.get("price")
     if "price" in operation and price is None:
@@ -710,10 +720,19 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             sort_order=int(offering.sort_order or 0),
         )
         db.add(selected)
+    elif "state" not in operation:
+        desired_state = selected.state
     selected.state = desired_state
-    selected.cost_status = cost_status
-    selected.typed_value_override = typed_override
-    selected.price = price
+    if "cost_status" in operation or not selected.cost_status:
+        selected.cost_status = cost_status
+    if has_typed_op:
+        prev_typed = dict(selected.typed_value_override or {})
+        if isinstance(typed_override, dict):
+            if "description" in prev_typed and "description" not in typed_override:
+                typed_override["description"] = prev_typed["description"]
+        selected.typed_value_override = typed_override
+    if "price" in operation or selected.price is None:
+        selected.price = price
     if "label" in operation or "label_override" in operation:
         raw_lbl = operation.get("label") if "label" in operation else operation.get("label_override")
         if raw_lbl:
@@ -790,16 +809,24 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
         selection.typed_value_override = curr_typed or None
     if "typed_value" in operation or "typed_value_override" in operation:
         raw = operation.get("typed_value") if "typed_value" in operation else operation.get("typed_value_override")
+        prev_typed = dict(selection.typed_value_override or {})
         if raw is None:
-            if selection.typed_value_override and "description" in selection.typed_value_override:
-                selection.typed_value_override = {"type": "custom", "description": selection.typed_value_override["description"]}
-            else:
-                selection.typed_value_override = None
+            cleared: dict = {"type": "custom", "display_text": "", "hide_limit": True}
+            if "description" in prev_typed:
+                cleared["description"] = prev_typed["description"]
+            selection.typed_value_override = cleared
         else:
             try:
                 validated = BenefitValue.model_validate(raw).model_dump(mode="json", exclude_none=True)
-                if selection.typed_value_override and "description" in selection.typed_value_override and "description" not in validated:
-                    validated["description"] = selection.typed_value_override["description"]
+                if isinstance(raw, dict):
+                    if "display_text" in raw and raw.get("display_text") == "":
+                        validated["display_text"] = ""
+                    if "hide_limit" in raw and raw.get("hide_limit") is not None:
+                        validated["hide_limit"] = bool(raw.get("hide_limit"))
+                if "description" in prev_typed and "description" not in validated:
+                    validated["description"] = prev_typed["description"]
+                if "display_text" in prev_typed and "display_text" not in validated and not (isinstance(raw, dict) and "display_text" in raw):
+                    validated["display_text"] = prev_typed["display_text"]
                 selection.typed_value_override = validated
             except ValidationError as exc:
                 raise AppError("The quotation-specific benefit value is invalid.", 422) from exc

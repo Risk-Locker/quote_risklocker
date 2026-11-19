@@ -22,7 +22,12 @@ from app.models.tables import (
     Session as SessionModel,
     TenureComparisonEntry,
 )
-from app.services.marketing_comparison.ncd_evaluator import get_standard_betterment_rate
+from app.services.marketing_comparison.dynamic_addons import sanitize_extra_addons_map
+from app.services.marketing_comparison.ncd_evaluator import (
+    check_has_betterment_peril,
+    evaluate_betterment_rules,
+    get_standard_betterment_rate,
+)
 from app.services.marketing_comparison.workspace_sync import sync_session_draft_from_comparison
 
 _ZERO = Decimal("0.00")
@@ -190,7 +195,103 @@ def sync_and_update_covernote(
                 child.coverage_end_date = next_e
                 child.expiry_month = next_e.strftime("%Y-%m")
 
-    # 4. Sync financial & benefit fields into cn_session.draft + DraftBenefitSelections
+    # 3b. Vehicle Model & YOM Updates on TrackedVehicle
+    tv = getattr(tenure, "tracked_vehicle", None)
+    if payload.get("vehicle_model") is not None and tv is not None:
+        clean_vm = str(payload["vehicle_model"]).strip()
+        if clean_vm:
+            tv.car_model = clean_vm
+    if payload.get("manufacture_year") is not None and tv is not None:
+        yom_int = int(payload["manufacture_year"])
+        if yom_int > 1900:
+            tv.manufacture_year = yom_int
+
+    # 3c. Fixed Costs (Road Tax & Runner Fee + Toggles)
+    if payload.get("road_tax") is not None:
+        tenure.road_tax = float(_q2(payload["road_tax"]))
+    if payload.get("runner_fee") is not None:
+        tenure.runner_fee = float(_q2(payload["runner_fee"]))
+    if payload.get("include_road_tax") is not None:
+        tenure.include_road_tax = bool(payload["include_road_tax"])
+    if payload.get("include_runner_fee") is not None:
+        tenure.include_runner_fee = bool(payload["include_runner_fee"])
+
+    eff_rt = _q2(tenure.road_tax) if (tenure.include_road_tax is not False) else _ZERO
+    eff_rf = _q2(tenure.runner_fee) if (tenure.include_runner_fee is not False) else _ZERO
+
+    # 3d. Bidirectional Total Payable <-> Motor Premium sync
+    sync_payload = dict(payload)
+    if sync_payload.get("total_payable") is not None:
+        tot_dec = _q2(sync_payload["total_payable"])
+        tenure.won_premium = float(tot_dec)
+        if sync_payload.get("motor_premium") is None:
+            sync_payload["motor_premium"] = float(max(_ZERO, (tot_dec - eff_rt - eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP)))
+
+    # Normalize Betterment mode ('auto' | 'waived' | 'copay') & explicit betterment_rate
+    b_mode = str(sync_payload.get("betterment_mode") or "").strip().lower()
+    if b_mode == "auto":
+        sync_payload.pop("waiver_betterment", None)
+        sync_payload.pop("betterment_rate", None)
+        if cn_session and cn_session.draft and isinstance(cn_session.draft.fields, dict):
+            df_auto = dict(cn_session.draft.fields)
+            df_auto.pop("waiver_of_betterment", None)
+            df_auto.pop("betterment_rate", None)
+            cn_session.draft.fields = df_auto
+            flag_modified(cn_session.draft, "fields")
+    elif sync_payload.get("betterment_rate") is not None:
+        br_val = float(sync_payload["betterment_rate"])
+        sync_payload["waiver_betterment"] = br_val == 0.0
+    elif b_mode == "waived":
+        sync_payload["waiver_betterment"] = True
+        sync_payload["betterment_rate"] = 0.0
+    elif b_mode == "copay":
+        sync_payload["waiver_betterment"] = False
+        veh_yom_cur = getattr(tv, "manufacture_year", None) if tv else None
+        q_yr_cur = (tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year)
+        reg_dt = None
+        if cn_session and cn_session.draft and isinstance(cn_session.draft.fields, dict):
+            reg_raw = cn_session.draft.fields.get("registration_date") or cn_session.draft.fields.get("date_of_registration")
+            reg_dt = reg_raw.get("value") if isinstance(reg_raw, dict) else reg_raw
+        if reg_dt:
+            from app.domain.betterment_engine import calculate_exact_vehicle_age
+
+            veh_age_copay = calculate_exact_vehicle_age(reg_dt, tenure.coverage_start_date or f"{q_yr_cur}-01-01")
+        else:
+            veh_age_copay = max(0, q_yr_cur - (veh_yom_cur or q_yr_cur))
+        calc_rate, _ = get_standard_betterment_rate(veh_age_copay)
+        if sync_payload.get("betterment_rate") is None:
+            sync_payload["betterment_rate"] = calc_rate
+
+    # Normalize dynamic add-on map if passed
+    if isinstance(sync_payload.get("extra_addons"), dict):
+        sync_payload["extra_addons"] = sanitize_extra_addons_map(sync_payload["extra_addons"])
+
+    # Sync scalar peril states when Included Perils checklist is explicitly saved
+    if isinstance(sync_payload.get("included_perils"), list):
+        peril_set = {str(p).strip().upper() for p in sync_payload["included_perils"] if str(p).strip()}
+        if "special_perils" not in sync_payload:
+            sync_payload["special_perils"] = "Included" if ("FLOOD" in peril_set or "SPECIAL PERILS" in peril_set) else "Not Included"
+        if "llp_llop" not in sync_payload:
+            sync_payload["llp_llop"] = "Included" if ("LLP" in peril_set or "LLOP" in peril_set) else "Not Included"
+        if "towing_limit" not in sync_payload and "TOWING" not in peril_set:
+            sync_payload["towing_limit"] = "No towing"
+        if "windscreen_sum_insured" not in sync_payload and "WINDSCREEN" not in peril_set:
+            sync_payload["windscreen_sum_insured"] = 0.0
+        if "waiver_betterment" not in sync_payload and "betterment_rate" not in sync_payload and "betterment_mode" not in sync_payload:
+            if "BETTERMENT" in peril_set:
+                sync_payload["waiver_betterment"] = True
+                sync_payload["betterment_rate"] = 0.0
+            else:
+                sync_payload["waiver_betterment"] = False
+        from app.services.marketing_comparison.dynamic_addons import DYNAMIC_ADDON_DEFINITIONS
+
+        ea_cur = dict(sync_payload.get("extra_addons") or {})
+        for defn in DYNAMIC_ADDON_DEFINITIONS:
+            if defn["key"] not in ea_cur:
+                ea_cur[defn["key"]] = "Yes" if defn["peril_tag"] in peril_set else "No"
+        sync_payload["extra_addons"] = ea_cur
+
+    # 4. Sync financial, vehicle & benefit fields ONLY into cn_session.draft + its DraftBenefitSelections
     sync_keys = [
         k for k in (
             "company_name",
@@ -204,32 +305,45 @@ def sync_and_update_covernote(
             "llp_llop",
             "excess",
             "waiver_betterment",
+            "betterment_rate",
+            "extra_addons",
+            "included_perils",
+            "vehicle_model",
+            "manufacture_year",
         )
-        if k in payload and payload[k] is not None
+        if k in sync_payload and sync_payload[k] is not None
     ]
+    if b_mode == "auto" and "betterment_rate" not in sync_keys:
+        sync_keys.append("betterment_rate")
+        sync_payload["betterment_rate"] = None
+
     if cn_session and sync_keys:
         sync_session_draft_from_comparison(
             db,
             tenure,
             cn_session.id,
             edited_fields=sync_keys,
-            field_values=payload,
-            explicit_motor_premium=(payload.get("motor_premium") is not None),
+            field_values=sync_payload,
+            explicit_motor_premium=(sync_payload.get("motor_premium") is not None),
             user_id=user_id,
         )
 
-    # 5. Recompute tenure.won_premium = motor_premium + eff_rt + eff_rf
-    eff_rt = _q2(tenure.road_tax) if (tenure.include_road_tax is not False) else _ZERO
-    eff_rf = _q2(tenure.runner_fee) if (tenure.include_runner_fee is not False) else _ZERO
-    if payload.get("motor_premium") is not None:
-        new_mp = _q2(payload["motor_premium"])
-        tenure.won_premium = (new_mp + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP)
-    elif cn_session and cn_session.draft and isinstance(cn_session.draft.fields, dict):
+    # 5. Recompute tenure.won_premium = motor_premium + eff_rt + eff_rf (unless explicit total_payable took precedence cleanly)
+    if sync_payload.get("total_payable") is not None:
+        tenure.won_premium = float(_q2(sync_payload["total_payable"]))
+    elif sync_payload.get("motor_premium") is not None:
+        new_mp = _q2(sync_payload["motor_premium"])
+        tenure.won_premium = float((new_mp + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
+    elif any(k in payload for k in ("road_tax", "runner_fee", "include_road_tax", "include_runner_fee")) and cn_session and cn_session.draft and isinstance(cn_session.draft.fields, dict):
         prem_dec = _q2(cn_session.draft.fields.get("premium"))
         if prem_dec > _ZERO:
-            tenure.won_premium = (prem_dec + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP)
+            tenure.won_premium = float((prem_dec + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
+    elif cn_session and cn_session.draft and isinstance(cn_session.draft.fields, dict) and tenure.won_premium is None:
+        prem_dec = _q2(cn_session.draft.fields.get("premium"))
+        if prem_dec > _ZERO:
+            tenure.won_premium = float((prem_dec + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
 
-    # 6. Mirror edits if cn_session also happens to have a TenureComparisonEntry row
+    # 6. Mirror edits strictly if cn_session itself owns a TenureComparisonEntry row (never alter other underwriters!)
     if cn_session:
         cn_entries = list(
             db.scalars(
@@ -244,48 +358,85 @@ def sync_and_update_covernote(
                 ce.company_name = comp_name
             if tenure.winning_company_id:
                 ce.company_id = tenure.winning_company_id
-            if payload.get("sum_insured") is not None:
-                ce.sum_insured = _q2(payload["sum_insured"])
-            if payload.get("motor_premium") is not None:
-                ce.motor_premium = _q2(payload["motor_premium"])
+            if sync_payload.get("sum_insured") is not None:
+                ce.sum_insured = _q2(sync_payload["sum_insured"])
+            if sync_payload.get("motor_premium") is not None:
+                ce.motor_premium = _q2(sync_payload["motor_premium"])
             elif tenure.won_premium is not None:
                 ce.motor_premium = max(_ZERO, (_q2(tenure.won_premium) - eff_rt - eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
-            if payload.get("agreed_value") is not None or payload.get("valuation_type") is not None:
-                vt_raw = payload.get("valuation_type")
+            if sync_payload.get("agreed_value") is not None or sync_payload.get("valuation_type") is not None:
+                vt_raw = sync_payload.get("valuation_type")
                 if vt_raw is not None and str(vt_raw).strip() != "":
                     is_ag = str(vt_raw).strip().lower() in {"agreed value", "agreed_value"}
                 else:
-                    is_ag = bool(payload.get("agreed_value"))
+                    is_ag = bool(sync_payload.get("agreed_value"))
                 ce.agreed_value = is_ag
                 ce.valuation_type = "agreed_value" if is_ag else "market_value"
-            if payload.get("excess") is not None:
-                ce.excess = _q2(payload["excess"])
-            if payload.get("towing_limit") is not None:
-                ce.towing_limit = str(payload["towing_limit"]).strip() or "Unlimited"
+            if sync_payload.get("excess") is not None:
+                ce.excess = _q2(sync_payload["excess"])
+            if sync_payload.get("towing_limit") is not None:
+                ce.towing_limit = str(sync_payload["towing_limit"]).strip() or "Unlimited"
                 ce.towing_km = ce.towing_limit
-            if payload.get("windscreen_sum_insured") is not None:
-                ws_dec = _q2(payload["windscreen_sum_insured"])
+            if sync_payload.get("windscreen_sum_insured") is not None:
+                ws_dec = _q2(sync_payload["windscreen_sum_insured"])
                 ce.windscreen_sum_insured = ws_dec if ws_dec > _ZERO else None
-            if payload.get("special_perils") is not None:
-                sp_s = str(payload["special_perils"]).strip()
+            if sync_payload.get("special_perils") is not None:
+                sp_s = str(sync_payload["special_perils"]).strip()
                 ce.special_perils = None if sp_s.lower() in {"not included", "no", "none", "excluded", "-", ""} else sp_s
-            if payload.get("llp_llop") is not None:
-                llp_s = str(payload["llp_llop"]).strip()
+            if sync_payload.get("llp_llop") is not None:
+                llp_s = str(sync_payload["llp_llop"]).strip()
                 ce.llp_llop = None if llp_s.lower() in {"not included", "no", "none", "excluded", "-", ""} else llp_s
-            if payload.get("waiver_betterment") is not None:
-                ce.waiver_betterment = bool(payload["waiver_betterment"])
+            if isinstance(sync_payload.get("extra_addons"), dict):
+                ce.extra_addons = {**dict(getattr(ce, "extra_addons", None) or {}), **sync_payload["extra_addons"]}
+            if b_mode == "auto":
+                veh_yom = getattr(tv, "manufacture_year", None) if tv else None
+                q_year = (tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year)
+                cn_f_now = cn_session.draft.fields if cn_session.draft and isinstance(cn_session.draft.fields, dict) else {}
+                has_p = check_has_betterment_peril(cn_f_now)
+                comp_obj_cn = db.get(InsuranceCompany, tenure.winning_company_id) if tenure.winning_company_id else None
+                reg_raw_auto = cn_f_now.get("registration_date") or cn_f_now.get("date_of_registration")
+                reg_dt_auto = reg_raw_auto.get("value") if isinstance(reg_raw_auto, dict) else reg_raw_auto
+                w_auto, r_auto, d_auto = evaluate_betterment_rules(
+                    yom=veh_yom,
+                    quote_year=q_year,
+                    company_name=ce.company_name,
+                    has_betterment_peril=has_p,
+                    registration_date=reg_dt_auto,
+                    coverage_start_date=tenure.coverage_start_date,
+                    company_obj=comp_obj_cn,
+                )
+                ce.waiver_betterment = w_auto
+                ce.betterment_rate = r_auto
+                ce.betterment_display = d_auto
+            elif sync_payload.get("betterment_rate") is not None:
+                b_r = float(sync_payload["betterment_rate"])
+                ce.waiver_betterment = b_r == 0.0
+                ce.betterment_rate = b_r
+                ce.betterment_display = "No (0%)" if b_r == 0.0 else f"Yes ({int(b_r) if b_r.is_integer() else b_r}%)"
+            elif sync_payload.get("waiver_betterment") is not None:
+                ce.waiver_betterment = bool(sync_payload["waiver_betterment"])
                 if ce.waiver_betterment:
                     ce.betterment_rate = _ZERO
                     ce.betterment_display = "No (0%)"
                 else:
-                    veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if getattr(tenure, "tracked_vehicle", None) else None
+                    veh_yom = getattr(tv, "manufacture_year", None) if tv else None
                     q_year = (tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year)
-                    b_rate, b_disp = get_standard_betterment_rate(max(0, q_year - (veh_yom or q_year)))
+                    _, b_rate, b_disp = evaluate_betterment_rules(
+                        yom=veh_yom,
+                        quote_year=q_year,
+                        company_name=ce.company_name,
+                        has_betterment_peril=False,
+                        coverage_start_date=tenure.coverage_start_date,
+                    )
                     ce.betterment_rate = b_rate
                     ce.betterment_display = b_disp
             mp_dec = _q2(ce.motor_premium)
             si_dec = _q2(ce.sum_insured)
-            ce.total_payable = (mp_dec + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP)
+            ce.road_tax = float(eff_rt)
+            ce.runner_fee = float(eff_rf)
+            ce.include_road_tax = (tenure.include_road_tax is not False)
+            ce.include_runner_fee = (tenure.include_runner_fee is not False)
+            ce.total_payable = float((mp_dec + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
             if si_dec > _ZERO and mp_dec > _ZERO:
                 ce.rate_percentage = ((mp_dec / si_dec) * _HUNDRED).quantize(_RATE_QUANT, rounding=ROUND_HALF_UP)
 

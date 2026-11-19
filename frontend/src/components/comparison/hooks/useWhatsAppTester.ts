@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 
-export function useWhatsAppTester(tenureId: string) {
+export function useWhatsAppTester(
+  tenureId: string,
+  onNotify?: (type: "success" | "error", title: string, message: string) => void
+) {
   const [copiedWhatsapp, setCopiedWhatsapp] = useState(false);
   const [isLoadingWhatsapp, setIsLoadingWhatsapp] = useState(false);
 
@@ -19,7 +22,9 @@ export function useWhatsAppTester(tenureId: string) {
         setTimeout(() => setCopiedWhatsapp(false), 3000);
       }
     } catch (err: any) {
-      alert("Failed to copy WhatsApp summary: " + (err.message || String(err)));
+      const msg = "Failed to copy WhatsApp summary: " + (err.message || String(err));
+      if (onNotify) onNotify("error", "Copy Summary Failed", msg);
+      else console.error(msg);
     } finally {
       setIsLoadingWhatsapp(false);
     }

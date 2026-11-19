@@ -216,11 +216,11 @@ function Design2Footer({
   return (
     <div
       style={{
-        flex: "0 0 108px",
-        height: "108px",
+        flex: "0 0 98px",
+        height: "98px",
         background: "#E52320",
         color: "#FFFFFF",
-        padding: "0 42px",
+        padding: "0 38px",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
@@ -393,7 +393,7 @@ export function Design2CanvasView({
           overflow: "hidden",
         }}
       >
-        <div style={{ flex: "1 1 auto", minHeight: 0, padding: "22px 42px 10px 42px", display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: "1 1 auto", minHeight: 0, padding: "18px 38px 8px 38px", display: "flex", flexDirection: "column" }}>
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center" }}>
@@ -461,8 +461,8 @@ export function Design2CanvasView({
             {/* Left Column (Specs + Premium) */}
             <div style={{ flex: 1.02, paddingRight: "18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
               <div>
-                <div style={{ fontSize: "14.5px", fontWeight: 800, color: "#E52320", marginBottom: "5px", lineHeight: 1.2 }}>
-                  Vehicle Information <span style={{ fontSize: "13.5px", fontWeight: 700, color: "#544F4E" }}>车辆资料</span>
+                <div style={{ fontSize: "15.0px", fontWeight: 700, color: "#E52320", marginBottom: "5px", lineHeight: 1.2 }}>
+                  Vehicle Information <span style={{ fontSize: "14.0px", fontWeight: 600, color: "#544F4E" }}>车辆资料</span>
                 </div>
                 {[
                   { label: "Customer / 客户姓名", val: custName },
@@ -479,19 +479,20 @@ export function Design2CanvasView({
                     style={{
                       display: "flex",
                       alignItems: "flex-end",
-                      fontSize: "9.6px",
-                      padding: "4.5px 0 3px 0",
-                      minHeight: "24.5px",
+                      fontSize: "10.6px",
+                      padding: "4px 0 2.5px 0",
+                      minHeight: "22.5px",
                       boxSizing: "border-box",
                     }}
                   >
-                    <div style={{ width: "174px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
+                    <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
                       {row.label}
                     </div>
                     <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
                     <div
                       style={{
-                        fontWeight: 700,
+                        fontSize: "10.8px",
+                        fontWeight: 600,
                         color: "#0F172A",
                         wordBreak: "break-word",
                         flexGrow: 1,
@@ -506,31 +507,31 @@ export function Design2CanvasView({
                 ))}
               </div>
 
-              <div style={{ marginTop: "12px" }}>
-                <div style={{ fontSize: "14.5px", fontWeight: 800, color: "#E52320", marginBottom: "4px", lineHeight: 1.2 }}>
-                  Premium Summary <span style={{ fontSize: "13.5px", fontWeight: 700, color: "#544F4E" }}>保费</span>
+              <div style={{ marginTop: "10px" }}>
+                <div style={{ fontSize: "15.0px", fontWeight: 700, color: "#E52320", marginBottom: "4px", lineHeight: 1.2 }}>
+                  Premium Summary <span style={{ fontSize: "14.0px", fontWeight: 600, color: "#544F4E" }}>保费</span>
                 </div>
-                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "9.6px", padding: "4.5px 0 3px 0", minHeight: "24.5px", boxSizing: "border-box" }}>
-                  <div style={{ width: "174px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
+                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
+                  <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
                     Insurance Premium / 保费
                   </div>
                   <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
-                  <div style={{ fontWeight: 700, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
+                  <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
                     {formatMoney(premium)}
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "9.6px", padding: "4.5px 0 3px 0", minHeight: "24.5px", boxSizing: "border-box" }}>
-                  <div style={{ width: "174px", whiteSpace: "nowrap", fontWeight: 500, color: "#1E293B", flexShrink: 0, paddingBottom: "2px" }}>
+                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
+                  <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
                     Roadtax and Runner Fee / 路税及服务费
                   </div>
                   <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
-                  <div style={{ fontWeight: 700, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
+                  <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
                     {rtCombined}
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "14px" }}>
-                  <div style={{ fontSize: "13.5px", fontWeight: 800, color: "#E52320", whiteSpace: "nowrap" }}>TOTAL PAYABLE 应付总额 :</div>
-                  <div style={{ fontSize: "22px", fontWeight: 900, color: "#E52320", letterSpacing: "-0.4px", lineHeight: 1, whiteSpace: "nowrap" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "12px" }}>
+                  <div style={{ fontSize: "13.8px", fontWeight: 700, color: "#E52320", whiteSpace: "nowrap" }}>TOTAL PAYABLE 应付总额 :</div>
+                  <div style={{ fontSize: "22px", fontWeight: 800, color: "#E52320", letterSpacing: "-0.4px", lineHeight: 1, whiteSpace: "nowrap" }}>
                     {formatMoney(totalPayable)}
                   </div>
                 </div>
@@ -560,17 +561,17 @@ export function Design2CanvasView({
                       color: "#FFFFFF",
                       height: "40px",
                       padding: "0 15px",
-                      fontSize: "11.5px",
-                      fontWeight: 800,
+                      fontSize: "12.2px",
+                      fontWeight: 700,
                       display: "flex",
                       alignItems: "center",
                       gap: "9px",
                     }}
                   >
                     <FreeCoverageGiftSvg width={28} height={24} />
-                    <span>{insurer.split(" ")[0]} Free Added Coverage</span>
+                    <span><span style={{ textTransform: "uppercase" }}>{insurer.split(" ")[0]}</span> Free Added Coverage</span>
                   </div>
-                  <div style={{ padding: "14px 14px 10px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 10px", alignContent: "start" }}>
+                  <div style={{ padding: "12px 14px 10px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "11px 10px", alignContent: "start" }}>
                     {freeItems.length > 0 ? (
                       freeItems.map((fi, idx) => (
                         <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: "6px" }}>
@@ -578,17 +579,18 @@ export function Design2CanvasView({
                             <GreenTickSvg size={15} />
                           </div>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: "10.6px", fontWeight: 800, color: "#0F172A", lineHeight: 1.18 }}>{fi.title}</div>
+                            <div style={{ fontSize: "11.4px", fontWeight: 700, color: "#0F172A", lineHeight: 1.18 }}>{fi.title}</div>
                             {fi.description && (
                               <div
                                 style={{
-                                  fontSize: "9.0px",
-                                  color: "#1E293B",
+                                  fontSize: "9.8px",
+                                  fontWeight: 400,
+                                  color: "#334155",
                                   lineHeight: 1.24,
                                   marginTop: "2px",
                                   overflow: "hidden",
                                   display: "-webkit-box",
-                                  WebkitLineClamp: 3,
+                                  WebkitLineClamp: 4,
                                   WebkitBoxOrient: "vertical",
                                 }}
                               >
@@ -683,7 +685,7 @@ export function Design2CanvasView({
                     boxShadow: "0 1px 2px rgba(15, 23, 42, 0.045)",
                     display: "flex",
                     alignItems: "stretch",
-                    height: "71px",
+                    height: "73px",
                     boxSizing: "border-box",
                     overflow: "hidden",
                   }}
@@ -696,8 +698,8 @@ export function Design2CanvasView({
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "2px" }}>
                         <div
                           style={{
-                            fontSize: "9.2px",
-                            fontWeight: 800,
+                            fontSize: "10.0px",
+                            fontWeight: 600,
                             color: "#0F172A",
                             lineHeight: 1.15,
                             wordBreak: "break-word",
@@ -709,20 +711,21 @@ export function Design2CanvasView({
                         >
                           {card.title}
                         </div>
-                        <div style={{ fontSize: "7.6px", fontWeight: 700, color: "#334155", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
+                        <div style={{ fontSize: "8.1px", fontWeight: 600, color: "#334155", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
                           {card.serial_number}
                         </div>
                       </div>
                       {card.value && (
-                        <div style={{ fontSize: "8.4px", fontWeight: 800, color: "#15803D", marginTop: "1px", lineHeight: 1.12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div style={{ fontSize: "9.1px", fontWeight: 600, color: "#15803D", marginTop: "1px", lineHeight: 1.12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {card.value}
                         </div>
                       )}
                       {card.description && (
                         <div
                           style={{
-                            fontSize: "7.9px",
-                            color: "#0F172A",
+                            fontSize: "8.6px",
+                            fontWeight: 400,
+                            color: "#334155",
                             lineHeight: 1.18,
                             marginTop: "1px",
                             wordBreak: "break-word",

@@ -239,13 +239,24 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
     vtype_cur = _field_value(draft.fields or {}, "vehicle_type", "vehicle_category")
     is_ev, _ = classify_vehicle_ev_status(cbrand or "", cmodel or raw_vehicle or "", cc_val or "", vtype_cur or None)
 
-    # 2. Resolve product
+    # 2. Resolve product (invalidate stale coverage OR EV/ICE powertrain mismatch!)
     products = [item for item in _rows(db, InsuranceProduct) if item.company_id == draft.company_id and item.status == "active"]
     if draft.product_id:
         curr_prod = next((p for p in products if p.id == draft.product_id), None)
         if not curr_prod:
             draft.product_id = None
-        elif resolved_coverage_id:
+        else:
+            p_is_ev = "(ev)" in curr_prod.name.lower() or " ev" in curr_prod.name.lower()
+            if p_is_ev != bool(is_ev):
+                has_matching_engine_prod = any(
+                    ("(ev)" in p.name.lower() or " ev" in p.name.lower()) == bool(is_ev)
+                    for p in products
+                )
+                if has_matching_engine_prod:
+                    draft.product_id = None
+                    draft.tier_id = None
+                    draft.catalog_revision_id = None
+        if draft.product_id and curr_prod and resolved_coverage_id:
             cov_row = db.get(CoverageType, resolved_coverage_id) if resolved_coverage_id else None
             cov_key = str(cov_row.coverage_key).lower() if cov_row else ""
             if cov_key == "comprehensive":
@@ -533,6 +544,7 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
     existing = [item for item in _rows(db, DraftBenefitSelection) if item.draft_id == draft.id]
     existing_offerings = {item.catalog_offering_id for item in existing if item.catalog_offering_id}
     existing_concepts = {item.concept_id for item in existing if item.state == "current" and item.concept_id}
+    existing_keys = {item.selection_key for item in existing if item.selection_key}
 
     # Find primary package for this draft:
     # 1. draft.package_id if set and valid in revision
@@ -653,12 +665,13 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
 
     created = 0
     for offering in sorted(base_offerings, key=lambda item: (int(item.sort_order or 0), item.offering_key)):
-        if offering.id in existing_offerings or offering.concept_id in existing_concepts:
+        sel_key = f"catalog:{offering.offering_key}"[:160]
+        if offering.id in existing_offerings or offering.concept_id in existing_concepts or sel_key in existing_keys:
             continue
         db.add(DraftBenefitSelection(
             id=new_id(),
             draft_id=draft.id,
-            selection_key=f"catalog:{offering.offering_key}"[:160],
+            selection_key=sel_key,
             catalog_offering_id=offering.id,
             concept_id=offering.concept_id,
             item_kind="catalog",
@@ -671,6 +684,7 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
         ))
         existing_offerings.add(offering.id)
         existing_concepts.add(offering.concept_id)
+        existing_keys.add(sel_key)
         created += 1
     return created
 

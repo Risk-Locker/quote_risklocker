@@ -418,6 +418,19 @@ def format_canonical_perils(combined_text: str, tokens: list[str] | None = None)
     if any(k in text for k in ("all drivers", "unnamed drivers", "semua pemandu")) or re.search(r"\b(?:endorsement|end|end\.)\s*108\b", text) or ("108" in end_tokens):
         add("ALL DRIVERS")
 
+    # 17. Conditional Dynamic Add-ons (E-Hailing, Child Safety, Full Respray, EV Battery)
+    if re.search(r"\b(?:e[\s\-]?hailing|ehailing)\b", text) and not re.search(
+        r"\b(?:does\s+not\s+cover|not\s+covered|not\s+included|tidak\s+termasuk|exclud(?:ing|ed))\b[^\n]{0,40}\b(?:e[\s\-]?hailing|ehailing)\b",
+        text,
+    ):
+        add("E-HAILING")
+    if any(k in text for k in ("child car seat", "child safety seat", "child restraint")):
+        add("CHILD SEAT")
+    if any(k in text for k in ("full respray", "respray", "spray paint", "repainting")):
+        add("RESPRAY")
+    if any(k in text for k in ("ev battery", "battery depletion", "out of charge")):
+        add("EV BATTERY")
+
     return found
 
 
@@ -512,6 +525,12 @@ def _extract_vehicle_motor_premium(f: dict[str, Any]) -> float:
     explicit = _to_float(f.get("motor_premium") or f.get("total_payable"))
     if explicit > 0.0:
         return round(explicit, 2)
+
+    prem_node = f.get("premium")
+    if isinstance(prem_node, dict) and prem_node.get("status") == "manual_override":
+        manual_prem = _to_float(prem_node)
+        if manual_prem > 0.0:
+            return round(manual_prem, 2)
 
     total_amt = _to_float(f.get("total_amount"))
     if total_amt > 0.0:
@@ -822,7 +841,7 @@ def _resolve_comparison_benefits(
                 ).all()
             )
     selections = [s for s in all_selections if s.state == "current"]
-    inactive_selections = [s for s in all_selections if s.state != "current"]
+    inactive_selections = [s for s in all_selections if s.state in ("removed", "available_addon")]
 
     concept_ids = {s.concept_id for s in all_selections if s.concept_id}
     concepts: dict[str, BenefitConcept] = {}
@@ -846,6 +865,20 @@ def _resolve_comparison_benefits(
             matched.add("special-perils")
         if any(w in blob for w in ("legal-liability", "liability to passenger", "liability of passenger", "llp", "llop", "lltp")):
             matched.add("llp_llop")
+        if "betterment" in blob:
+            matched.add("betterment")
+        if any(w in blob for w in ("ehailing", "e-hailing", "e hailing", "private hire")):
+            matched.add("ehailing")
+        if any(w in blob for w in ("strike-riot", "strike, riot", "strike riot", "civil commotion", "srcc")):
+            matched.add("srcc")
+        if any(w in blob for w in ("child-car-seat", "child-seat", "child car seat", "child safety seat")):
+            matched.add("child_seat")
+        if any(w in blob for w in ("spray-paint", "respray", "repaint")):
+            matched.add("respray")
+        if any(w in blob for w in ("battery-depletion", "ev-battery", "battery depletion", "out of charge")):
+            matched.add("ev_battery")
+        if any(w in blob for w in ("wall-charger", "charger-liability", "charging-cable", "wall charger")):
+            matched.add("ev_other")
         return matched
 
     active_domains: set[str] = set()
@@ -1104,6 +1137,7 @@ def _resolve_comparison_benefits(
 
     # --- TOWING ---
     target_comp_id = company_id or getattr(session, "company_id", None)
+    comp_obj = None
     comp_name_str = ""
     if target_comp_id:
         comp_obj = prefetched["companies_by_id"].get(target_comp_id) if prefetched is not None else db.get(InsuranceCompany, target_comp_id)
@@ -1150,6 +1184,7 @@ def _resolve_comparison_benefits(
         combined_text=combined_text,
         extracted_towing=raw_towing,
         catalog_display_value=towing_limit_val,
+        company_obj=comp_obj,
     )
     if clean_towing == "-":
         clean_towing = None
@@ -1408,19 +1443,19 @@ def _resolve_comparison_benefits(
             if eval_map["llp"].is_modified:
                 llp_val = eval_map["llp"].display_description
                 
-        if "towing" not in eval_map:
+        if "towing" not in eval_map and not (isinstance(t_f, dict) and t_f.get("status") == "manual_override"):
             clean_towing = None
         else:
-            if eval_map["towing"].is_modified:
+            if "towing" in eval_map and eval_map["towing"].is_modified and not (isinstance(t_f, dict) and t_f.get("status") == "manual_override"):
                 clean_towing = getattr(eval_map["towing"], "display_value", None) or eval_map["towing"].display_description
                 
         # Update detailed_perils based on engine overrides
         for dp in detailed_perils:
             n_lower = dp["name"].lower()
             if "towing" in n_lower:
-                if "towing" not in eval_map:
+                if "towing" not in eval_map and not (isinstance(t_f, dict) and t_f.get("status") == "manual_override"):
                     dp["name"] = "HIDDEN"
-                elif eval_map["towing"].is_modified:
+                elif "towing" in eval_map and eval_map["towing"].is_modified:
                     dp["name"] = eval_map["towing"].display_title if eval_map["towing"].display_title != "Roadside Towing" else dp["name"]
                     dp["coverage_limit"] = getattr(eval_map["towing"], "display_value", None) or eval_map["towing"].display_description
             elif "special peril" in n_lower or "flood" in n_lower:
@@ -1439,12 +1474,46 @@ def _resolve_comparison_benefits(
         # Remove hidden perils
         detailed_perils = [dp for dp in detailed_perils if dp["name"] != "HIDDEN"]
 
+    from app.services.marketing_comparison.dynamic_addons import extract_dynamic_addons
+
+    extra_addons_map = extract_dynamic_addons(
+        selections=selections,
+        concepts_by_id=concepts,
+        disabled_domains=disabled_domains,
+        ext_lines=ext_lines,
+        combined_text=combined_text,
+        end_tokens=end_tokens,
+        draft_fields=f,
+    )
+
+    # Enforce authoritative manual peril toggles and disabled domains onto canonical_perils_list
+    ip_override = f.get("included_perils")
+    if isinstance(ip_override, dict) and ip_override.get("status") == "manual_override" and isinstance(ip_override.get("value"), list):
+        canonical_perils_list = [str(p).strip().upper() for p in ip_override["value"] if str(p).strip()]
+    else:
+        tag_suppression: list[tuple[bool, str]] = [
+            (ws_explicitly_removed or windscreen_amount is None, "WINDSCREEN"),
+            (not has_special_perils, "FLOOD"),
+            (not has_llp, "LLP"),
+            (not has_llp, "LLOP"),
+            ("betterment" in disabled_domains or (isinstance(f.get("waiver_of_betterment"), dict) and f["waiver_of_betterment"].get("status") == "manual_override" and str(f["waiver_of_betterment"].get("value") or "").lower() != "included"), "BETTERMENT"),
+            (extra_addons_map.get("ehailing") != "Yes", "E-HAILING"),
+            ("srcc" in disabled_domains or extra_addons_map.get("srcc") != "Yes", "SRCC"),
+            (extra_addons_map.get("child_seat") != "Yes", "CHILD SEAT"),
+            (extra_addons_map.get("respray") != "Yes", "RESPRAY"),
+            (extra_addons_map.get("ev_battery") != "Yes", "EV BATTERY"),
+            (extra_addons_map.get("ev_other") != "Yes", "EV CHARGE"),
+        ]
+        suppressed_tags = {tag for cond, tag in tag_suppression if cond}
+        canonical_perils_list = [tag for tag in canonical_perils_list if tag not in suppressed_tags]
+
     return {
         "special_perils": special_perils_val,
         "windscreen_sum_insured": windscreen_amount,
         "llp_llop": llp_val,
         "towing_limit": clean_towing,
         "towing_km": clean_towing,
+        "extra_addons": extra_addons_map,
         "combined_text": combined_text,
         "canonical_perils": canonical_perils_list,
         "canonical_perils_formatted": ", ".join(canonical_perils_list),

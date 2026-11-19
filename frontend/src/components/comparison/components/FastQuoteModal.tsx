@@ -14,6 +14,7 @@ import {
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import type { TenureSpec } from "../types";
+import { TowingLimitSelector } from "./TowingLimitSelector";
 
 interface FastQuoteModalProps {
   isOpen: boolean;
@@ -23,28 +24,15 @@ interface FastQuoteModalProps {
 }
 
 const COMMON_INSURERS: Array<{ name: string; defaultTowing: string }> = [
-  { name: "AmAssurance", defaultTowing: "365km" },
-  { name: "STMB", defaultTowing: "50km" },
-  { name: "Kurnia", defaultTowing: "200km" },
-  { name: "Etiqa", defaultTowing: "200km" },
-  { name: "Lonpac", defaultTowing: "RM400" },
-  { name: "Berjaya Sompo", defaultTowing: "RM300" },
-  { name: "Tune Protect", defaultTowing: "200km" },
-  { name: "QBE", defaultTowing: "RM500" },
-  { name: "Allianz", defaultTowing: "Unlimited" },
-];
-
-const TOWING_PRESETS = [
-  "50km",
-  "100km",
-  "150km",
-  "200km",
-  "365km",
-  "RM300",
-  "RM400",
-  "RM500",
-  "RM1,000",
-  "Unlimited",
+  { name: "AmAssurance", defaultTowing: "365 km" },
+  { name: "STMB", defaultTowing: "50 km" },
+  { name: "Kurnia", defaultTowing: "150 km" },
+  { name: "Etiqa", defaultTowing: "200 km" },
+  { name: "Lonpac", defaultTowing: "RM 400" },
+  { name: "Berjaya Sompo", defaultTowing: "Unlimited" },
+  { name: "Tune Protect", defaultTowing: "RM 300" },
+  { name: "QBE", defaultTowing: "RM 500" },
+  { name: "Allianz", defaultTowing: "150 km" },
 ];
 
 export function FastQuoteModal({
@@ -57,7 +45,7 @@ export function FastQuoteModal({
   const [customInsurer, setCustomInsurer] = useState("");
   const [sumInsured, setSumInsured] = useState("");
   const [motorPremium, setMotorPremium] = useState("");
-  const [towingLimit, setTowingLimit] = useState("365km");
+  const [towingLimit, setTowingLimit] = useState("365 km");
   const [valuationType, setValuationType] = useState<"market_value" | "agreed_value">("agreed_value");
   const [excess, setExcess] = useState("0");
   const [quotationNo, setQuotationNo] = useState("");
@@ -243,32 +231,15 @@ export function FastQuoteModal({
 
           {/* Towing Entitlement */}
           <div>
-            <label className="text-[11px] font-bold text-[#454545] uppercase tracking-wider block mb-1">
+            <label className="text-[11px] font-bold text-[#454545] uppercase tracking-wider block mb-1.5">
               4. Towing Entitlement
             </label>
-            <div className="flex gap-1.5 flex-wrap">
-              {TOWING_PRESETS.slice(0, 6).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTowingLimit(t)}
-                  className={`px-2 py-1 rounded text-[11px] font-semibold border transition-all ${
-                    towingLimit === t
-                      ? "bg-[#1b1717] text-white border-[#1b1717]"
-                      : "bg-[#f5f5f7] text-[#454545] border-[#e5e5ea] hover:bg-neutral-200/50"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-              <input
-                type="text"
-                value={towingLimit}
-                onChange={(e) => setTowingLimit(e.target.value)}
-                placeholder="Custom towing"
-                className="w-24 px-2 py-1 text-[11px] font-mono rounded border border-[#e5e5ea] focus:border-[#1b1717] outline-hidden"
-              />
-            </div>
+            <TowingLimitSelector
+              value={towingLimit}
+              onChange={setTowingLimit}
+              disabled={saving}
+              compact
+            />
           </div>
 
           {/* Advanced Accordion Toggle */}

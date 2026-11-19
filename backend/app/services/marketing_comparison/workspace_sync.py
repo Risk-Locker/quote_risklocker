@@ -54,6 +54,30 @@ _CONCEPT_MATCHERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ("betterment", "waiver-of-betterment", "waiver-betterment", "betterment-protection"),
         ("betterment",),
     ),
+    "ehailing": (
+        ("ehailing", "e-hailing", "private-hire-car-e-hailing"),
+        ("e-hailing", "ehailing", "e hailing", "private hire car"),
+    ),
+    "srcc": (
+        ("strike-riot-civil-commotion", "srcc"),
+        ("strike, riot", "strike riot", "civil commotion", "srcc"),
+    ),
+    "child_seat": (
+        ("child-car-seat", "child-seat", "child-safety-seat"),
+        ("child car seat", "child safety seat"),
+    ),
+    "respray": (
+        ("repaint-spray-paint", "full-respray", "spray-paint", "respray"),
+        ("full respray", "respray", "spray paint", "repaint"),
+    ),
+    "ev_battery": (
+        ("ev-battery-depletion-towing", "ev-battery", "battery-coverage"),
+        ("ev battery", "battery depletion", "out of charge"),
+    ),
+    "ev_other": (
+        ("ev-home-wall-charger", "ev-wall-charger", "ev-charger-liability"),
+        ("wall charger", "ev wall charger", "charger liability"),
+    ),
 }
 
 
@@ -147,6 +171,13 @@ def _activate_domain_selection(
                     stamp_applied_to_premium(other, Decimal("0.00"))
         target.state = "current"
         target.superseded_by_id = None
+        if target.item_kind == "custom" and not target.label_override:
+            target.label_override = default_label
+        if domain_key == "towing" and typed_value is not None:
+            new_disp = str(typed_value.get("display_text") or "").lower()
+            cur_lbl_low = str(target.label_override or "").lower()
+            if "unlimited" in cur_lbl_low and "unlimited" not in new_disp:
+                target.label_override = default_label
         if typed_value is not None:
             curr_tv = dict(target.typed_value_override or {})
             desc = curr_tv.get("description")
@@ -162,6 +193,45 @@ def _activate_domain_selection(
         return
 
     concept, offering = _find_concept_and_offering(db, draft, candidate_keys)
+    resolved_item_kind = "catalog" if offering else "custom"
+    target_key = (f"catalog:{offering.offering_key}" if offering else f"comparison:{domain_key}")[:160]
+    resolved_label = (
+        (offering.label_override if offering and offering.label_override else None)
+        or (default_label if resolved_item_kind == "custom" else None)
+    )
+
+    # Reuse any existing DraftBenefitSelection matching target_key or offering to satisfy uq_draft_benefit_selection_key
+    existing_by_key = next((s for s in selections if (s.selection_key or "") == target_key), None)
+    if existing_by_key is None and offering is not None:
+        existing_by_key = next((s for s in selections if s.catalog_offering_id == offering.id), None)
+    if existing_by_key is not None:
+        if existing_by_key.concept_id:
+            for other in selections:
+                if other.id != existing_by_key.id and other.concept_id == existing_by_key.concept_id and other.state == "current":
+                    other.state = "superseded"
+                    other.superseded_by_id = existing_by_key.id
+                    stamp_applied_to_premium(other, Decimal("0.00"))
+        existing_by_key.state = "current"
+        existing_by_key.superseded_by_id = None
+        existing_by_key.cost_status = "included"
+        if existing_by_key.item_kind == "custom" and not existing_by_key.label_override:
+            existing_by_key.label_override = resolved_label or default_label
+        if domain_key == "towing" and typed_value is not None:
+            new_disp = str(typed_value.get("display_text") or "").lower()
+            cur_lbl_low = str(existing_by_key.label_override or "").lower()
+            if "unlimited" in cur_lbl_low and "unlimited" not in new_disp:
+                existing_by_key.label_override = resolved_label or default_label
+        if typed_value is not None:
+            curr_tv = dict(existing_by_key.typed_value_override or {})
+            next_tv = dict(typed_value)
+            if curr_tv.get("description") and "description" not in next_tv:
+                next_tv["description"] = curr_tv["description"]
+            existing_by_key.typed_value_override = next_tv
+        stamp_applied_to_premium(existing_by_key, Decimal("0.00"))
+        if user_id:
+            existing_by_key.selected_by = user_id
+        return
+
     # Supersede any current row on target.concept_id if present
     if concept:
         for other in selections:
@@ -172,13 +242,13 @@ def _activate_domain_selection(
     new_sel = DraftBenefitSelection(
         id=new_id(),
         draft_id=draft.id,
-        selection_key=(f"catalog:{offering.offering_key}" if offering else f"comparison:{domain_key}")[:160],
+        selection_key=target_key,
         catalog_offering_id=offering.id if offering else None,
         concept_id=concept.id if concept else None,
-        item_kind="catalog" if offering else "custom",
+        item_kind=resolved_item_kind,
         state="current",
         cost_status="included",
-        label_override=(offering.label_override if offering and offering.label_override else None) or (None if concept else default_label),
+        label_override=resolved_label,
         typed_value_override=typed_value,
         evidence_snapshot={"source": "comparison_sync", "applied_to_premium": "0.00"},
         sort_order=int(offering.sort_order or 0) if offering else 60,
@@ -230,7 +300,16 @@ def sync_session_draft_from_comparison(
 
     # 1. Selection & Benefit Synchronization + applied_to_premium removal deltas
     removed_applied_total = Decimal("0.00")
-    benefit_sync_keys = {"windscreen_sum_insured", "special_perils", "llp_llop", "towing_limit", "towing_km", "waiver_betterment"}
+    benefit_sync_keys = {
+        "windscreen_sum_insured",
+        "special_perils",
+        "llp_llop",
+        "towing_limit",
+        "towing_km",
+        "waiver_betterment",
+        "extra_addons",
+        "included_perils",
+    }
     if edited_set.intersection(benefit_sync_keys):
         selections = list(
             db.scalars(select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft.id)).all()
@@ -319,13 +398,38 @@ def sync_session_draft_from_comparison(
                     selections,
                     concepts_by_id,
                     "betterment",
-                    ("betterment", "waiver-of-betterment"),
+                    ("betterment", "waiver-of-betterment", "betterment-protection"),
                     "Waiver of Betterment",
                     None,
                     user_id,
                 )
             else:
                 removed_applied_total += _deactivate_domain_selections(selections, concepts_by_id, "betterment", user_id)
+
+        if "extra_addons" in edited_set and isinstance(field_values.get("extra_addons"), dict):
+            from app.services.marketing_comparison.dynamic_addons import (
+                DYNAMIC_ADDON_BY_KEY,
+                normalize_dynamic_addon_flag,
+            )
+
+            for addon_k, addon_v in field_values["extra_addons"].items():
+                defn = DYNAMIC_ADDON_BY_KEY.get(str(addon_k or "").strip().lower())
+                if not defn:
+                    continue
+                if normalize_dynamic_addon_flag(addon_v) == "Yes":
+                    _activate_domain_selection(
+                        db,
+                        draft,
+                        selections,
+                        concepts_by_id,
+                        defn["key"],
+                        defn["concept_keys"],
+                        defn["default_title"],
+                        {"type": "boolean", "value": True, "display_text": "Included"},
+                        user_id,
+                    )
+                else:
+                    removed_applied_total += _deactivate_domain_selections(selections, concepts_by_id, defn["key"], user_id)
 
         if explicit_motor_premium:
             for sel in selections:
@@ -372,6 +476,42 @@ def sync_session_draft_from_comparison(
     if "waiver_betterment" in edited_set:
         _set_manual_field("waiver_of_betterment", "Included" if field_values.get("waiver_betterment") else "Not Included")
 
+    if "betterment_rate" in edited_set:
+        if field_values.get("betterment_rate") is not None:
+            _set_manual_field("betterment_rate", str(field_values["betterment_rate"]))
+        else:
+            d_fields.pop("betterment_rate", None)
+
+    if "extra_addons" in edited_set and isinstance(field_values.get("extra_addons"), dict):
+        from app.services.marketing_comparison.dynamic_addons import sanitize_extra_addons_map
+
+        prev_ea = d_fields.get("extra_addons")
+        base_map = (
+            dict(prev_ea.get("value"))
+            if isinstance(prev_ea, dict) and isinstance(prev_ea.get("value"), dict)
+            else (dict(prev_ea) if isinstance(prev_ea, dict) else {})
+        )
+        merged_ea = {**sanitize_extra_addons_map(base_map), **sanitize_extra_addons_map(field_values["extra_addons"])}
+        d_fields["extra_addons"] = {"value": merged_ea, "status": "manual_override"}
+
+    if "included_perils" in edited_set:
+        raw_perils = field_values.get("included_perils")
+        if isinstance(raw_perils, list):
+            clean_list = list(dict.fromkeys(str(p).strip().upper() for p in raw_perils if str(p).strip()))
+            d_fields["included_perils"] = {"value": clean_list, "status": "manual_override"}
+        elif raw_perils is None:
+            d_fields.pop("included_perils", None)
+
+    if "vehicle_model" in edited_set and field_values.get("vehicle_model"):
+        vm_val = str(field_values["vehicle_model"]).strip()
+        _set_manual_field("car_model", vm_val)
+        _set_manual_field("vehicle_model", vm_val)
+
+    if "manufacture_year" in edited_set and field_values.get("manufacture_year"):
+        yom_str = str(int(field_values["manufacture_year"]))
+        _set_manual_field("vehicle_year", yom_str)
+        _set_manual_field("manufacture_year", yom_str)
+
     if "excess" in edited_set and field_values.get("excess") is not None:
         ex_dec = parse_money_decimal(field_values.get("excess")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         ex_str = f"{ex_dec:.2f}"
@@ -399,10 +539,13 @@ def sync_session_draft_from_comparison(
     )
     if explicit_motor_premium and field_values.get("motor_premium") is not None:
         mp_dec = parse_money_decimal(field_values.get("motor_premium")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        _set_manual_field("motor_premium", f"{mp_dec:.2f}")
         _set_manual_field("premium", f"{mp_dec:.2f}")
         _set_manual_field("premium_due", f"{mp_dec:.2f}")
         _set_decision("premium", f"{mp_dec:.2f}")
         tot_dec = (mp_dec + eff_rt + eff_rf).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        d_fields["include_road_tax"] = {"value": bool(tenure.include_road_tax is not False) if tenure else True, "status": "ready"}
+        d_fields["include_runner_fee"] = {"value": bool(tenure.include_runner_fee is not False) if tenure else True, "status": "ready"}
         d_fields["roadtax"] = {"value": f"{eff_rt:.2f}", "status": "ready"}
         d_fields["service_fee"] = {"value": f"{eff_rf:.2f}", "status": "ready"}
         d_fields["total_amount"] = {"value": f"{tot_dec:.2f}", "status": "ready"}
@@ -411,10 +554,15 @@ def sync_session_draft_from_comparison(
         cur_prem = parse_money_decimal(d_fields.get("premium"))
         new_prem = max(Decimal("0.00"), (cur_prem - removed_applied_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
         prem_delta_out = -removed_applied_total
+        _set_manual_field("motor_premium", f"{new_prem:.2f}")
         _set_manual_field("premium", f"{new_prem:.2f}")
         _set_manual_field("premium_due", f"{new_prem:.2f}")
         _set_decision("premium", f"{new_prem:.2f}")
         tot_dec = (new_prem + eff_rt + eff_rf).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        d_fields["include_road_tax"] = {"value": bool(tenure.include_road_tax is not False) if tenure else True, "status": "ready"}
+        d_fields["include_runner_fee"] = {"value": bool(tenure.include_runner_fee is not False) if tenure else True, "status": "ready"}
+        d_fields["roadtax"] = {"value": f"{eff_rt:.2f}", "status": "ready"}
+        d_fields["service_fee"] = {"value": f"{eff_rf:.2f}", "status": "ready"}
         d_fields["total_amount"] = {"value": f"{tot_dec:.2f}", "status": "ready"}
         d_decisions["total_amount"] = {"decision": "confirm", "decided_by": user_id, "decided_at": now_iso}
 

@@ -461,10 +461,9 @@ def format_addon_value(raw_val: Any, val_override: Any = None) -> str:
         except Exception:
             pass
 
-    # 10. General Word Clamping: Ensure coverage info is never longer than 4 words
-    words = s.split()
-    if len(words) > 4:
-        return " ".join(words[:4])
+    # 10. Reject unparsed multi-word prose sentences instead of slicing mid-sentence fragments
+    if len(s.split()) > 3 or len(s) > 28:
+        return ""
 
     return s
 
@@ -888,9 +887,47 @@ def extract_free_coverage_items(
         t_norm = _normalize_benefit_code(str(raw.get("title") or raw.get("label") or ""))
         return "towing" in t_norm and "battery" not in t_norm
 
-    def _format_towing_title(base_label: str, limit_val: str) -> str:
+    def _is_coverage_hidden_or_cleared(raw: dict[str, Any]) -> bool:
+        if raw.get("hide_coverage") is True or raw.get("show_coverage") is False:
+            return True
+        for k in ("typed_value_override", "typed_value"):
+            tv = raw.get(k)
+            if isinstance(tv, dict):
+                if tv.get("hide_limit") is True or tv.get("hideCoverage") is True:
+                    return True
+                if "display_text" in tv and str(tv.get("display_text") or "").strip() == "" and tv.get("value") in (None, ""):
+                    return True
+        return False
+
+    def _strip_trailing_metric_parens(title_str: str) -> str:
+        return re.sub(
+            r"\s*\((?:(?:RM|MYR)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|Unlimited[^)]*)\)\s*$",
+            "",
+            (title_str or "").strip(),
+            flags=re.IGNORECASE,
+        ).strip()
+
+    def _format_towing_title(base_label: str, limit_val: str, *, is_manual_val: bool = False) -> str:
         clean_title = (base_label or "Emergency Towing Assistance").strip()
-        clean_val = (limit_val or "").strip()
+        raw_lim = (limit_val or "").strip()
+        if is_manual_val and raw_lim:
+            clean_title = _strip_trailing_metric_parens(clean_title)
+        # Extract only a concise towing metric (e.g. '200 km', 'RM 400', 'Unlimited'); never wrap prose sentences in parens
+        clean_val = ""
+        if raw_lim:
+            if is_manual_val and len(raw_lim) <= 40:
+                clean_val = raw_lim
+            elif re.fullmatch(r"(?:Unlimited(?:\s*-\s*[A-Za-z0-9 ]+)?|RM\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km)", raw_lim, re.IGNORECASE):
+                clean_val = raw_lim
+            elif "unlimited" in raw_lim.lower() and len(raw_lim.split()) <= 4:
+                clean_val = "Unlimited"
+            else:
+                m_km = re.search(r"\b(\d+\s*km)\b", raw_lim, re.IGNORECASE)
+                m_rm = re.search(r"\b(RM\s*[\d,]+(?:\.\d{1,2})?)\b", raw_lim, re.IGNORECASE)
+                if m_km:
+                    clean_val = m_km.group(1).lower()
+                elif m_rm:
+                    clean_val = m_rm.group(1).upper()
         if not clean_val:
             return clean_title
         val_compact = re.sub(r"\.00\b", "", clean_val).lower()
@@ -905,12 +942,19 @@ def extract_free_coverage_items(
         if raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
             continue
 
+        is_hide_cov = _is_coverage_hidden_or_cleared(raw)
+        has_manual_val_ovr = bool(raw.get("has_manual_value_override"))
+
         if _is_base_towing_card(raw):
             c_title = str(raw.get("label") or raw.get("title") or "Emergency Towing Assistance").strip()
-            c_val = str(raw.get("value") or raw.get("display_value") or raw.get("coverage_limit") or "").strip()
+            c_val = "" if is_hide_cov else str(raw.get("value") or raw.get("display_value") or raw.get("coverage_limit") or "").strip()
+            if is_hide_cov:
+                c_title = _strip_trailing_metric_parens(c_title)
             c_desc = str(raw.get("description") or raw.get("short_description") or "").strip()
             has_manual_override = bool(
                 raw.get("has_manual_override")
+                or has_manual_val_ovr
+                or is_hide_cov
                 or raw.get("is_manual")
                 or str(raw.get("source") or "").lower() == "manual"
                 or raw.get("label_override")
@@ -929,7 +973,7 @@ def extract_free_coverage_items(
                 out_title = towing_upgrade["title"]
                 out_desc = towing_upgrade["description"]
             else:
-                out_title = _format_towing_title(c_title, c_val)
+                out_title = _format_towing_title(c_title, c_val, is_manual_val=has_manual_val_ovr)
                 out_desc = c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer."
 
             norm_out = _normalize_benefit_code(out_title)
@@ -945,17 +989,17 @@ def extract_free_coverage_items(
         title = str(raw.get("title") or raw.get("label") or "").strip()
         if not title:
             continue
+        if is_hide_cov:
+            title = _strip_trailing_metric_parens(title)
+        elif has_manual_val_ovr:
+            c_val = str(raw.get("value") or "").strip()
+            if c_val and len(c_val) <= 40 and c_val.lower() not in title.lower():
+                title = f"{_strip_trailing_metric_parens(title)} ({c_val})"
         norm_title = _normalize_benefit_code(title)
         if norm_title in seen_titles:
             continue
         seen_titles.add(norm_title)
         desc = str(raw.get("description") or raw.get("short_description") or "").strip()
-        val = format_addon_value(raw.get("value") or raw.get("coverage_limit"))
-        if val:
-            val_compact = re.sub(r"\.00\b", "", val).lower()
-            desc_norm = desc.lower()
-            if val.lower() not in desc_norm and val_compact not in desc_norm:
-                desc = f"{desc} ({val})".strip() if desc else val
         items.append({"title": title, "description": desc})
         if len(items) >= limit:
             break
@@ -1047,12 +1091,17 @@ def build_unified_matrix_cards(
         if is_betterment:
             if re.match(r"(?i)^\s*rm\b", str(raw_val or "").strip()):
                 raw_val = ""
-            comp_l = (insurer_name or "").lower()
-            default_years = (
-                "Up to 10 Years"
-                if ("qbe" in comp_l or any(k in comp_l for k in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")))
-                else "Up to 15 Years"
-            )
+            try:
+                from app.services.marketing_comparison.company_rules import resolve_company_betterment_rule
+
+                _, _, default_years = resolve_company_betterment_rule(company_name=insurer_name)
+            except Exception:
+                comp_l = (insurer_name or "").lower()
+                default_years = (
+                    "Up to 10 Years"
+                    if ("qbe" in comp_l or any(k in comp_l for k in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")))
+                    else "Up to 15 Years"
+                )
             if not raw_val or raw_val in ("Up to 10 Years", "Up to 15 Years", "Standard"):
                 formatted_val = default_years
             else:
@@ -1199,12 +1248,17 @@ def build_unified_matrix_cards(
                 seen_in_output.add(cat_id)
                 fill_val = format_addon_value(cat.get("default_value"))
                 if cat_id == "betterment":
-                    comp_l = (insurer_name or "").lower()
-                    fill_val = (
-                        "Up to 10 Years"
-                        if ("qbe" in comp_l or any(k in comp_l for k in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")))
-                        else "Up to 15 Years"
-                    )
+                    try:
+                        from app.services.marketing_comparison.company_rules import resolve_company_betterment_rule
+
+                        _, _, fill_val = resolve_company_betterment_rule(company_name=insurer_name)
+                    except Exception:
+                        comp_l = (insurer_name or "").lower()
+                        fill_val = (
+                            "Up to 10 Years"
+                            if ("qbe" in comp_l or any(k in comp_l for k in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")))
+                            else "Up to 15 Years"
+                        )
                 processed_cards.append(
                     {
                         "id": cat["id"],

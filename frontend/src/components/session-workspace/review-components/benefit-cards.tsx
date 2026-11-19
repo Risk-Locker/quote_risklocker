@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { ArrowCounterClockwise, ArrowLeft, ArrowRight, Check, Eye, EyeSlash, Lock, PencilSimple, Sparkle, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { fileUrl } from "@/lib/api";
 import type { BenefitCardSummary } from "../types";
 
@@ -36,9 +37,24 @@ export function IncludedCard({
   const isUnder10Insurer = insLower.includes("qbe") || insLower.includes("stmb") || insLower.includes("takaful malaysia") || insLower.includes("lonpac");
   const defaultBetterment = isUnder10Insurer ? "Up to 10 Years" : "Up to 15 Years";
 
-  const displayLimitVal = isBetterment && (/^\s*rm\b/i.test(card.value || "") || !card.value)
-    ? defaultBetterment
-    : card.value;
+  const embeddedMetricMatch = !card.value
+    ? card.label.match(/\(((?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|unlimited[^)]*)\)\s*$/i)
+    : null;
+  const effectiveRawVal = card.value || (embeddedMetricMatch ? embeddedMetricMatch[1].trim() : "");
+  const isExplicitlyCleared = Boolean(
+    ((selection as any)?.typed_value_override &&
+      "display_text" in ((selection as any)?.typed_value_override || {}) &&
+      String((selection as any)?.typed_value_override?.display_text ?? "").trim() === "") ||
+    ((card as any).typed_value &&
+      "display_text" in ((card as any).typed_value || {}) &&
+      String((card as any).typed_value?.display_text ?? "").trim() === "")
+  );
+
+  const displayLimitVal = isExplicitlyCleared
+    ? ""
+    : isBetterment && (/^\s*rm\b/i.test(effectiveRawVal) || !effectiveRawVal)
+      ? defaultBetterment
+      : effectiveRawVal;
   const isLimitHidden = Boolean(
     (selection as any)?.typed_value_override?.hide_limit ??
     (card as any).typed_value?.hide_limit ??
@@ -48,13 +64,13 @@ export function IncludedCard({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(card.label);
   const [isEditingLimit, setIsEditingLimit] = useState(false);
-  const [limitInput, setLimitInput] = useState(card.value || "");
+  const [limitInput, setLimitInput] = useState(displayLimitVal || "");
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [descInput, setDescInput] = useState(card.description || "");
   const [savedField, setSavedField] = useState<string | null>(null);
 
   useEffect(() => { setTitleInput(card.label); }, [card.label]);
-  useEffect(() => { setLimitInput(card.value || ""); }, [card.value]);
+  useEffect(() => { setLimitInput(displayLimitVal || ""); }, [displayLimitVal]);
   useEffect(() => { setDescInput(card.description || ""); }, [card.description]);
 
   const flashSaved = (field: string) => {
@@ -62,20 +78,36 @@ export function IncludedCard({
     setTimeout(() => setSavedField(null), 1400);
   };
 
+  const stripMetricFromLabelIfPresent = (): string | undefined => {
+    const stripped = card.label.replace(/\s*\((?:(?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|unlimited[^)]*)\)\s*$/i, "").trim();
+    return stripped && stripped !== card.label ? stripped : undefined;
+  };
+
   const handleToggleCoverageVisibility = () => {
     const nextHidden = !isLimitHidden;
     flashSaved("coverage");
-    const currentTyped = (selection as any)?.typed_value_override || (card as any).typed_value || {};
-    const newTyped = typeof currentTyped === "object" && currentTyped !== null
-      ? { ...currentTyped, hide_limit: nextHidden, display_text: card.value || currentTyped.display_text || "" }
-      : { type: "custom", display_text: card.value || "", hide_limit: nextHidden };
+    const newTyped = {
+      type: "custom",
+      display_text: displayLimitVal || card.value || "",
+      hide_limit: nextHidden,
+    };
+    const cleanedLabel = nextHidden ? stripMetricFromLabelIfPresent() : undefined;
     if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: newTyped }, `benefits.${selectionId}.hide_limit`);
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.${selectionId}.hide_limit`
+      );
     } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, typed_value: newTyped }, `benefits.offer.${card.offering_id}`);
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.offer.${card.offering_id}`
+      );
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
-      onQueue({ op: "benefit_update", selection_id: targetId, typed_value: newTyped }, `benefits.${targetId}.hide_limit`);
+      onQueue(
+        { op: "benefit_update", selection_id: targetId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.${targetId}.hide_limit`
+      );
     }
   };
 
@@ -101,15 +133,32 @@ export function IncludedCard({
       clean = defaultBetterment;
     }
     flashSaved("limit");
-    const typed = clean ? { type: "custom", display_text: clean } : null;
+    const typed = clean
+      ? { type: "custom", display_text: clean, hide_limit: false }
+      : { type: "custom", display_text: "", hide_limit: true };
+    const cleanedLabel = stripMetricFromLabelIfPresent();
     if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: typed }, `benefits.${selectionId}.limit`);
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.${selectionId}.limit`
+      );
     } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed }, `benefits.offer.${card.offering_id}`);
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.offer.${card.offering_id}`
+      );
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
-      onQueue({ op: "benefit_update", selection_id: targetId, typed_value: typed }, `benefits.${targetId}.limit`);
+      onQueue(
+        { op: "benefit_update", selection_id: targetId, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.${targetId}.limit`
+      );
     }
+  };
+
+  const handleRemoveCoverage = () => {
+    setLimitInput("");
+    handleLimitCommit("");
   };
 
   const handleDescCommit = (newVal: string) => {
@@ -274,8 +323,10 @@ export function IncludedCard({
     }
   };
 
-  const handleRemove = () => {
-    if (!window.confirm(`Are you sure you want to remove "${card.label}" completely?`)) return;
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
+
+  const performRemove = () => {
+    setConfirmRemoveOpen(false);
     if (selectionId) {
       onQueue(
         { op: "benefit_update", selection_id: selectionId, state: "removed" },
@@ -296,6 +347,8 @@ export function IncludedCard({
       );
     }
   };
+
+  const handleRemove = () => setConfirmRemoveOpen(true);
 
   return (
     <article className={`group flex items-start justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border p-2.5 shadow-xs transition-all ${card.is_detected
@@ -334,11 +387,11 @@ export function IncludedCard({
             />
           ) : (
             <div className="group/title flex items-center gap-1 max-w-full">
-              <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">{card.label}</h3>
+              <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight break-words">{card.label}</h3>
               <button
                 type="button"
                 onClick={() => setIsEditingTitle(true)}
-                className="opacity-0 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
+                className="opacity-70 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer shrink-0"
                 title="Edit title"
               >
                 <PencilSimple size={10} />
@@ -363,56 +416,71 @@ export function IncludedCard({
           ) : null}
         </div>
 
-        {/* Coverage Limit */}
-        {isEditingLimit ? (
-          <input
-            type="text"
-            placeholder={isBetterment ? `Coverage (e.g. ${defaultBetterment})` : "Coverage (e.g. RM 1,000, 50 km)"}
-            value={limitInput}
-            autoFocus
-            onChange={(e) => setLimitInput(e.target.value)}
-            onBlur={() => handleLimitCommit(limitInput)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleLimitCommit(limitInput);
-              if (e.key === "Escape") { setIsEditingLimit(false); setLimitInput(displayLimitVal || ""); }
-            }}
-            className="h-5 w-44 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none mt-0.5"
-          />
-        ) : displayLimitVal && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(displayLimitVal) && (/\d/.test(displayLimitVal) || /unlimited|waived/i.test(displayLimitVal)) ? (
-          <div className="group/limit flex items-center gap-1 mt-0.5">
-            <p className={`text-[11px] font-bold leading-tight truncate transition-colors ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[#5ABA00]"}`}>
-              {displayLimitVal}
-            </p>
+        {/* Coverage Limit: Editable, Hideable, and Removable for all Box 1 & Box 2 cards */}
+        <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-[11px]">
+          <span className="text-[10px] font-semibold text-[var(--rl-text-muted)]">Coverage:</span>
+          {isEditingLimit ? (
+            <input
+              type="text"
+              placeholder={isBetterment ? `Coverage (e.g. ${defaultBetterment})` : "Coverage (e.g. RM 1,000, 50 km)"}
+              value={limitInput}
+              autoFocus
+              onChange={(e) => setLimitInput(e.target.value)}
+              onBlur={() => handleLimitCommit(limitInput)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleLimitCommit(limitInput);
+                if (e.key === "Escape") { setIsEditingLimit(false); setLimitInput(displayLimitVal || ""); }
+              }}
+              className="h-5 w-40 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+            />
+          ) : displayLimitVal && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional", "Standard"].includes(displayLimitVal) ? (
+            <div className="group/limit flex items-center gap-1 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setIsEditingLimit(true)}
+                className={`text-[11px] font-bold leading-tight break-words text-left transition-colors cursor-pointer hover:underline ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[#5ABA00]"}`}
+                title="Click to edit coverage amount"
+              >
+                {displayLimitVal}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditingLimit(true)}
+                className="p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-colors cursor-pointer"
+                title="Edit coverage amount"
+              >
+                <PencilSimple size={10} />
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleCoverageVisibility}
+                className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
+                title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
+              >
+                {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
+              </button>
+              <button
+                type="button"
+                onClick={handleRemoveCoverage}
+                className="p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors cursor-pointer"
+                title="Remove coverage amount"
+                aria-label="Remove coverage amount"
+              >
+                <X size={10} weight="bold" />
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
-              onClick={() => setIsEditingLimit(true)}
-              className="opacity-0 group-hover/limit:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
-              title="Edit coverage limit"
-            >
-              <PencilSimple size={10} />
-            </button>
-            <button
-              type="button"
-              onClick={handleToggleCoverageVisibility}
-              className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
-              title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
-            >
-              {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
-            </button>
-          </div>
-        ) : (
-          <div className="group/limit flex items-center gap-1 mt-0.5">
-            <button
-              type="button"
-              onClick={() => setIsEditingLimit(true)}
-              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity cursor-pointer"
-              title="Set coverage limit"
+              onClick={() => { setLimitInput(""); setIsEditingLimit(true); }}
+              className="text-[10px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors cursor-pointer"
+              title="Set coverage amount"
             >
               <PencilSimple size={9} />
-              <span>+ Limit</span>
+              <span>+ Coverage</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Description */}
         {isEditingDesc ? (
@@ -430,13 +498,13 @@ export function IncludedCard({
           />
         ) : card.description ? (
           <div className="group/desc flex items-start gap-1 mt-0.5">
-            <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2 flex-1">
+            <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug break-words whitespace-normal flex-1">
               {card.description}
             </p>
             <button
               type="button"
               onClick={() => setIsEditingDesc(true)}
-              className="opacity-0 group-hover/desc:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity shrink-0 mt-0.5 cursor-pointer"
+              className="opacity-70 group-hover/desc:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity shrink-0 mt-0.5 cursor-pointer"
               title="Edit description"
             >
               <PencilSimple size={10} />
@@ -446,7 +514,7 @@ export function IncludedCard({
           <button
             type="button"
             onClick={() => setIsEditingDesc(true)}
-            className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[9px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity mt-0.5 cursor-pointer"
+            className="text-[9px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors mt-0.5 cursor-pointer"
             title="Add description"
           >
             <PencilSimple size={9} />
@@ -507,10 +575,10 @@ export function IncludedCard({
         <button
           type="button"
           onClick={handleMakePaid}
-          className="flex items-center gap-0.5 rounded bg-amber-50 hover:bg-amber-100 border border-amber-300 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 transition-colors cursor-pointer"
-          title="Move this benefit to Box 2: Add-On Upgrades (Bottom Matrix)"
+          className="flex items-center gap-0.5 rounded-[var(--rl-radius-sm)] bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors cursor-pointer"
+          title="Move this benefit to Box 2: Add-On Upgrades (TO Add-on Matrix)"
         >
-          <span>➔ Matrix Add-on</span>
+          <span>➔ TO addon</span>
         </button>
         <button
           type="button"
@@ -522,6 +590,14 @@ export function IncludedCard({
           <X size={14} weight="bold" />
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmRemoveOpen}
+        onOpenChange={setConfirmRemoveOpen}
+        title="Remove Benefit"
+        message={`Are you sure you want to remove "${card.label}" completely?`}
+        confirmLabel="Remove"
+        onConfirm={performRemove}
+      />
     </article>
   );
 }
@@ -578,10 +654,11 @@ export function AddonCard({
     if (isWindscreen) return;
     const nextHidden = !isLimitHidden;
     flashSaved("coverage");
-    const currentTyped = (card as any).typed_value || {};
-    const newTyped = typeof currentTyped === "object" && currentTyped !== null
-      ? { ...currentTyped, hide_limit: nextHidden, display_text: card.value || currentTyped.display_text || "" }
-      : { type: "custom", display_text: card.value || "", hide_limit: nextHidden };
+    const newTyped = {
+      type: "custom",
+      display_text: displayLimitVal || card.value || "",
+      hide_limit: nextHidden,
+    };
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: newTyped }, `benefits.${selectionId}.hide_limit`);
     } else if (card.offering_id) {
@@ -614,7 +691,9 @@ export function AddonCard({
       clean = defaultBetterment;
     }
     flashSaved("limit");
-    const typed = clean ? { type: "custom", display_text: clean } : null;
+    const typed = clean
+      ? { type: "custom", display_text: clean, hide_limit: false }
+      : { type: "custom", display_text: "", hide_limit: true };
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: typed }, `benefits.${selectionId}.limit`);
     } else if (card.offering_id) {
@@ -854,11 +933,11 @@ export function AddonCard({
             />
           ) : (
             <div className="group/title flex items-center gap-1 max-w-full">
-              <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">{card.label}</h3>
+              <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight break-words">{card.label}</h3>
               <button
                 type="button"
                 onClick={() => setIsEditingTitle(true)}
-                className="opacity-0 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
+                className="opacity-70 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer shrink-0"
                 title="Edit title"
               >
                 <PencilSimple size={10} />
@@ -898,15 +977,15 @@ export function AddonCard({
             }}
             className="h-5 w-44 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none mt-0.5"
           />
-        ) : displayLimitVal && !["", "Optional payable add-on", "Included", "FOC", "As quoted", "Optional"].includes(displayLimitVal) && (/\d/.test(displayLimitVal) || /unlimited|waived/i.test(displayLimitVal)) ? (
-          <div className="group/limit flex items-center gap-1 mt-0.5">
-            <p className={`text-[11px] font-bold leading-tight truncate transition-colors ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[#5ABA00]"}`}>
+        ) : displayLimitVal && !["", "Optional payable add-on", "Included", "FOC", "As quoted", "Optional"].includes(displayLimitVal) ? (
+          <div className="group/limit flex items-center gap-1 mt-0.5 flex-wrap">
+            <p className={`text-[11px] font-bold leading-tight break-words transition-colors ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[#5ABA00]"}`}>
               {displayLimitVal}
             </p>
             <button
               type="button"
               onClick={() => setIsEditingLimit(true)}
-              className="opacity-0 group-hover/limit:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
+              className="opacity-70 group-hover/limit:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer"
               title="Edit coverage limit"
             >
               <PencilSimple size={10} />
@@ -914,10 +993,18 @@ export function AddonCard({
             <button
               type="button"
               onClick={handleToggleCoverageVisibility}
-              className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
+              className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-70 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
               title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
             >
               {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setLimitInput(""); handleLimitCommit(""); }}
+              className="opacity-70 group-hover/limit:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-opacity cursor-pointer"
+              title="Remove coverage amount"
+            >
+              <X size={10} weight="bold" />
             </button>
           </div>
         ) : (
@@ -925,11 +1012,11 @@ export function AddonCard({
             <button
               type="button"
               onClick={() => setIsEditingLimit(true)}
-              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity cursor-pointer"
+              className="text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors cursor-pointer"
               title="Set coverage limit"
             >
               <PencilSimple size={9} />
-              <span>+ Limit</span>
+              <span>+ Coverage</span>
             </button>
           </div>
         )}
@@ -950,13 +1037,13 @@ export function AddonCard({
           />
         ) : card.description ? (
           <div className="group/desc flex items-start gap-1 mt-0.5">
-            <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug line-clamp-2 flex-1">
+            <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug break-words whitespace-normal flex-1">
               {card.description}
             </p>
             <button
               type="button"
               onClick={() => setIsEditingDesc(true)}
-              className="opacity-0 group-hover/desc:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity shrink-0 mt-0.5 cursor-pointer"
+              className="opacity-70 group-hover/desc:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity shrink-0 mt-0.5 cursor-pointer"
               title="Edit description"
             >
               <PencilSimple size={10} />
@@ -966,7 +1053,7 @@ export function AddonCard({
           <button
             type="button"
             onClick={() => setIsEditingDesc(true)}
-            className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[9px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity mt-0.5 cursor-pointer"
+            className="text-[9px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors mt-0.5 cursor-pointer"
             title="Add description"
           >
             <PencilSimple size={9} />
@@ -1082,9 +1169,24 @@ export function MatrixAddonCard({
   const isUnder10Insurer = insLower.includes("qbe") || insLower.includes("stmb") || insLower.includes("takaful malaysia") || insLower.includes("lonpac");
   const defaultBetterment = isUnder10Insurer ? "Up to 10 Years" : "Up to 15 Years";
 
-  const displayLimitVal = isBetterment && (/^\s*rm\b/i.test(card.value || "") || !card.value)
-    ? defaultBetterment
-    : card.value;
+  const embeddedMetricMatch = !card.value
+    ? card.label.match(/\(((?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|unlimited[^)]*)\)\s*$/i)
+    : null;
+  const effectiveRawVal = card.value || (embeddedMetricMatch ? embeddedMetricMatch[1].trim() : "");
+  const isExplicitlyCleared = Boolean(
+    ((selection as any)?.typed_value_override &&
+      "display_text" in ((selection as any)?.typed_value_override || {}) &&
+      String((selection as any)?.typed_value_override?.display_text ?? "").trim() === "") ||
+    ((card as any).typed_value &&
+      "display_text" in ((card as any).typed_value || {}) &&
+      String((card as any).typed_value?.display_text ?? "").trim() === "")
+  );
+
+  const displayLimitVal = isExplicitlyCleared
+    ? ""
+    : isBetterment && (/^\s*rm\b/i.test(effectiveRawVal) || !effectiveRawVal)
+      ? defaultBetterment
+      : effectiveRawVal;
   const isLimitHidden = Boolean(
     (selection as any)?.typed_value_override?.hide_limit ??
     (card as any).typed_value?.hide_limit ??
@@ -1094,13 +1196,13 @@ export function MatrixAddonCard({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(card.label);
   const [isEditingLimit, setIsEditingLimit] = useState(false);
-  const [limitInput, setLimitInput] = useState(card.value || "");
+  const [limitInput, setLimitInput] = useState(displayLimitVal || "");
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [descInput, setDescInput] = useState(card.description || "");
   const [savedField, setSavedField] = useState<string | null>(null);
 
   useEffect(() => { setTitleInput(card.label); }, [card.label]);
-  useEffect(() => { setLimitInput(card.value || ""); }, [card.value]);
+  useEffect(() => { setLimitInput(displayLimitVal || ""); }, [displayLimitVal]);
   useEffect(() => { setDescInput(card.description || ""); }, [card.description]);
 
   const flashSaved = (field: string) => {
@@ -1108,20 +1210,36 @@ export function MatrixAddonCard({
     setTimeout(() => setSavedField(null), 1400);
   };
 
+  const stripMetricFromLabelIfPresent = (): string | undefined => {
+    const stripped = card.label.replace(/\s*\((?:(?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|unlimited[^)]*)\)\s*$/i, "").trim();
+    return stripped && stripped !== card.label ? stripped : undefined;
+  };
+
   const handleToggleCoverageVisibility = () => {
     const nextHidden = !isLimitHidden;
     flashSaved("coverage");
-    const currentTyped = (selection as any)?.typed_value_override || (card as any).typed_value || {};
-    const newTyped = typeof currentTyped === "object" && currentTyped !== null
-      ? { ...currentTyped, hide_limit: nextHidden, display_text: card.value || currentTyped.display_text || "" }
-      : { type: "custom", display_text: card.value || "", hide_limit: nextHidden };
+    const newTyped = {
+      type: "custom",
+      display_text: displayLimitVal || card.value || "",
+      hide_limit: nextHidden,
+    };
+    const cleanedLabel = nextHidden ? stripMetricFromLabelIfPresent() : undefined;
     if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: newTyped }, `benefits.${selectionId}.hide_limit`);
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.${selectionId}.hide_limit`
+      );
     } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, typed_value: newTyped }, `benefits.offer.${card.offering_id}`);
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.offer.${card.offering_id}`
+      );
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
-      onQueue({ op: "benefit_update", selection_id: targetId, typed_value: newTyped }, `benefits.${targetId}.hide_limit`);
+      onQueue(
+        { op: "benefit_update", selection_id: targetId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.${targetId}.hide_limit`
+      );
     }
   };
 
@@ -1147,15 +1265,32 @@ export function MatrixAddonCard({
       clean = defaultBetterment;
     }
     flashSaved("limit");
-    const typed = clean ? { type: "custom", display_text: clean } : null;
+    const typed = clean
+      ? { type: "custom", display_text: clean, hide_limit: false }
+      : { type: "custom", display_text: "", hide_limit: true };
+    const cleanedLabel = stripMetricFromLabelIfPresent();
     if (selectionId && !pending) {
-      onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: typed }, `benefits.${selectionId}.limit`);
+      onQueue(
+        { op: "benefit_update", selection_id: selectionId, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.${selectionId}.limit`
+      );
     } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed }, `benefits.offer.${card.offering_id}`);
+      onQueue(
+        { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.offer.${card.offering_id}`
+      );
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
-      onQueue({ op: "benefit_update", selection_id: targetId, typed_value: typed }, `benefits.${targetId}.limit`);
+      onQueue(
+        { op: "benefit_update", selection_id: targetId, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
+        `benefits.${targetId}.limit`
+      );
     }
+  };
+
+  const handleRemoveCoverage = () => {
+    setLimitInput("");
+    handleLimitCommit("");
   };
 
   const handleDescCommit = (newVal: string) => {
@@ -1257,8 +1392,10 @@ export function MatrixAddonCard({
     }
   };
 
-  const handleRemove = () => {
-    if (!window.confirm(`Are you sure you want to remove "${card.label}" from this quotation?`)) return;
+  const [confirmRemoveAddonOpen, setConfirmRemoveAddonOpen] = useState(false);
+
+  const performRemove = () => {
+    setConfirmRemoveAddonOpen(false);
     if (selectionId) {
       onQueue(
         { op: "benefit_update", selection_id: selectionId, state: "removed" },
@@ -1276,6 +1413,8 @@ export function MatrixAddonCard({
       );
     }
   };
+
+  const handleRemove = () => setConfirmRemoveAddonOpen(true);
 
   const serialStr = String(index + 1).padStart(2, "0");
 
@@ -1341,13 +1480,13 @@ export function MatrixAddonCard({
             />
           ) : (
             <div className="group/title flex items-center gap-1.5 max-w-full">
-              <h4 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight truncate">
+              <h4 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight break-words">
                 {card.label}
               </h4>
               <button
                 type="button"
                 onClick={() => setIsEditingTitle(true)}
-                className="opacity-0 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity cursor-pointer"
+                className="opacity-70 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity cursor-pointer shrink-0"
                 title="Edit title"
               >
                 <PencilSimple size={11} />
@@ -1377,7 +1516,7 @@ export function MatrixAddonCard({
         {/* Coverage Limit & Price Row (Spacious & Clean) */}
         <div className="flex items-center gap-3 flex-wrap text-xs">
           {/* Coverage Limit */}
-          <div className="flex items-center gap-1 text-[11px]">
+          <div className="flex items-center gap-1 text-[11px] flex-wrap">
             <span className="font-semibold text-[var(--rl-text-muted)]">Coverage:</span>
             {isEditingLimit ? (
               <input
@@ -1393,17 +1532,20 @@ export function MatrixAddonCard({
                 }}
                 className="h-5 w-32 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
               />
-            ) : (
-              <div className="group/limit flex items-center gap-1">
-                <span className={`font-bold transition-colors ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[#5ABA00]"}`}>
-                  {displayLimitVal && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional"].includes(displayLimitVal)
-                    ? displayLimitVal
-                    : (isBetterment ? defaultBetterment : "Standard")}
-                </span>
+            ) : displayLimitVal && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional", "Standard"].includes(displayLimitVal) ? (
+              <div className="group/limit flex items-center gap-1 flex-wrap">
                 <button
                   type="button"
                   onClick={() => setIsEditingLimit(true)}
-                  className="opacity-0 group-hover/limit:opacity-100 p-0.5 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity cursor-pointer"
+                  className={`font-bold break-words text-left transition-colors cursor-pointer hover:underline ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[#5ABA00]"}`}
+                  title="Click to edit coverage limit"
+                >
+                  {displayLimitVal}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingLimit(true)}
+                  className="p-0.5 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-colors cursor-pointer"
                   title="Edit coverage limit"
                 >
                   <PencilSimple size={10} />
@@ -1411,12 +1553,31 @@ export function MatrixAddonCard({
                 <button
                   type="button"
                   onClick={handleToggleCoverageVisibility}
-                  className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "opacity-0 group-hover/limit:opacity-100 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
+                  className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
                   title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
                 >
                   {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
                 </button>
+                <button
+                  type="button"
+                  onClick={handleRemoveCoverage}
+                  className="p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors cursor-pointer"
+                  title="Remove coverage amount"
+                  aria-label="Remove coverage amount"
+                >
+                  <X size={10} weight="bold" />
+                </button>
               </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setLimitInput(""); setIsEditingLimit(true); }}
+                className="text-[10px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors cursor-pointer"
+                title="Set coverage amount"
+              >
+                <PencilSimple size={9} />
+                <span>+ Coverage</span>
+              </button>
             )}
           </div>
 
@@ -1496,13 +1657,13 @@ export function MatrixAddonCard({
           />
         ) : card.description ? (
           <div className="group/desc flex items-start gap-1">
-            <p className="text-[11px] text-[var(--rl-text-muted)] leading-relaxed line-clamp-2 flex-1">
+            <p className="text-[11px] text-[var(--rl-text-muted)] leading-relaxed break-words whitespace-normal flex-1">
               {card.description}
             </p>
             <button
               type="button"
               onClick={() => setIsEditingDesc(true)}
-              className="opacity-0 group-hover/desc:opacity-100 p-0.5 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity shrink-0 cursor-pointer"
+              className="opacity-70 group-hover/desc:opacity-100 p-0.5 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity shrink-0 cursor-pointer"
               title="Edit description"
             >
               <PencilSimple size={10} />
@@ -1512,7 +1673,7 @@ export function MatrixAddonCard({
           <button
             type="button"
             onClick={() => setIsEditingDesc(true)}
-            className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-opacity cursor-pointer"
+            className="text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors cursor-pointer"
             title="Add description"
           >
             <PencilSimple size={10} />
@@ -1541,6 +1702,14 @@ export function MatrixAddonCard({
           <X size={15} weight="bold" />
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmRemoveAddonOpen}
+        onOpenChange={setConfirmRemoveAddonOpen}
+        title="Remove Add-on"
+        message={`Are you sure you want to remove "${card.label}" from this quotation?`}
+        confirmLabel="Remove"
+        onConfirm={performRemove}
+      />
     </article>
   );
 }

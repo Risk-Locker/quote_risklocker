@@ -5,7 +5,8 @@ import { toBlob, toPng } from "html-to-image";
 
 export function useSnapshotExport(
   gridRef: React.RefObject<HTMLDivElement | null>,
-  vehicleNo?: string
+  vehicleNo?: string,
+  onNotify?: (type: "success" | "error", title: string, message: string) => void
 ) {
   const [copyingSnapshot, setCopyingSnapshot] = useState(false);
   const [downloadingSnapshot, setDownloadingSnapshot] = useState(false);
@@ -21,10 +22,12 @@ export function useSnapshotExport(
       });
       if (blob) {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-        alert("Comparison snapshot copied to clipboard!");
+        onNotify?.("success", "Snapshot Copied", "Comparison snapshot copied to clipboard.");
       }
     } catch (err: any) {
-      alert("Failed to copy snapshot: " + (err.message || String(err)));
+      const msg = "Failed to copy snapshot: " + (err.message || String(err));
+      if (onNotify) onNotify("error", "Copy Snapshot Failed", msg);
+      else console.error(msg);
     } finally {
       setCopyingSnapshot(false);
     }
@@ -44,7 +47,9 @@ export function useSnapshotExport(
       link.href = dataUrl;
       link.click();
     } catch (err: any) {
-      alert("Failed to download snapshot: " + (err.message || String(err)));
+      const msg = "Failed to download snapshot: " + (err.message || String(err));
+      if (onNotify) onNotify("error", "Download Snapshot Failed", msg);
+      else console.error(msg);
     } finally {
       setDownloadingSnapshot(false);
     }

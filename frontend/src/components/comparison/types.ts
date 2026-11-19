@@ -46,6 +46,11 @@ export interface TenureSpec {
   covernote_session_id?: string | null;
 }
 
+export interface DynamicAddonDefinition {
+  key: string;
+  label: string;
+}
+
 export interface ComparisonEntry {
   id: string;
   tenure_id: string;
@@ -78,7 +83,8 @@ export interface ComparisonEntry {
   towing_km?: string;
   agreed_value: boolean;
   waiver_betterment: boolean;
-  betterment_rate?: number;
+  betterment_rate?: number | null;
+  betterment_is_auto?: boolean;
   betterment_display?: string;
   excess: number;
   basic_figure_name?: string | null;
@@ -89,6 +95,7 @@ export interface ComparisonEntry {
   windscreen_sum_insured: number | null;
   special_perils: string | null;
   llp_llop: string | null;
+  extra_addons?: Record<string, string>;
   canonical_perils?: string[];
   canonical_perils_formatted?: string;
   is_recommended: boolean;
@@ -134,6 +141,9 @@ export interface ComparisonMatrixData {
   entries: ComparisonEntry[];
   needs_materialize?: boolean;
   previous_policy: any;
+  covernote_policy?: any;
+  active_dynamic_addons?: DynamicAddonDefinition[];
+  dynamic_addon_catalog?: DynamicAddonDefinition[];
   recommended_sum_insured: Record<string, number>;
   ncd: {
     current: number | null;

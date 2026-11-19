@@ -37,6 +37,7 @@ export function AdjustFeesModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [recalcFeedback, setRecalcFeedback] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -45,6 +46,7 @@ export function AdjustFeesModal({
       setIncludeRoadTax(initialIncludeRoadTax ?? true);
       setIncludeRunnerFee(initialIncludeRunnerFee ?? true);
       setRecalcFeedback(null);
+      setSaveError(null);
     }
   }, [isOpen, initialRoadTax, initialRunnerFee, initialIncludeRoadTax, initialIncludeRunnerFee]);
 
@@ -84,6 +86,7 @@ export function AdjustFeesModal({
   const handleSave = async () => {
     try {
       setIsSaving(true);
+      setSaveError(null);
       const res = await api<any>(`/comparison/${tenureId}/toggle-fees`, {
         method: "POST",
         body: JSON.stringify({
@@ -96,7 +99,7 @@ export function AdjustFeesModal({
       onSaved(res);
       onClose();
     } catch (e: any) {
-      alert("Failed to save fee settings: " + (e.message || String(e)));
+      setSaveError("Failed to save fee settings: " + (e.message || String(e)));
     } finally {
       setIsSaving(false);
     }
@@ -126,6 +129,11 @@ export function AdjustFeesModal({
         </div>
 
         <div className="p-6 space-y-5">
+          {saveError && (
+            <div className="rounded-[var(--rl-radius-sm)] border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+              {saveError}
+            </div>
+          )}
           {/* Section 1: Road Tax */}
           <div className={`p-4 rounded-2xl border transition-all ${includeRoadTax ? "bg-white border-[#e5e5ea] shadow-2xs" : "bg-neutral-50 border-neutral-200 opacity-80"}`}>
             <div className="flex items-center justify-between mb-3">

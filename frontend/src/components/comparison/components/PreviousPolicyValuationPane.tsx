@@ -11,11 +11,14 @@ import {
   DownloadSimple,
   ShieldCheck,
 } from "@phosphor-icons/react";
+import { Button } from "@/components/ui/button";
 import { formatShortInsurerName, formatBenefitCoverage } from "@/lib/benefit-utils";
 import { fileUrl } from "@/lib/api";
 import { formatMoneyWithRounding } from "../types";
-import type { TenureSpec, RoundingMode } from "../types";
+import type { DynamicAddonDefinition, TenureSpec, RoundingMode } from "../types";
 import { InlineComparisonFieldEditor } from "./InlineComparisonFieldEditor";
+import { DynamicAddonsControl } from "./DynamicAddonsControl";
+import { PerilsChecklistEditor } from "./PerilsChecklistEditor";
 
 export interface PreviousPolicyValuationPaneProps {
   tenure: TenureSpec;
@@ -32,6 +35,8 @@ export interface PreviousPolicyValuationPaneProps {
   tenureId: string;
   isUnlinkingCovernote: boolean;
   roundingMode?: RoundingMode;
+  activeDynamicAddons?: DynamicAddonDefinition[];
+  dynamicAddonCatalog?: DynamicAddonDefinition[];
   onOpenNcdModal: () => void;
   onUnlinkCovernote: () => void;
   onOpenEditCovernote?: () => void;
@@ -47,6 +52,8 @@ export function PreviousPolicyValuationPane({
   tenureId,
   isUnlinkingCovernote,
   roundingMode = "exact",
+  activeDynamicAddons = [],
+  dynamicAddonCatalog,
   onOpenNcdModal,
   onUnlinkCovernote,
   onOpenEditCovernote,
@@ -67,13 +74,13 @@ export function PreviousPolicyValuationPane({
     <div id="tour-current-policy" className="space-y-4 sticky top-6">
       {/* Card 1: Previous Policy Card (Baseline Reference & Current NCD) */}
       {previous_policy && (previous_policy.insurer || previous_policy.sum_insured > 0 || currentNcdVal != null) ? (
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="rounded-[var(--rl-radius)] border border-neutral-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between border-b border-neutral-200 pb-2.5 mb-3">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-xs font-bold uppercase tracking-wider text-neutral-900 truncate">
                 Previous Policy ({prevPeriod})
               </span>
-              <span className="rounded bg-neutral-100 text-neutral-700 font-bold px-1.5 py-0.5 text-[9px] uppercase border border-neutral-200 shrink-0">
+              <span className="rounded-[var(--rl-radius-sm)] bg-neutral-100 text-neutral-700 font-bold px-1.5 py-0.5 text-[9px] uppercase border border-neutral-200 shrink-0">
                 Baseline
               </span>
             </div>
@@ -169,12 +176,12 @@ export function PreviousPolicyValuationPane({
           </div>
         </div>
       ) : (
-        <div className="rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/60 p-4 shadow-2xs">
+        <div className="rounded-[var(--rl-radius)] border-2 border-dashed border-neutral-300 bg-neutral-50/60 p-4 shadow-2xs">
           <div className="flex items-center justify-between border-b border-neutral-200 pb-2 mb-2">
             <span className="text-xs font-bold uppercase tracking-wider text-neutral-700">
               Previous Policy ({priorYear})
             </span>
-            <span className="rounded bg-neutral-200 text-neutral-600 font-bold px-1.5 py-0.5 text-[9px] uppercase">
+            <span className="rounded-[var(--rl-radius-sm)] bg-neutral-200 text-neutral-600 font-bold px-1.5 py-0.5 text-[9px] uppercase">
               No Record
             </span>
           </div>
@@ -182,48 +189,68 @@ export function PreviousPolicyValuationPane({
             No prior policy term recorded for this vehicle.
           </p>
           <div className="pt-1 text-center">
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={onOpenNcdModal}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-neutral-300 hover:border-[#1b1717] text-xs font-bold text-neutral-800 shadow-2xs transition-colors cursor-pointer"
+              icon={<UploadSimple size={12} weight="bold" />}
+              className="text-xs"
             >
-              <UploadSimple size={12} weight="bold" />
               <span>Upload Last Year Policy / Edit NCD</span>
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       {/* Card 2: Current Policy Card (Official Cover Note OR Leading Option) */}
       {cn ? (
-        <div className="rounded-2xl border-2 border-emerald-600 bg-gradient-to-b from-emerald-50/30 to-white p-4 shadow-md ring-2 ring-emerald-500/15">
+        <div className="rounded-[var(--rl-radius)] border-2 border-emerald-600 bg-gradient-to-b from-emerald-50/30 to-white p-4 shadow-md ring-2 ring-emerald-500/15">
           <div className="flex flex-col gap-1.5 border-b border-emerald-200 pb-2.5 mb-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-emerald-950 truncate">
                 Current Policy ({currentYear})
               </span>
               {onOpenEditCovernote && (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={onOpenEditCovernote}
-                  title="Edit all Cover Note details (Policy #, Insurer, Dates, Financials, Benefits)"
-                  className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-bold text-emerald-900 hover:bg-emerald-100 transition-colors cursor-pointer shrink-0"
+                  title="Edit all Cover Note details (Policy #, Insurer, Dates, Financials, Perils)"
+                  icon={<PencilSimple size={11} weight="bold" />}
+                  className="min-h-[26px] px-2.5 py-0.5 text-[11px] border-emerald-300 text-emerald-900 hover:bg-emerald-100 shrink-0"
                 >
-                  <PencilSimple size={11} weight="bold" />
-                  <span>Edit</span>
-                </button>
+                  <span>Edit All</span>
+                </Button>
               )}
             </div>
             <div className="flex items-center justify-between gap-1.5 flex-wrap">
-              <span className="rounded bg-emerald-700 text-white font-bold px-1.5 py-0.5 text-[9px] uppercase inline-flex items-center gap-1 shrink-0">
+              <span className="rounded-[var(--rl-radius-sm)] bg-emerald-700 text-white font-bold px-2 py-0.5 text-[9px] uppercase inline-flex items-center gap-1 shrink-0">
                 <CheckCircle size={10} weight="fill" /> Issued Cover Note
               </span>
-              <span
-                className="rounded bg-emerald-900 px-2 py-0.5 text-[10px] font-bold text-white uppercase whitespace-nowrap truncate max-w-[140px]"
-                title={cn.company_name}
-              >
-                {formatShortInsurerName(cn.company_name)}
-              </span>
+              {onPatchCovernoteField ? (
+                <InlineComparisonFieldEditor
+                  field="company_name"
+                  label="Underwriter / Insurer"
+                  currentValue={cn.company_name || ""}
+                  onSave={onPatchCovernoteField}
+                >
+                  <span
+                    className="rounded-[var(--rl-radius-sm)] bg-emerald-900 px-2 py-0.5 text-[10px] font-bold text-white uppercase whitespace-nowrap truncate max-w-[140px]"
+                    title={cn.company_name}
+                  >
+                    {formatShortInsurerName(cn.company_name)}
+                  </span>
+                </InlineComparisonFieldEditor>
+              ) : (
+                <span
+                  className="rounded-[var(--rl-radius-sm)] bg-emerald-900 px-2 py-0.5 text-[10px] font-bold text-white uppercase whitespace-nowrap truncate max-w-[140px]"
+                  title={cn.company_name}
+                >
+                  {formatShortInsurerName(cn.company_name)}
+                </span>
+              )}
             </div>
           </div>
 
@@ -252,16 +279,19 @@ export function PreviousPolicyValuationPane({
             {/* Period of Insurance */}
             <div className="flex justify-between items-center">
               <span className="text-neutral-500">Insurance Period:</span>
-              {onOpenEditCovernote ? (
-                <button
-                  type="button"
-                  onClick={onOpenEditCovernote}
-                  title="Click to edit Cover Note period dates"
-                  className="inline-flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-emerald-50 font-mono font-bold text-neutral-900 cursor-pointer group"
+              {onPatchCovernoteField ? (
+                <InlineComparisonFieldEditor
+                  field="coverage_period"
+                  label="Insurance Period"
+                  currentValue={cn.coverage_period_formatted || ""}
+                  coverageStartDate={cn.coverage_start_date}
+                  coverageEndDate={cn.coverage_end_date}
+                  onSave={onPatchCovernoteField}
                 >
-                  <span>{cn.coverage_period_formatted || "—"}</span>
-                  <PencilSimple size={11} weight="bold" className="text-emerald-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
+                  <span className="font-mono font-bold text-neutral-900">
+                    {cn.coverage_period_formatted || "—"}
+                  </span>
+                </InlineComparisonFieldEditor>
               ) : (
                 <span className="font-mono font-bold text-neutral-900">
                   {cn.coverage_period_formatted || "—"}
@@ -342,33 +372,92 @@ export function PreviousPolicyValuationPane({
             {/* Total Payable */}
             <div className="flex justify-between items-center">
               <span className="text-neutral-500">Premium Payable:</span>
-              <span
-                className="font-mono font-bold text-emerald-700"
-                title={cn.exact_total_payable != null ? `Exact cents: RM ${Number(cn.exact_total_payable).toFixed(2)}` : undefined}
-              >
-                RM {formatMoneyWithRounding(
-                  roundingMode === "whole"
-                    ? (cn.rounded_total_payable ?? Math.round(cn.total_payable))
-                    : (cn.exact_total_payable ?? cn.total_payable),
-                  roundingMode
-                )}
-              </span>
+              {onPatchCovernoteField ? (
+                <InlineComparisonFieldEditor
+                  field="total_payable"
+                  label="Premium Payable (RM)"
+                  currentValue={cn.exact_total_payable ?? cn.total_payable}
+                  onSave={onPatchCovernoteField}
+                >
+                  <span
+                    className="font-mono font-bold text-emerald-700"
+                    title={cn.exact_total_payable != null ? `Exact cents: RM ${Number(cn.exact_total_payable).toFixed(2)}` : undefined}
+                  >
+                    RM {formatMoneyWithRounding(
+                      roundingMode === "whole"
+                        ? (cn.rounded_total_payable ?? Math.round(cn.total_payable))
+                        : (cn.exact_total_payable ?? cn.total_payable),
+                      roundingMode
+                    )}
+                  </span>
+                </InlineComparisonFieldEditor>
+              ) : (
+                <span
+                  className="font-mono font-bold text-emerald-700"
+                  title={cn.exact_total_payable != null ? `Exact cents: RM ${Number(cn.exact_total_payable).toFixed(2)}` : undefined}
+                >
+                  RM {formatMoneyWithRounding(
+                    roundingMode === "whole"
+                      ? (cn.rounded_total_payable ?? Math.round(cn.total_payable))
+                      : (cn.exact_total_payable ?? cn.total_payable),
+                    roundingMode
+                  )}
+                </span>
+              )}
             </div>
 
             {/* Fixed Costs */}
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center">
               <span className="text-neutral-500">Fixed Costs:</span>
-              <span className="font-mono font-medium text-neutral-700">
-                RM {(((cn.include_road_tax === false || tenure.include_road_tax === false ? 0 : (cn.road_tax ?? tenure.road_tax)) || 0) + ((cn.include_runner_fee === false || tenure.include_runner_fee === false ? 0 : (cn.runner_fee ?? tenure.runner_fee)) || 0)).toFixed(2)} (Tax + Runner)
-              </span>
+              {onPatchCovernoteField ? (
+                <InlineComparisonFieldEditor
+                  field="fixed_costs"
+                  label="Fixed Costs (Road Tax + Runner)"
+                  currentValue={(((cn.include_road_tax === false || tenure.include_road_tax === false ? 0 : (cn.road_tax ?? tenure.road_tax)) || 0) + ((cn.include_runner_fee === false || tenure.include_runner_fee === false ? 0 : (cn.runner_fee ?? tenure.runner_fee)) || 0)).toFixed(2)}
+                  roadTax={cn.road_tax ?? tenure.road_tax ?? 0}
+                  runnerFee={cn.runner_fee ?? tenure.runner_fee ?? 0}
+                  includeRoadTax={cn.include_road_tax !== false && tenure.include_road_tax !== false}
+                  includeRunnerFee={cn.include_runner_fee !== false && tenure.include_runner_fee !== false}
+                  onSave={onPatchCovernoteField}
+                >
+                  <span className="font-mono font-medium text-neutral-700">
+                    RM {(((cn.include_road_tax === false || tenure.include_road_tax === false ? 0 : (cn.road_tax ?? tenure.road_tax)) || 0) + ((cn.include_runner_fee === false || tenure.include_runner_fee === false ? 0 : (cn.runner_fee ?? tenure.runner_fee)) || 0)).toFixed(2)} (Tax + Runner)
+                  </span>
+                </InlineComparisonFieldEditor>
+              ) : (
+                <span className="font-mono font-medium text-neutral-700">
+                  RM {(((cn.include_road_tax === false || tenure.include_road_tax === false ? 0 : (cn.road_tax ?? tenure.road_tax)) || 0) + ((cn.include_runner_fee === false || tenure.include_runner_fee === false ? 0 : (cn.runner_fee ?? tenure.runner_fee)) || 0)).toFixed(2)} (Tax + Runner)
+                </span>
+              )}
             </div>
 
-            {/* Included Perils */}
-            <div className="flex justify-between items-start gap-2">
-              <span className="text-neutral-500 shrink-0">Included Perils:</span>
-              <span className="font-medium text-emerald-900 text-right">
-                {cn.canonical_perils_formatted || "Comprehensive Policy Coverage"}
-              </span>
+            {/* Included Perils (Added vs Not Added visibility + interactive checklist) */}
+            <div className="space-y-1.5 pt-1 border-t border-emerald-100">
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-neutral-500 shrink-0 font-semibold">Included Perils:</span>
+                {onPatchCovernoteField ? (
+                  <InlineComparisonFieldEditor
+                    field="included_perils"
+                    label="Edit Included Perils"
+                    currentValue={(cn.canonical_perils || []).join(", ")}
+                    canonicalPerils={cn.canonical_perils || []}
+                    onSave={onPatchCovernoteField}
+                  >
+                    <span className="text-[11px] font-semibold text-emerald-800 hover:underline">
+                      Edit Perils ({(cn.canonical_perils || []).length} Added)
+                    </span>
+                  </InlineComparisonFieldEditor>
+                ) : (
+                  <span className="font-medium text-emerald-900 text-right">
+                    {cn.canonical_perils_formatted || "Comprehensive Policy Coverage"}
+                  </span>
+                )}
+              </div>
+              <PerilsChecklistEditor
+                readOnly
+                compact
+                selectedPerils={cn.canonical_perils || []}
+              />
             </div>
 
             {/* Riders & Underwriting Terms */}
@@ -445,6 +534,45 @@ export function PreviousPolicyValuationPane({
                     <span className="font-medium text-neutral-800">{cn.llp_llop || "Not Included"}</span>
                   )}
                 </div>
+
+                {/* Conditional Dynamic Extra Add-ons (when >=1 policy in tenure includes one) */}
+                {activeDynamicAddons.map((addon) => {
+                  const val = (cn.extra_addons && cn.extra_addons[addon.key]) || "No";
+                  const isYes = val === "Yes";
+                  return (
+                    <div key={addon.key} className="flex justify-between items-center text-[11px]">
+                      <span className="text-neutral-500">{addon.label}:</span>
+                      {onPatchCovernoteField ? (
+                        <InlineComparisonFieldEditor
+                          field={`extra_addon:${addon.key}`}
+                          label={addon.label}
+                          currentValue={val}
+                          onSave={onPatchCovernoteField}
+                        >
+                          <span className={`font-bold ${isYes ? "text-emerald-700" : "text-neutral-600"}`}>
+                            {val}
+                          </span>
+                        </InlineComparisonFieldEditor>
+                      ) : (
+                        <span className={`font-bold ${isYes ? "text-emerald-700" : "text-neutral-600"}`}>
+                          {val}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {onPatchCovernoteField && (
+                  <div className="flex justify-between items-center text-[11px] pt-0.5">
+                    <span className="text-neutral-500">Extra Add-ons:</span>
+                    <DynamicAddonsControl
+                      currentExtraAddons={cn.extra_addons}
+                      catalog={dynamicAddonCatalog}
+                      onSetAddon={(key, val) => onPatchCovernoteField({ extra_addons: { [key]: val } })}
+                    />
+                  </div>
+                )}
+
                 <div className="flex justify-between items-center text-[11px]">
                   <span className="text-neutral-500">Excess:</span>
                   {onPatchCovernoteField ? (
@@ -471,6 +599,10 @@ export function PreviousPolicyValuationPane({
                       field="waiver_betterment"
                       label="Betterment"
                       currentValue={cn.waiver_betterment ? "No (0%)" : cn.betterment_display || "Yes"}
+                      companyName={cn.company_name}
+                      manufactureYear={cn.manufacture_year || tenure.manufacture_year}
+                      bettermentRate={cn.betterment_rate}
+                      isBettermentAuto={cn.betterment_is_auto}
                       onSave={onPatchCovernoteField}
                     >
                       <span className={`font-bold ${cn.waiver_betterment ? "text-emerald-700" : "text-amber-700"}`}>
@@ -485,20 +617,46 @@ export function PreviousPolicyValuationPane({
                 </div>
               </div>
 
-            <div className="flex justify-between pt-1">
+            <div className="flex justify-between items-center pt-1">
               <span className="text-neutral-500">Model:</span>
-              <span className="font-medium text-neutral-900 text-right truncate max-w-[150px]">
-                {tenure.vehicle_model}
-              </span>
+              {onPatchCovernoteField ? (
+                <InlineComparisonFieldEditor
+                  field="vehicle_model"
+                  label="Vehicle Model"
+                  currentValue={cn.vehicle_model || tenure.vehicle_model || ""}
+                  onSave={onPatchCovernoteField}
+                >
+                  <span className="font-medium text-neutral-900 text-right truncate max-w-[150px]">
+                    {cn.vehicle_model || tenure.vehicle_model}
+                  </span>
+                </InlineComparisonFieldEditor>
+              ) : (
+                <span className="font-medium text-neutral-900 text-right truncate max-w-[150px]">
+                  {cn.vehicle_model || tenure.vehicle_model}
+                </span>
+              )}
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center">
               <span className="text-neutral-500">YOM:</span>
-              <span className="font-medium text-neutral-900 text-right">
-                {tenure.manufacture_year || ""}
-              </span>
+              {onPatchCovernoteField ? (
+                <InlineComparisonFieldEditor
+                  field="manufacture_year"
+                  label="Year of Manufacture (YOM)"
+                  currentValue={cn.manufacture_year || tenure.manufacture_year || ""}
+                  onSave={onPatchCovernoteField}
+                >
+                  <span className="font-mono font-medium text-neutral-900 text-right">
+                    {cn.manufacture_year || tenure.manufacture_year || "—"}
+                  </span>
+                </InlineComparisonFieldEditor>
+              ) : (
+                <span className="font-mono font-medium text-neutral-900 text-right">
+                  {cn.manufacture_year || tenure.manufacture_year || "—"}
+                </span>
+              )}
             </div>
 
-            {/* Action Buttons */}
+            {/* Action Buttons (Unified --rl-radius-sm corners & consistent borders) */}
             <div className="pt-3 border-t border-emerald-200 flex flex-col gap-1.5">
               <div className="flex items-center gap-1.5 flex-wrap">
                 {cn.uploaded_file_id && (
@@ -507,7 +665,7 @@ export function PreviousPolicyValuationPane({
                       href={fileUrl(`/uploaded-files/${cn.uploaded_file_id}/content`)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 min-w-[95px] flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 shadow-2xs transition-colors"
+                      className="flex-1 min-w-[90px] min-h-[32px] flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-[var(--rl-radius-sm)] text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 border border-emerald-700 transition-colors"
                       title="View official Cover Note PDF in new tab"
                     >
                       <FilePdf size={13} weight="bold" />
@@ -515,8 +673,8 @@ export function PreviousPolicyValuationPane({
                     </a>
                     <a
                       href={fileUrl(`/uploaded-files/${cn.uploaded_file_id}/content`)}
-                      download={(cn as any).file_name || `${cn.company_name || 'policy'}_covernote.pdf`}
-                      className="flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-lg text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition-colors cursor-pointer shadow-2xs"
+                      download={(cn as any).file_name || `${cn.company_name || "policy"}_covernote.pdf`}
+                      className="min-h-[32px] flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-[var(--rl-radius-sm)] text-xs font-semibold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition-colors cursor-pointer"
                       title="Download official Cover Note PDF to your device"
                     >
                       <DownloadSimple size={13} weight="bold" />
@@ -524,22 +682,24 @@ export function PreviousPolicyValuationPane({
                     </a>
                   </>
                 )}
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
+                  loading={isUnlinkingCovernote}
                   onClick={onUnlinkCovernote}
-                  disabled={isUnlinkingCovernote}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-700 hover:text-rose-900 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer disabled:opacity-50"
+                  className="text-xs text-rose-700 hover:text-rose-900 hover:bg-rose-50 border-rose-200"
                   title="Unlink this cover note and revert policy stage"
                 >
                   {isUnlinkingCovernote ? "Unlinking..." : "Unlink"}
-                </button>
+                </Button>
               </div>
               {cn.session_id && (
                 <Link
                   href={`/sessions/${cn.session_id}/review` as Route}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold text-emerald-950 bg-emerald-100/80 hover:bg-emerald-200/90 border border-emerald-300 transition-colors shadow-2xs"
+                  className="min-h-[32px] flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-[var(--rl-radius-sm)] text-xs font-semibold text-emerald-950 bg-emerald-100/80 hover:bg-emerald-200/90 border border-emerald-300 transition-colors"
                   title="Open issued cover note in Quotation Workspace to review extracted fields or generate documentation"
                 >
                   <FilePdf size={14} weight="bold" className="text-emerald-800" />
@@ -554,17 +714,17 @@ export function PreviousPolicyValuationPane({
           </div>
         </div>
       ) : (
-        <div className="rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/70 p-4 shadow-2xs">
+        <div className="rounded-[var(--rl-radius)] border-2 border-dashed border-neutral-300 bg-neutral-50/70 p-4 shadow-2xs">
           <div className="flex items-center justify-between border-b border-neutral-200/80 pb-2.5 mb-3">
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-bold uppercase tracking-wider text-neutral-800">
                 Current Policy ({currentYear})
               </span>
-              <span className="rounded bg-neutral-200 text-neutral-700 font-bold px-1.5 py-0.5 text-[9px] uppercase">
+              <span className="rounded-[var(--rl-radius-sm)] bg-neutral-200 text-neutral-700 font-bold px-1.5 py-0.5 text-[9px] uppercase">
                 Pending Issue
               </span>
             </div>
-            <span className="rounded bg-neutral-100 text-neutral-600 px-2 py-0.5 text-[10px] font-bold border border-neutral-200">
+            <span className="rounded-[var(--rl-radius-sm)] bg-neutral-100 text-neutral-600 px-2 py-0.5 text-[10px] font-bold border border-neutral-200">
               Awaiting Cover Note
             </span>
           </div>
@@ -584,7 +744,7 @@ export function PreviousPolicyValuationPane({
             <div className="pt-1 flex items-center justify-center gap-2">
               <Link
                 href={`/upload?mode=comparison&tenure_id=${tenureId}` as Route}
-                className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-black text-white text-[11px] font-bold shadow-2xs transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                className="min-h-[32px] px-3 py-1.5 rounded-[var(--rl-radius-sm)] bg-[#1b1717] hover:bg-black text-white text-[11px] font-semibold border border-[#1b1717] transition-colors inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <UploadSimple size={12} weight="bold" />
                 <span>Upload Cover Note PDF</span>
@@ -595,7 +755,7 @@ export function PreviousPolicyValuationPane({
       )}
 
       {/* Recommended Sum Insured / Valuation Matrix */}
-      <div className="rounded-2xl border border-[#e5e5ea] bg-white p-4 shadow-sm">
+      <div className="rounded-[var(--rl-radius)] border border-[#e5e5ea] bg-white p-4 shadow-sm">
         <span className="block text-xs font-bold uppercase tracking-wider text-[#1b1717] border-b border-[#e5e5ea] pb-2 mb-3">
           Recommended Sum Insured
         </span>
@@ -617,26 +777,28 @@ export function PreviousPolicyValuationPane({
       </div>
 
       {/* NCD Block */}
-      <div className="rounded-2xl border border-[#e5e5ea] bg-white p-4 shadow-sm space-y-3">
+      <div className="rounded-[var(--rl-radius)] border border-[#e5e5ea] bg-white p-4 shadow-sm space-y-3">
         <div className="flex items-center justify-between border-b border-[#e5e5ea] pb-2">
           <span className="block text-xs font-bold uppercase tracking-wider text-[#1b1717]">
             NCD Entitlement
           </span>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={onOpenNcdModal}
-            className="inline-flex items-center gap-1 text-[11px] font-semibold text-neutral-600 hover:text-black bg-neutral-100 hover:bg-neutral-200 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+            icon={<PencilSimple size={12} weight="bold" />}
+            className="min-h-[26px] text-[11px] px-2.5 py-0.5"
             title="Edit Current or Next NCD / Upload last year policy"
           >
-            <PencilSimple size={12} weight="bold" />
             <span>Edit / Upload</span>
-          </button>
+          </Button>
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-center text-xs">
           <div
             onClick={onOpenNcdModal}
-            className="rounded-xl bg-[#f5f5f7] p-3 border border-[#e5e5ea] flex flex-col justify-between cursor-pointer hover:border-neutral-400 transition-colors shadow-2xs group"
+            className="rounded-[var(--rl-radius)] bg-[#f5f5f7] p-3 border border-[#e5e5ea] flex flex-col justify-between cursor-pointer hover:border-neutral-400 transition-colors shadow-2xs group"
             title="Click to edit Current NCD or upload previous policy"
           >
             <div>
@@ -658,7 +820,7 @@ export function PreviousPolicyValuationPane({
 
           <div
             onClick={onOpenNcdModal}
-            className="rounded-xl bg-emerald-50/80 p-3 border border-emerald-200 flex flex-col justify-between cursor-pointer hover:border-emerald-400 transition-colors shadow-2xs group"
+            className="rounded-[var(--rl-radius)] bg-emerald-50/80 p-3 border border-emerald-200 flex flex-col justify-between cursor-pointer hover:border-emerald-400 transition-colors shadow-2xs group"
             title="Click to edit Next NCD"
           >
             <div>

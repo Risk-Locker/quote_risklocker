@@ -33,9 +33,24 @@ export function formatBenefitCoverage(
     return "No Towing";
   }
 
-  // RM-based underwriter guardrail: NEVER display KM distance
+  // Explicit user-entered KM limit always takes precedence over insurer defaults
+  const explicitKmMatch = str.match(/^(\d+(?:\.\d+)?)\s*(?:km|kilometers?|kilometres?)$/i);
+  if (explicitKmMatch) {
+    return `${explicitKmMatch[1]} km`;
+  }
+
+  // Explicit user-entered RM limit (>= 50 or formatted) takes precedence
+  const explicitRmMatch = str.match(/^(?:rm|myr)\s*([\d,]+(?:\.\d{1,2})?)$/i);
+  if (explicitRmMatch) {
+    const val = parseFloat(explicitRmMatch[1].replace(/,/g, ""));
+    if (!Number.isNaN(val) && val > 0) {
+      return `RM ${Math.round(val).toLocaleString("en-MY")}`;
+    }
+  }
+
+  // Fallback safeguard ONLY when text is non-specific/ambiguous (never overriding explicit KM/RM above)
   if (isRmCompany) {
-    if (/km$/i.test(str) || /^\d+\s*km$/i.test(str) || /^rm\s*(?:[1-9]|1\d|20|50)$/i.test(str)) {
+    if (/^standard$/i.test(str) || /^included$/i.test(str)) {
       if (comp.includes("qbe")) return "RM 500";
       if (comp.includes("lonpac")) return "RM 400";
       if (comp.includes("sompo")) return "Unlimited";

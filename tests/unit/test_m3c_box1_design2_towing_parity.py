@@ -345,3 +345,151 @@ def test_company_benefit_condition_plan_4_beats_wildcard_across_box1_and_compari
     eval_tow = next(b for b in evaluated if b.concept_id == "towing")
     assert eval_tow.display_title == "Unlimited Towing Assistance"
     assert "Unlimited" in eval_tow.display_description
+
+
+def test_box1_coverage_edit_hide_and_remove_eliminates_fixed_365km_or_rm200(hermetic_db: Session):
+    """Box 1 cards must support editing, hiding, and removing coverage amounts (e.g. 365 km or RM 200) without snapping back to catalog defaults."""
+    from app.services.workspace_patch_service import _apply_benefit_update
+
+    user = User(id=new_id(), email="box1-edit@risklocker.test", password_hash="x", role="staff", status="active")
+    comp = InsuranceCompany(id=new_id(), slug="amassurance", name="AmAssurance", category="Motor", status="active")
+    c_towing = BenefitConcept(id=new_id(), concept_key="towing", label="Emergency Towing Assistance", description="Standard towing", status="active")
+    bcat = BenefitCatalog(id=new_id(), company_id=comp.id, name="Auto365 Premier", status="active")
+    brev = BenefitCatalogRevision(id=new_id(), catalog_id=bcat.id, revision_number=1, state="published", content_hash="h-365")
+    off_tow = CatalogOffering(
+        id=new_id(),
+        catalog_revision_id=brev.id,
+        concept_id=c_towing.id,
+        offering_key="premier-towing-365",
+        offering_kind="base",
+        role="included",
+        display_value="365 km",
+        typed_value={"type": "distance", "value": 365, "unit": "km", "unlimited": False},
+        description_override="24/7 emergency accident and breakdown towing assistance up to 365 km.",
+        status="active",
+        sort_order=1,
+    )
+    draft = QuotationDraft(
+        id=new_id(),
+        uploaded_file_id=new_id(),
+        owner_id=user.id,
+        company_id=comp.id,
+        catalog_revision_id=brev.id,
+        fields={"vehicle_no": {"value": "WAA3650"}, "coverage_type": {"value": "Comprehensive"}},
+    )
+    sel_tow = DraftBenefitSelection(
+        id=new_id(),
+        draft_id=draft.id,
+        selection_key="catalog:premier-towing-365",
+        catalog_offering_id=off_tow.id,
+        concept_id=c_towing.id,
+        item_kind="catalog",
+        state="current",
+        cost_status="included",
+        evidence_snapshot={"coverage_limit": "RM 200"},
+        sort_order=1,
+    )
+    hermetic_db.add_all([user, comp, c_towing, bcat, brev, off_tow, draft, sel_tow])
+    hermetic_db.commit()
+
+    # 1. Initial catalog default resolves to '365 km'
+    cards_init = resolve_benefit_cards(
+        selections=[sel_tow],
+        offerings=[off_tow],
+        concepts=[c_towing],
+        relations=[],
+        facets=[],
+    )
+    tow_init = cards_init["current_benefits"][0]
+    assert tow_init["value"] == "365 km"
+    free_init = extract_free_coverage_items(cards_init["current_benefits"], "AmAssurance")
+    assert free_init[0]["title"] == "Emergency Towing Assistance (365 km)"
+
+    # 2. Editing description alone must preserve catalog '365 km' coverage
+    _apply_benefit_update(
+        hermetic_db,
+        draft,
+        user,
+        {"op": "benefit_update", "selection_id": sel_tow.id, "label": "Custom Roadside Towing", "description": "Custom edited description."},
+    )
+    hermetic_db.commit()
+    cards_desc = resolve_benefit_cards(
+        selections=[sel_tow],
+        offerings=[off_tow],
+        concepts=[c_towing],
+        relations=[],
+        facets=[],
+    )
+    tow_desc = cards_desc["current_benefits"][0]
+    assert tow_desc["label"] == "Custom Roadside Towing"
+    assert tow_desc["description"] == "Custom edited description."
+    assert tow_desc["value"] == "365 km"
+
+    # 3. Editing coverage amount in Box 1 from '365 km' to '500 km' updates both card and Design 2 Top-Right
+    _apply_benefit_update(
+        hermetic_db,
+        draft,
+        user,
+        {"op": "benefit_update", "selection_id": sel_tow.id, "typed_value": {"type": "custom", "display_text": "500 km", "hide_limit": False}},
+    )
+    hermetic_db.commit()
+    cards_edit = resolve_benefit_cards(
+        selections=[sel_tow],
+        offerings=[off_tow],
+        concepts=[c_towing],
+        relations=[],
+        facets=[],
+    )
+    tow_edit = cards_edit["current_benefits"][0]
+    assert tow_edit["value"] == "500 km"
+    assert tow_edit["description"] == "Custom edited description."
+    free_edit = extract_free_coverage_items(cards_edit["current_benefits"], "AmAssurance")
+    assert free_edit[0]["title"] == "Custom Roadside Towing (500 km)"
+    assert "365" not in free_edit[0]["title"]
+    assert "200" not in free_edit[0]["title"]
+
+    # 4. Hiding coverage in Box 1 (hide_limit=True) keeps hide_limit flag and omits coverage suffix from Design 2 Top-Right
+    _apply_benefit_update(
+        hermetic_db,
+        draft,
+        user,
+        {"op": "benefit_update", "selection_id": sel_tow.id, "typed_value": {"type": "custom", "display_text": "500 km", "hide_limit": True}},
+    )
+    hermetic_db.commit()
+    cards_hidden = resolve_benefit_cards(
+        selections=[sel_tow],
+        offerings=[off_tow],
+        concepts=[c_towing],
+        relations=[],
+        facets=[],
+    )
+    tow_hidden = cards_hidden["current_benefits"][0]
+    assert tow_hidden["hide_coverage"] is True
+    assert tow_hidden["typed_value"]["hide_limit"] is True
+    free_hidden = extract_free_coverage_items(cards_hidden["current_benefits"], "AmAssurance")
+    assert free_hidden[0]["title"] == "Custom Roadside Towing"
+    assert "(" not in free_hidden[0]["title"]
+
+    # 5. Removing/clearing coverage completely (typed_value=None or display_text="") must NOT snap back to '365 km' or 'RM 200'
+    _apply_benefit_update(
+        hermetic_db,
+        draft,
+        user,
+        {"op": "benefit_update", "selection_id": sel_tow.id, "typed_value": None},
+    )
+    hermetic_db.commit()
+    cards_removed = resolve_benefit_cards(
+        selections=[sel_tow],
+        offerings=[off_tow],
+        concepts=[c_towing],
+        relations=[],
+        facets=[],
+    )
+    tow_removed = cards_removed["current_benefits"][0]
+    assert tow_removed["value"] == ""
+    assert tow_removed["description"] == "Custom edited description."
+    free_removed = extract_free_coverage_items(cards_removed["current_benefits"], "AmAssurance")
+    assert free_removed[0]["title"] == "Custom Roadside Towing"
+    assert "365" not in free_removed[0]["title"]
+    assert "200" not in free_removed[0]["title"]
+

@@ -133,13 +133,16 @@ def evaluate_betterment_rules(
     registration_date: Any = None,
     coverage_start_date: Any = None,
     coverage_type: str | None = None,
+    company_obj: Any = None,
 ) -> tuple[bool, float, str]:
-    """Evaluate Waiver of Betterment and Betterment Co-Payment Rate based on underwriting rules.
-    
-    Uses exact completed calendar years via calculate_exact_vehicle_age when registration_date is available.
+    """Evaluate Waiver of Betterment and Betterment Co-Payment Rate based on DB underwriting rules.
+
+    Uses exact completed calendar years via calculate_exact_vehicle_age when registration_date is available,
+    or completed years (`quote_y - veh_yom`) without off-by-1 thresholds when only YOM is provided.
     Third Party / TPO motor policies do not cover Own Damage repair, so betterment is strictly N/A.
     """
     from app.domain.betterment_engine import calculate_exact_vehicle_age
+    from app.services.marketing_comparison.company_rules import resolve_company_betterment_rule
 
     cov_str = str(coverage_type or "").strip().lower()
     is_third_party = (
@@ -151,77 +154,54 @@ def evaluate_betterment_rules(
 
     quote_y = quote_year or datetime.now().year
     veh_yom = yom if (yom and yom > 1900) else None
+    auto_waive, max_waiver_years, _ = resolve_company_betterment_rule(
+        company_name=company_name,
+        company_obj=company_obj,
+    )
 
     if registration_date:
         veh_age = calculate_exact_vehicle_age(registration_date, coverage_start_date or f"{quote_y}-01-01")
         is_under_5 = veh_age < 5
-        is_under_10 = veh_age < 10
-        is_under_15 = veh_age < 15
+        within_waiver_cap = veh_age < max_waiver_years
     elif veh_yom:
         veh_age = max(0, quote_y - veh_yom)
-        is_under_5 = (veh_yom + 4) > quote_y
-        is_under_10 = (veh_yom + 9) > quote_y
-        is_under_15 = (veh_yom + 14) > quote_y
+        is_under_5 = veh_age < 5
+        within_waiver_cap = veh_age < max_waiver_years
     else:
         veh_age = 0
         is_under_5 = False
-        is_under_10 = True  # When age is unknown, peril waiver defaults to True if insurer supports it
-        is_under_15 = True
+        within_waiver_cap = True  # Unknown age: honor insurer waiver cap if peril added
 
-    # 1st Condition:
-    # Vehicles under 5 completed years are exempt from betterment co-payment (0%)
+    # 1st Condition: Vehicles under 5 completed years are exempt from betterment co-payment (0%)
     if is_under_5:
         return True, 0.0, "No (0%)"
 
-    comp_lower = (company_name or "").lower()
-    is_qbe = "qbe" in comp_lower
-    is_tune_sompo_amgen_etiqa = any(
-        x in comp_lower for x in ("tune", "sompo", "amassurance", "amgen", "etiqa")
-    )
-    is_lonpac_stmb = any(
-        x in comp_lower for x in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")
-    )
-
-    # 2nd Condition: QBE comprehensive private waiver up to 10 completed years
-    if is_qbe and is_comprehensive_private:
-        if (registration_date and is_under_10) or (veh_yom and is_under_10):
+    # 2nd Condition: Insurers with automatic waiver (e.g. QBE Comprehensive Private up to 10 completed years)
+    if auto_waive and is_comprehensive_private:
+        if (registration_date or veh_yom) and within_waiver_cap:
             return True, 0.0, "No (0%)"
-        else:
-            rate, disp = get_standard_betterment_rate(veh_age)
-            return False, rate, disp
+        rate, disp = get_standard_betterment_rate(veh_age)
+        return False, rate, disp
 
-    # 2.2 If it's not QBE: check for perils related to betterment
+    # 3rd Condition: Non-auto-waive insurers require betterment peril/endorsement
     if not has_betterment_peril:
         rate, disp = get_standard_betterment_rate(veh_age)
         return False, rate, disp
 
-    # Perils added: check insurance company
-    if is_tune_sompo_amgen_etiqa:
-        if is_under_15:
-            return True, 0.0, "No (0%)"
-        else:
-            rate, disp = get_standard_betterment_rate(veh_age)
-            return False, rate, disp
-    elif is_lonpac_stmb:
-        if is_under_10:
-            return True, 0.0, "No (0%)"
-        else:
-            rate, disp = get_standard_betterment_rate(veh_age)
-            return False, rate, disp
-    else:
-        if is_under_10:
-            return True, 0.0, "No (0%)"
-        else:
-            rate, disp = get_standard_betterment_rate(veh_age)
-            return False, rate, disp
+    if within_waiver_cap:
+        return True, 0.0, "No (0%)"
+    rate, disp = get_standard_betterment_rate(veh_age)
+    return False, rate, disp
 
 
 def calculate_betterment_rate(
-    age_in_years: int, company_name: str | None = None
+    age_in_years: int, company_name: str | None = None, company_obj: Any = None,
 ) -> tuple[float, str]:
-    """Backward-compatible helper returning standard or QBE betterment rate."""
-    comp_lower = (company_name or "").lower()
-    if "qbe" in comp_lower and age_in_years <= 10:
+    """Backward-compatible helper returning standard or auto-waive insurer betterment rate."""
+    from app.services.marketing_comparison.company_rules import resolve_company_betterment_rule
+
+    auto_waive, max_years, _ = resolve_company_betterment_rule(company_name=company_name, company_obj=company_obj)
+    if auto_waive and age_in_years <= max_years:
         return 0.0, "No (0%)"
     return get_standard_betterment_rate(age_in_years)
 
@@ -239,11 +219,26 @@ def normalize_towing_km(raw_towing: Any, combined_text: str = "", company_name: 
     ):
         return "No towing"
 
+    # Preserve explicit Unlimited (or specific driver plan unlimited tiers)
+    if val_str and "unlimited" in val_str.lower():
+        return val_str if re.search(r"plan\s*\d+", val_str, re.IGNORECASE) else "Unlimited"
+
+    # Preserve explicit user-entered RM or KM caps verbatim cleanly (e.g. RM 100, RM 400, 50 km, 100 km)
+    m_explicit_rm = re.match(r"^(?:rm|myr)\s*([\d,]+(?:\.\d{1,2})?)$", val_str, re.IGNORECASE)
+    if m_explicit_rm:
+        amt = float(m_explicit_rm.group(1).replace(",", ""))
+        return f"RM {int(amt):,}" if amt.is_integer() else f"RM {amt:,.2f}"
+
+    m_explicit_km = re.match(r"^(\d+(?:\.\d+)?)\s*(?:km|kilomet(?:er|re)s?)$", val_str, re.IGNORECASE)
+    if m_explicit_km:
+        km_f = float(m_explicit_km.group(1))
+        return f"{int(km_f)} km" if km_f.is_integer() else f"{km_f} km"
+
     m_raw_num = re.match(r"^(\d+)$", val_str)
     if m_raw_num:
         val = int(m_raw_num.group(1))
         comp_l = (company_name or "").lower()
-        if val in (200, 300, 400, 500, 600) and any(c in comp_l for c in ("qbe", "lonpac", "sompo", "tune")):
+        if val in (100, 200, 300, 400, 500, 600) and any(c in comp_l for c in ("qbe", "lonpac", "sompo", "tune")):
             return f"RM {val}"
         return f"{val} km"
 

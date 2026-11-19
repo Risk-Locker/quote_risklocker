@@ -419,7 +419,29 @@ def _card(
 
     has_selection_price = selection is not None and hasattr(selection, "price") and selection.price is not None
     is_selection_explicit_foc = selection is not None and getattr(selection, "cost_status", None) in {"foc", "included"} and getattr(selection, "price", None) is None
-    has_selection_typed = selection is not None and bool(getattr(selection, "typed_value_override", None))
+    sel_typed_raw = getattr(selection, "typed_value_override", None) if selection is not None else None
+    is_limit_cleared = bool(
+        isinstance(sel_typed_raw, dict)
+        and "display_text" in sel_typed_raw
+        and str(sel_typed_raw.get("display_text") or "").strip() == ""
+        and sel_typed_raw.get("value") in (None, "")
+    )
+    is_limit_hidden = bool(
+        isinstance(sel_typed_raw, dict)
+        and (sel_typed_raw.get("hide_limit") is True or sel_typed_raw.get("hideCoverage") is True)
+    )
+    has_selection_value_override = bool(
+        isinstance(sel_typed_raw, dict)
+        and (
+            is_limit_cleared
+            or (sel_typed_raw.get("display_text") is not None and str(sel_typed_raw.get("display_text")).strip() != "")
+            or sel_typed_raw.get("value") is not None
+            or sel_typed_raw.get("unlimited") is True
+            or sel_typed_raw.get("plan_key")
+            or sel_typed_raw.get("enum_key")
+        )
+    )
+    has_selection_typed = has_selection_value_override or is_limit_hidden
 
     # Dynamic company baseline cost calculation (only if user hasn't explicitly set price or FOC)
     if not has_selection_price and not is_selection_explicit_foc:
@@ -523,48 +545,54 @@ def _card(
         else:
             card_val = ""
 
-    # Tiered Display Value Resolution:
-    # 1. Manual Workspace Selection override (`selection.typed_value_override`)
-    # 2. Dynamic CompanyBenefitCondition (`replacement_value`)
-    # 3. CatalogOffering (`display_value`) fallback
-    concept_id_key = str(getattr(concept, "id", None) or "")
-    cond_val = (active_conditional_values or {}).get(concept_id_key)
-    if not has_selection_typed and cond_val and str(cond_val).strip():
-        card_val = str(cond_val).strip()
-    elif not card_val and offering is not None and getattr(offering, "display_value", None):
-        card_val = str(offering.display_value).strip()
+    if is_limit_cleared:
+        card_val = ""
+    else:
+        # Tiered Display Value Resolution:
+        # 1. Manual Workspace Selection override (`selection.typed_value_override`)
+        # 2. Dynamic CompanyBenefitCondition (`replacement_value`)
+        # 3. CatalogOffering (`display_value`) fallback
+        concept_id_key = str(getattr(concept, "id", None) or "")
+        cond_val = (active_conditional_values or {}).get(concept_id_key)
+        if not has_selection_value_override and cond_val and str(cond_val).strip():
+            card_val = str(cond_val).strip()
+        elif not card_val and not has_selection_value_override and offering is not None and getattr(offering, "display_value", None):
+            card_val = str(offering.display_value).strip()
 
-    # Strict check: card_val must contain digits or be 'unlimited'
-    if card_val:
-        has_digits = any(c.isdigit() for c in card_val)
-        is_unlimited = "unlimited" in card_val.strip().lower()
-        # Plan / Tier suppression: if card_val looks like a plan designation ("Plan 2", "Tier 1", "Pakej 3", or pure standalone 1-2 digit number), suppress it
-        is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", card_val.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", card_val.strip()))
-        if is_plan_indicator:
-            card_val = ""
-        elif not has_digits and not is_unlimited:
-            card_val = ""
-        elif card_val.strip().lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
-            card_val = ""
-
-    # If card_val is empty, but evidence_snapshot has an extracted coverage limit (e.g. RM 4,000):
-    ev_lim = (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit")
-    if ev_lim and (not card_val or card_val.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "optional"}):
-        ev_str = str(ev_lim).strip()
-        if ev_str.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
-            card_val = ""
-        else:
-            has_digits = any(c.isdigit() for c in ev_str)
-            is_unlimited = ev_str.lower() == "unlimited"
-            is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", ev_str.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", ev_str.strip()))
+        # Strict check for catalog/automatic values: card_val must contain digits or be 'unlimited'
+        if card_val and not has_selection_value_override:
+            has_digits = any(c.isdigit() for c in card_val)
+            is_unlimited = "unlimited" in card_val.strip().lower()
+            # Plan / Tier suppression: if card_val looks like a plan designation ("Plan 2", "Tier 1", "Pakej 3", or pure standalone 1-2 digit number), suppress it
+            is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", card_val.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", card_val.strip()))
             if is_plan_indicator:
                 card_val = ""
-            elif has_digits and not ev_str.startswith("RM"):
-                card_val = f"RM {ev_str}"
-            elif has_digits or is_unlimited:
-                card_val = ev_str
-            else:
+            elif not has_digits and not is_unlimited:
                 card_val = ""
+            elif card_val.strip().lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
+                card_val = ""
+            elif len(card_val.split()) > 4 and not re.match(r"^(?:rm|myr)\s*[\d,]+", card_val.strip(), re.IGNORECASE):
+                # Never leak multi-word catalog prose sentences into the crisp coverage metric badge
+                card_val = ""
+
+        # If card_val is empty, but evidence_snapshot has an extracted coverage limit (e.g. RM 4,000):
+        ev_lim = (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit")
+        if not has_selection_value_override and ev_lim and (not card_val or card_val.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "optional"}):
+            ev_str = str(ev_lim).strip()
+            if ev_str.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
+                card_val = ""
+            else:
+                has_digits = any(c.isdigit() for c in ev_str)
+                is_unlimited = ev_str.lower() == "unlimited"
+                is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", ev_str.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", ev_str.strip()))
+                if is_plan_indicator:
+                    card_val = ""
+                elif has_digits and not ev_str.startswith("RM"):
+                    card_val = f"RM {ev_str}"
+                elif has_digits or is_unlimited:
+                    card_val = ev_str
+                else:
+                    card_val = ""
 
     ev_snap = getattr(selection, "evidence_snapshot", None)
     ev_source = str(ev_snap.get("source") or "").strip().lower() if isinstance(ev_snap, dict) else ""
@@ -639,12 +667,18 @@ def _card(
         # Precedence for title/label: Manual Selection override -> Conditional title -> Offering/Concept default
         "label": getattr(selection, "label_override", None) or (active_conditional_titles or {}).get(concept_id_key) or label or getattr(offering, "label_override", None) or concept.label,
         "has_manual_override": bool(has_selection_typed or getattr(selection, "label_override", None)),
+        "has_manual_value_override": has_selection_value_override,
+        "hide_coverage": is_limit_hidden,
         "description": final_desc,
         "is_custom_description": is_custom_desc,
         "description_override": offering_desc,
         "conditional_description": cond_desc if cond_desc else None,
         "value": card_val,
-        "typed_value": typed_value,
+        "typed_value": (
+            {**(typed_value if isinstance(typed_value, dict) else {"type": "custom", "display_text": card_val}), "hide_limit": True}
+            if is_limit_hidden
+            else typed_value
+        ),
         "price": price,
         "optional_price": getattr(offering, "optional_price", None),
         "initial_price": getattr(offering, "optional_price", None),
@@ -677,7 +711,18 @@ def _expanded_cards(
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
 ) -> list[dict]:
-    typed_value = getattr(selection, "typed_value_override", None) or offering.typed_value
+    sel_ovr = getattr(selection, "typed_value_override", None)
+    has_val_ovr = bool(
+        isinstance(sel_ovr, dict)
+        and (
+            "display_text" in sel_ovr
+            or sel_ovr.get("value") is not None
+            or sel_ovr.get("unlimited") is True
+            or sel_ovr.get("plan_key")
+            or sel_ovr.get("enum_key")
+        )
+    )
+    typed_value = sel_ovr if has_val_ovr else (offering.typed_value or sel_ovr)
     facet_ids = list(offering.presentation_facet_ids or [])
     if not facet_ids:
         return [_card(

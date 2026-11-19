@@ -455,6 +455,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 registration_date=reg_date,
                 coverage_start_date=tenure.coverage_start_date,
                 coverage_type=cov_type_val,
+                company_obj=benefit_prefetch.get("companies_by_id", {}).get(getattr(s, "company_id", None)),
             )
 
             entry = TenureComparisonEntry(
@@ -481,6 +482,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 windscreen_sum_insured=b_res["windscreen_sum_insured"],
                 special_perils=b_res["special_perils"],
                 llp_llop=b_res["llp_llop"],
+                extra_addons=dict(b_res.get("extra_addons") or {}),
                 sort_order=idx,
                 is_recommended=bool(
                     (tenure.winning_quotation_ref and s.quotation_ref == tenure.winning_quotation_ref)
@@ -531,6 +533,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     registration_date=reg_date,
                     coverage_start_date=tenure.coverage_start_date,
                     coverage_type=cov_type_val,
+                    company_obj=benefit_prefetch.get("companies_by_id", {}).get(getattr(s, "company_id", None)),
                 )
 
                 c_id_key = str(getattr(s, "company_id", "") or "").lower()
@@ -569,6 +572,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         existing_match.special_perils = b_res["special_perils"]
                     if not is_field_overridden(existing_match, "llp_llop"):
                         existing_match.llp_llop = b_res["llp_llop"]
+                    if not is_field_overridden(existing_match, "extra_addons"):
+                        existing_match.extra_addons = dict(b_res.get("extra_addons") or {})
                     if not existing_match.is_manual and not get_entry_overrides(existing_match):
                         existing_match.version = s.tenure_version or (existing_match.version or 1)
                 else:
@@ -596,6 +601,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         windscreen_sum_insured=b_res["windscreen_sum_insured"],
                         special_perils=b_res["special_perils"],
                         llp_llop=b_res["llp_llop"],
+                        extra_addons=dict(b_res.get("extra_addons") or {}),
                         sort_order=len(entries) + idx,
                         version=s.tenure_version or 1,
                         is_recommended=bool(
@@ -1190,12 +1196,16 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         # Resolve canonical short perils and detailed perils with prices for this entry
         entry_perils = []
         entry_detailed_perils = []
+        entry_extra_addons = dict(getattr(e, "extra_addons", None) or {})
         if s_obj:
             entry_b_res = _resolve_comparison_benefits(
                 db, s_obj, getattr(s_obj, "company_id", None), f_obj, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
             )
             entry_perils = entry_b_res.get("canonical_perils") or []
             entry_detailed_perils = entry_b_res.get("detailed_perils") or []
+            if not is_field_overridden(e, "extra_addons"):
+                merged_dyn = {**dict(entry_b_res.get("extra_addons") or {}), **entry_extra_addons}
+                entry_extra_addons = merged_dyn
         entry_perils_str = ", ".join(entry_perils) if entry_perils else ""
 
         entry_ncd = _extract_ncd_from_draft(f_obj, s_obj=s_obj)
@@ -1276,6 +1286,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "special_perils": e.special_perils,
             "llp_llop": e.llp_llop,
             "personal_accident": e.personal_accident,
+            "extra_addons": entry_extra_addons,
             "canonical_perils": entry_perils,
             "canonical_perils_formatted": entry_perils_str,
             "detailed_perils": entry_detailed_perils,
@@ -1476,26 +1487,67 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             for sel in cn_all_sels
         )
         cn_bet_inactive = any(
-            getattr(sel, "state", None) != "current" and "betterment" in f"{getattr(sel, 'selection_key', '') or ''} {getattr(sel, 'label_override', '') or ''}".lower()
+            getattr(sel, "state", None) in ("removed", "available_addon") and "betterment" in f"{getattr(sel, 'selection_key', '') or ''} {getattr(sel, 'label_override', '') or ''}".lower()
             for sel in cn_all_sels
         )
+        cn_raw_rate = _extract_val(cn_f.get("betterment_rate"))
+        cn_rate_manual = isinstance(cn_f.get("betterment_rate"), dict) and cn_f["betterment_rate"].get("status") == "manual_override" and cn_raw_rate not in (None, "")
         cn_raw_w = _extract_val(cn_f.get("waiver_of_betterment"))
-        if cn_bet_active:
-            cn_waiver_bet = True
-        elif cn_bet_inactive:
-            cn_waiver_bet = False
-        elif isinstance(cn_f.get("waiver_of_betterment"), dict) and cn_f["waiver_of_betterment"].get("status") == "manual_override":
-            cn_waiver_bet = str(cn_raw_w or "").strip().lower() == "included"
-        else:
-            cn_has_peril = check_has_betterment_peril(cn_f, cn_b_res.get("combined_text", ""), cn_raw_w)
-            cn_waiver_bet = bool(cn_has_peril)
-        if cn_waiver_bet:
-            cn_bet_rate = 0.0
-            cn_bet_disp = "No (0%)"
-        else:
-            cn_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
-            cn_q_yr = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year
-            cn_bet_rate, cn_bet_disp = get_standard_betterment_rate(max(0, cn_q_yr - (cn_yom or cn_q_yr)))
+        cn_w_manual = isinstance(cn_f.get("waiver_of_betterment"), dict) and cn_f["waiver_of_betterment"].get("status") == "manual_override"
+        cn_comp_obj = benefit_prefetch.get("companies_by_id", {}).get(getattr(cn_session, "company_id", None) or tenure.winning_company_id)
+        cn_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
+        cn_q_yr = (cn_session.coverage_start_date or tenure.coverage_start_date or datetime.now(timezone.utc)).year
+        cn_reg_date = _extract_val(cn_f.get("registration_date")) or _extract_val(cn_f.get("reg_date"))
+        cn_cov_type = _extract_val(cn_f.get("coverage_type")) or getattr(cn_session, "coverage_type", None)
+
+        if cn_rate_manual:
+            try:
+                cn_bet_rate = round(float(str(cn_raw_rate).strip()), 2)
+                cn_waiver_bet = cn_bet_rate == 0.0
+                cn_bet_disp = (
+                    "No (0%)"
+                    if cn_waiver_bet
+                    else f"Yes ({int(cn_bet_rate) if float(cn_bet_rate).is_integer() else cn_bet_rate}%)"
+                )
+            except (TypeError, ValueError):
+                cn_rate_manual = False
+        if not cn_rate_manual:
+            if cn_w_manual:
+                cn_has_peril = str(cn_raw_w or "").strip().lower() == "included"
+                cn_waiver_bet = cn_has_peril
+                if cn_waiver_bet:
+                    cn_bet_rate = 0.0
+                    cn_bet_disp = "No (0%)"
+                else:
+                    _, cn_bet_rate, cn_bet_disp = evaluate_betterment_rules(
+                        yom=cn_yom,
+                        quote_year=cn_q_yr,
+                        company_name=cn_comp,
+                        has_betterment_peril=False,
+                        is_comprehensive_private=is_comp_private,
+                        registration_date=cn_reg_date,
+                        coverage_start_date=cn_session.coverage_start_date or tenure.coverage_start_date,
+                        coverage_type=cn_cov_type,
+                        company_obj=cn_comp_obj,
+                    )
+            else:
+                if cn_bet_active:
+                    cn_has_peril = True
+                elif cn_bet_inactive:
+                    cn_has_peril = False
+                else:
+                    cn_has_peril = check_has_betterment_peril(cn_f, cn_b_res.get("combined_text", ""), cn_raw_w)
+                cn_waiver_bet, cn_bet_rate, cn_bet_disp = evaluate_betterment_rules(
+                    yom=cn_yom,
+                    quote_year=cn_q_yr,
+                    company_name=cn_comp,
+                    has_betterment_peril=cn_has_peril,
+                    is_comprehensive_private=is_comp_private,
+                    registration_date=cn_reg_date,
+                    coverage_start_date=cn_session.coverage_start_date or tenure.coverage_start_date,
+                    coverage_type=cn_cov_type,
+                    company_obj=cn_comp_obj,
+                )
 
         s_date = cn_session.coverage_start_date or tenure.coverage_start_date
         e_date = cn_session.coverage_end_date or tenure.coverage_end_date
@@ -1528,12 +1580,17 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "waiver_betterment": cn_waiver_bet,
             "betterment_rate": cn_bet_rate,
             "betterment_display": cn_bet_disp,
+            "betterment_is_auto": not (cn_rate_manual or cn_w_manual),
             "windscreen_sum_insured": cn_b_res.get("windscreen_sum_insured"),
             "towing_limit": cn_b_res.get("towing_km") or "Unlimited",
             "towing_km": cn_b_res.get("towing_km") or "Unlimited",
             "special_perils": cn_b_res.get("special_perils"),
             "llp_llop": cn_b_res.get("llp_llop"),
+            "extra_addons": cn_b_res.get("extra_addons") or {},
+            "canonical_perils": cn_b_res.get("canonical_perils") or [],
             "canonical_perils_formatted": cn_b_res.get("canonical_perils_formatted") or "Standard Comprehensive Policy",
+            "vehicle_model": (getattr(tenure.tracked_vehicle, "car_model", None) if tenure.tracked_vehicle else None) or _extract_val(cn_f.get("car_model") or cn_f.get("vehicle_model")),
+            "manufacture_year": cn_yom or _extract_vehicle_year_from_draft(cn_f),
             "uploaded_file_id": cn_session.uploaded_file_id,
             "uploaded_file_name": cn_session.uploaded_file.original_filename if cn_session.uploaded_file else f"{cn_comp}.pdf",
         }
@@ -1659,6 +1716,20 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         "covernote_policy": covernote_policy,
         "unlinked_covernotes": unlinked_covernotes,
         "entries": entry_dicts,
+        "active_dynamic_addons": [
+            {"key": d["key"], "label": d["label"]}
+            for d in __import__("app.services.marketing_comparison.dynamic_addons", fromlist=["DYNAMIC_ADDON_DEFINITIONS"]).DYNAMIC_ADDON_DEFINITIONS
+            if any(
+                (ed.get("extra_addons") or {}).get(d["key"]) == "Yes"
+                for ed in entry_dicts
+                if not ed.get("is_hidden")
+            )
+            or ((covernote_policy or {}).get("extra_addons") or {}).get(d["key"]) == "Yes"
+        ],
+        "dynamic_addon_catalog": [
+            {"key": d["key"], "label": d["label"]}
+            for d in __import__("app.services.marketing_comparison.dynamic_addons", fromlist=["DYNAMIC_ADDON_DEFINITIONS"]).DYNAMIC_ADDON_DEFINITIONS
+        ],
         "needs_materialize": bool(needs_commit),
         "upload_sessions": upload_sessions,
         "duplicate_alerts": duplicate_alerts,
@@ -1938,6 +2009,19 @@ def save_comparison_entry(
         entry.special_perils = _safe_str(payload["special_perils"]) or None
     if "llp_llop" in payload:
         entry.llp_llop = _safe_str(payload["llp_llop"]) or None
+    if "extra_addons" in payload and isinstance(payload["extra_addons"], dict):
+        from app.services.marketing_comparison.dynamic_addons import sanitize_extra_addons_map
+
+        entry.extra_addons = {**dict(getattr(entry, "extra_addons", None) or {}), **sanitize_extra_addons_map(payload["extra_addons"])}
+    if "betterment_rate" in payload and payload["betterment_rate"] is not None:
+        b_rate_val = round(float(payload["betterment_rate"]), 2)
+        entry.waiver_betterment = b_rate_val == 0.0
+        entry.betterment_rate = b_rate_val
+        entry.betterment_display = (
+            "No (0%)"
+            if b_rate_val == 0.0
+            else f"Yes ({int(b_rate_val) if float(b_rate_val).is_integer() else b_rate_val}%)"
+        )
     if "notes" in payload:
         entry.notes = _safe_str(payload["notes"]) or None
     if "discount" in payload:
@@ -1979,6 +2063,7 @@ def save_comparison_entry(
                 "windscreen_sum_insured": entry.windscreen_sum_insured,
                 "special_perils": entry.special_perils or "Not Included",
                 "llp_llop": entry.llp_llop or "Not Included",
+                "extra_addons": getattr(entry, "extra_addons", None) or {},
             },
             explicit_motor_premium=("motor_premium" in payload),
         )
@@ -2594,6 +2679,8 @@ def rescan_comparison_tenure(
                 entry.special_perils = b_res["special_perils"]
             if not is_field_overridden(entry, "llp_llop"):
                 entry.llp_llop = b_res["llp_llop"]
+            if not is_field_overridden(entry, "extra_addons"):
+                entry.extra_addons = dict(b_res.get("extra_addons") or {})
 
             if not is_field_overridden(entry, "waiver_betterment"):
                 raw_w = _extract_val(f.get("waiver_of_betterment"))

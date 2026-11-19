@@ -51,7 +51,14 @@ import {
 import { toBlob, toPng } from "html-to-image";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import type { RoundingMode } from "./types";
+import { Dialog } from "@/components/ui/dialog";
+import type {
+  ComparisonEntry,
+  ComparisonMatrixProps,
+  DynamicAddonDefinition,
+  RoundingMode,
+  TenureSpec,
+} from "./types";
 import { ManualQuoteModal } from "./manual-quote-modal";
 import { FastQuoteModal } from "./components/FastQuoteModal";
 import { UnlinkCovernoteModal } from "./components/UnlinkCovernoteModal";
@@ -118,142 +125,14 @@ function isLlpLlopIncluded(val: string | null | undefined): boolean {
   );
 }
 
-interface ComparisonMatrixProps {
-  tenureId: string;
-}
-
-interface TenureSpec {
-  id: string;
-  vehicle_no: string;
-  is_plate_undetected?: boolean;
-  tracking_by_chassis?: boolean;
-  customer_name: string;
-  ic_no?: string;
-  formatted_ic?: string;
-  birth_date?: string;
-  customer_age?: number;
-  customer_gender?: string;
-  nric_state?: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-  engine_no?: string;
-  chassis_no?: string;
-  manufacture_year?: number;
-  seating_capacity?: string;
-  coverage_start_date: string;
-  coverage_end_date: string;
-  coverage_period_formatted: string;
-  expiry_month: string;
-  status: string;
-  road_tax: number;
-  runner_fee: number;
-  include_road_tax?: boolean;
-  include_runner_fee?: boolean;
-  runner_fee_type?: string;
-  fixed_costs_total: number;
-  quotation_discount?: number;
-  windscreen_target: number | null;
-  ncd_percentage: number | null;
-  engine_cc: string;
-  car_brand?: string | null;
-  vehicle_model: string;
-  vehicle_type: string;
-  winning_file_id?: string | null;
-  winning_file_name?: string | null;
-  policy_number?: string | null;
-  covernote_session_id?: string | null;
-}
-
-interface ComparisonEntry {
-  id: string;
-  tenure_id: string;
-  session_id: string | null;
-  company_name: string;
-  company_id: string | null;
-  sum_insured: number;
-  valuation_type: string;
-  motor_premium: number;
-  rounded_motor_premium?: number | null;
-  exact_motor_premium?: number | null;
-  bnm_5cent_motor_premium?: number | null;
-  whole_motor_premium?: number | null;
-  road_tax: number;
-  runner_fee: number;
-  include_road_tax?: boolean;
-  include_runner_fee?: boolean;
-  discount?: number | null;
-  effective_discount?: number | null;
-  total_payable: number;
-  rounded_total_payable?: number | null;
-  exact_total_payable?: number | null;
-  bnm_5cent_total_payable?: number | null;
-  whole_total_payable?: number | null;
-  net_total_payable?: number;
-  rounded_net_total_payable?: number;
-  bnm_5cent_net_total_payable?: number;
-  whole_net_total_payable?: number | null;
-  towing_limit: string;
-  towing_km?: string;
-  agreed_value: boolean;
-  waiver_betterment: boolean;
-  betterment_rate?: number;
-  betterment_display?: string;
-  excess: number;
-  basic_figure_name?: string | null;
-  basic_figure_amount?: number | null;
-  rate_factor?: number | null;
-  rate_factor_formatted?: string | null;
-  rate_percentage: number | null;
-  windscreen_sum_insured: number | null;
-  special_perils: string | null;
-  llp_llop: string | null;
-  canonical_perils?: string[];
-  canonical_perils_formatted?: string;
-  is_recommended: boolean;
-  is_manual: boolean;
-  manual_overrides?: string[];
-  is_hidden?: boolean;
-  manual_rank?: number | null;
-  sort_order: number;
-  rank?: number;
-  version?: number;
-  uploaded_at?: string;
-  notes: string | null;
-  ranking_explanation?: string | null;
-  quotation_ref?: string | null;
-  source_quotation_no?: string | null;
-  is_takaful?: boolean;
-  ncd_percentage?: number | null;
-  customer_name?: string | null;
-  customer_address?: string | null;
-  ic_or_brn?: string | null;
-  vehicle_no?: string | null;
-  engine_no?: string | null;
-  chassis_no?: string | null;
-  vehicle_year?: string | null;
-  engine_cc?: string | null;
-  vehicle_age?: number | null;
-  detailed_perils?: Array<{
-    name: string;
-    coverage_limit?: string | number | null;
-    premium_cost?: number;
-    has_cost?: boolean;
-    is_included?: boolean;
-  }>;
-  coverage_start_date?: string | null;
-  coverage_end_date?: string | null;
-  coverage_period_formatted?: string | null;
-  uploaded_file_id?: string | null;
-  original_filename?: string | null;
-}
-
 export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const router = useRouter();
   const [data, setData] = useState<{
     tenure: TenureSpec;
     entries: ComparisonEntry[];
     previous_policy: any;
+    active_dynamic_addons?: DynamicAddonDefinition[];
+    dynamic_addon_catalog?: DynamicAddonDefinition[];
     recommended_sum_insured: Record<string, number>;
     ncd: { current: number | null; next: number | null; current_period?: string; next_period?: string; has_previous_policy?: boolean };
     pending_jobs_count?: number;
@@ -332,10 +211,12 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       waiver_betterment?: boolean;
       betterment_rate?: number;
       betterment_display?: string;
+      betterment_is_auto?: boolean;
       excess?: number;
       windscreen_sum_insured: number | null;
       special_perils?: string | null;
       llp_llop?: string | null;
+      extra_addons?: Record<string, string>;
       canonical_perils?: string[];
       canonical_perils_formatted?: string;
       coverage_start_date?: string | null;
@@ -442,6 +323,15 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [promotingEntryId, setPromotingEntryId] = useState<string | null>(null);
   const [showUnlinkModal, setShowUnlinkModal] = useState(false);
   const [showEditCovernoteModal, setShowEditCovernoteModal] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    confirmLabel: string;
+    variant: "primary" | "danger";
+    action: () => Promise<void>;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   const handlePatchCovernote = async (patch: Record<string, any>) => {
     const res = await api<any>(`/comparison/${tenureId}/covernote`, {
@@ -452,7 +342,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     if (res?.tenure) {
       populateEditInputs(res.tenure);
     }
-    triggerStatus("success", "Cover Note Updated", "Issued Cover Note details saved and synchronized across the system.");
+    triggerStatus("success", "Cover Note Updated", "Issued Cover Note details saved and synchronized cleanly.");
   };
 
   const performUnlink = async () => {
@@ -465,7 +355,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       setShowUnlinkModal(false);
       await fetchComparison(true);
     } catch (err: any) {
-      alert("Failed to remove cover note: " + (err.message || String(err)));
+      triggerStatus("error", "Remove Cover Note Failed", err.message || String(err));
     } finally {
       setIsUnlinkingCovernote(false);
     }
@@ -493,25 +383,31 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
   const handlePromoteToCovernote = async (entry: ComparisonEntry) => {
     if (!entry.session_id) {
-      alert("This quotation does not have an attached PDF session.");
+      triggerStatus("error", "Missing PDF Session", "This quotation does not have an attached PDF session.");
       return;
     }
-    if (!confirm(`Mark ${entry.company_name} as the official issued Cover Note / Policy for this vehicle? This will move it from the comparison matrix into the Current Policy section and transition the tenure to Issued Policy.`)) {
-      return;
-    }
-    try {
-      setPromotingEntryId(entry.id);
-      await api(`/comparison/${tenureId}/sessions/${entry.session_id}/convert-type`, {
-        method: "POST",
-        body: JSON.stringify({ document_type: "covernote" }),
-      });
-      triggerStatus("success", "Cover Note Issued", `${entry.company_name} is now designated as the official issued Cover Note.`);
-      await fetchComparison(true);
-    } catch (err: any) {
-      alert("Failed to convert document type: " + (err.message || String(err)));
-    } finally {
-      setPromotingEntryId(null);
-    }
+    setConfirmDialog({
+      open: true,
+      title: `Issue ${entry.company_name} Cover Note`,
+      description: `Mark ${entry.company_name} as the official issued Cover Note / Policy for this vehicle? This will move it into Current Policy and seal the tenure ledger.`,
+      confirmLabel: "Mark as Cover Note",
+      variant: "primary",
+      action: async () => {
+        try {
+          setPromotingEntryId(entry.id);
+          await api(`/comparison/${tenureId}/sessions/${entry.session_id}/convert-type`, {
+            method: "POST",
+            body: JSON.stringify({ document_type: "covernote" }),
+          });
+          triggerStatus("success", "Cover Note Issued", `${entry.company_name} is now designated as the official issued Cover Note.`);
+          await fetchComparison(true);
+        } catch (err: any) {
+          triggerStatus("error", "Conversion Failed", err.message || String(err));
+        } finally {
+          setPromotingEntryId(null);
+        }
+      },
+    });
   };
 
   // Source PDF Viewer State & Resizer/Docking
@@ -766,7 +662,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         populateEditInputs(res.tenure);
       }
     } catch (err: any) {
-      alert("Failed to refresh ledger: " + (err.message || String(err)));
+      triggerStatus("error", "Refresh Ledger Failed", err.message || String(err));
     } finally {
       setRefreshingLedger(false);
     }
@@ -928,7 +824,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       populateEditInputs(updated.tenure);
       setEditingFixedCosts(false);
     } catch (err: any) {
-      alert("Error updating details: " + err.message);
+      triggerStatus("error", "Update Details Failed", err.message || String(err));
     } finally {
       setSavingFixedCosts(false);
     }
@@ -969,7 +865,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       }
       await fetchComparison(true);
     } catch (err: any) {
-      alert("Failed to generate quotation: " + (err.message || String(err)));
+      triggerStatus("error", "Generate Quotation Failed", err.message || String(err));
     } finally {
       setGeneratingQuoteEntryId(null);
     }
@@ -1014,7 +910,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       });
       await fetchComparison(true);
     } catch (err: any) {
-      alert("Failed to upload previous policy PDF: " + (err.message || String(err)));
+      triggerStatus("error", "Previous Policy Upload Failed", err.message || String(err));
     } finally {
       setIsUploadingPrevPolicy(false);
       if (prevPolicyFileInputRef.current) {
@@ -1031,7 +927,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       });
       await fetchComparison(true);
     } catch (err: any) {
-      alert("Failed to generate all quotations: " + (err.message || String(err)));
+      triggerStatus("error", "Generate Quotations Failed", err.message || String(err));
     } finally {
       setGeneratingAllQuotes(false);
     }
@@ -1056,22 +952,31 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     const promptMsg = deleteAllVersions
       ? "Are you sure you want to completely remove this underwriter and all its quotes from comparison?"
       : "Are you sure you want to remove this quotation version from comparison?";
-    if (!confirm(promptMsg)) return;
-    try {
-      const updated = await api<any>(`/comparison/${tenureId}/entry/${entryId}?all_versions=${deleteAllVersions}`, {
-        method: "DELETE",
-      });
-      setData(updated);
-      setActiveVersionsByCompany((prev) => {
-        const next = { ...prev };
-        for (const [cName, ids] of Object.entries(next)) {
-          next[cName] = ids.filter((id) => id !== entryId);
+    setConfirmDialog({
+      open: true,
+      title: deleteAllVersions ? "Remove Underwriter Column" : "Remove Quotation Version",
+      description: promptMsg,
+      confirmLabel: "Remove",
+      variant: "danger",
+      action: async () => {
+        try {
+          const updated = await api<any>(`/comparison/${tenureId}/entry/${entryId}?all_versions=${deleteAllVersions}`, {
+            method: "DELETE",
+          });
+          setData(updated);
+          setActiveVersionsByCompany((prev) => {
+            const next = { ...prev };
+            for (const [cName, ids] of Object.entries(next)) {
+              next[cName] = ids.filter((id) => id !== entryId);
+            }
+            return next;
+          });
+          triggerStatus("success", "Removed", "Quotation entry removed from comparison.");
+        } catch (err: any) {
+          triggerStatus("error", "Delete Failed", err.message || String(err));
         }
-        return next;
-      });
-    } catch (err: any) {
-      alert(err.message);
-    }
+      },
+    });
   };
 
   const handleCopyWhatsapp = async () => {
@@ -1081,7 +986,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       setCopiedWhatsapp(true);
       setTimeout(() => setCopiedWhatsapp(false), 3000);
     } catch (err: any) {
-      alert("Failed to copy WhatsApp summary: " + err.message);
+      triggerStatus("error", "Copy Summary Failed", err.message || String(err));
     }
   };
 
@@ -1141,7 +1046,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       });
       await fetchComparison(true);
     } catch (err: any) {
-      alert("Failed to update visibility: " + err.message);
+      triggerStatus("error", "Update Visibility Failed", err.message || String(err));
       await fetchComparison(true);
     }
   };
@@ -1162,7 +1067,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       await fetchComparison(true);
       triggerStatus("info", "Rank Override Updated", `Manual rank set to #${rankVal || "Auto"} for ${entry.company_name}.`);
     } catch (err: any) {
-      alert("Failed to update manual rank: " + err.message);
+      triggerStatus("error", "Rank Update Failed", err.message || String(err));
       await fetchComparison(true);
     }
   };
@@ -1199,7 +1104,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       });
       await fetchComparison(true);
     } catch (err: any) {
-      alert("Failed to resolve duplicate quote: " + err.message);
+      triggerStatus("error", "Duplicate Resolution Failed", err.message || String(err));
     } finally {
       setResolvingDuplicateId(null);
     }
@@ -1216,10 +1121,10 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       });
       if (blob) {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-        alert("Comparison snapshot copied to clipboard!");
+        triggerStatus("success", "Snapshot Copied", "Comparison snapshot copied to clipboard.");
       }
     } catch (err: any) {
-      alert("Failed to copy snapshot: " + (err.message || String(err)));
+      triggerStatus("error", "Copy Snapshot Failed", err.message || String(err));
     } finally {
       setCopyingSnapshot(false);
     }
@@ -1239,7 +1144,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       link.href = dataUrl;
       link.click();
     } catch (err: any) {
-      alert("Failed to download snapshot: " + (err.message || String(err)));
+      triggerStatus("error", "Download Snapshot Failed", err.message || String(err));
     } finally {
       setDownloadingSnapshot(false);
     }
@@ -1408,11 +1313,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       });
       setData((prev) => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          entries: prev.entries.map((e) =>
-            e.id === entry.id
-              ? {
+        const nextEntries = prev.entries.map((e) =>
+          e.id === entry.id
+            ? {
                 ...e,
                 sum_insured: res.sum_insured !== undefined ? res.sum_insured : e.sum_insured,
                 motor_premium: res.motor_premium !== undefined ? res.motor_premium : e.motor_premium,
@@ -1425,10 +1328,12 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 waiver_betterment: res.waiver_betterment !== undefined ? res.waiver_betterment : e.waiver_betterment,
                 betterment_rate: res.betterment_rate !== undefined ? res.betterment_rate : e.betterment_rate,
                 betterment_display: res.betterment_display !== undefined ? res.betterment_display : e.betterment_display,
+                betterment_is_auto: res.betterment_is_auto !== undefined ? res.betterment_is_auto : e.betterment_is_auto,
                 towing_limit: res.towing_limit ?? e.towing_limit,
                 towing_km: res.towing_km ?? e.towing_km,
                 special_perils: res.special_perils !== undefined ? res.special_perils : e.special_perils,
                 llp_llop: res.llp_llop !== undefined ? res.llp_llop : e.llp_llop,
+                extra_addons: res.extra_addons !== undefined ? res.extra_addons : e.extra_addons,
                 excess: res.excess !== undefined ? res.excess : e.excess,
                 windscreen_sum_insured:
                   res.windscreen_sum_insured !== undefined ? res.windscreen_sum_insured : e.windscreen_sum_insured,
@@ -1438,14 +1343,31 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 version: res.version ?? (e.version || 1) + 1,
                 rank: res.rank ?? e.rank,
               }
-              : e
-          ),
+            : e
+        );
+        const catalog = prev.dynamic_addon_catalog || [];
+        const nextActiveAddons =
+          catalog.length > 0
+            ? catalog.filter(
+                (def) =>
+                  nextEntries.some((en) => en.extra_addons?.[def.key] === "Yes") ||
+                  prev.covernote_policy?.extra_addons?.[def.key] === "Yes"
+              )
+            : prev.active_dynamic_addons;
+        return {
+          ...prev,
+          entries: nextEntries,
+          active_dynamic_addons: nextActiveAddons,
         };
       });
       if (
         patch.motor_premium !== undefined ||
         patch.sum_insured !== undefined ||
         patch.windscreen_sum_insured !== undefined ||
+        patch.extra_addons !== undefined ||
+        patch.waiver_betterment !== undefined ||
+        patch.betterment_rate !== undefined ||
+        patch.betterment_mode !== undefined ||
         patch.clear_override_field !== undefined
       ) {
         void fetchComparison(true);
@@ -1529,6 +1451,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         onPromoteToCovernote={handlePromoteToCovernote}
         onDeleteEntry={handleDeleteEntry}
         roundingMode={roundingMode}
+        activeDynamicAddons={data?.active_dynamic_addons}
+        dynamicAddonCatalog={data?.dynamic_addon_catalog}
       />
     );
   };
@@ -2364,6 +2288,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             tenureId={tenureId}
             isUnlinkingCovernote={isUnlinkingCovernote}
             roundingMode={roundingMode}
+            activeDynamicAddons={data.active_dynamic_addons}
+            dynamicAddonCatalog={data.dynamic_addon_catalog}
             onOpenNcdModal={handleOpenNcdModal}
             onUnlinkCovernote={handleUnlinkCovernote}
             onOpenEditCovernote={() => setShowEditCovernoteModal(true)}
@@ -2507,6 +2433,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         initialData={editingEntry ? { ...editingEntry, vehicle_age: editingEntry.vehicle_age ?? data?.vehicle_age } : null}
         tenureId={tenureId}
         tenureStartDate={tenure?.coverage_start_date}
+        dynamicAddonCatalog={data?.dynamic_addon_catalog}
         onUploadSuccess={() => fetchComparison()}
       />
 
@@ -2579,7 +2506,33 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           runnerFee={tenure.runner_fee}
           includeRoadTax={tenure.include_road_tax !== false}
           includeRunnerFee={tenure.include_runner_fee !== false}
+          vehicleModel={tenure.vehicle_model}
+          manufactureYear={tenure.manufacture_year}
+          dynamicAddonCatalog={data?.dynamic_addon_catalog}
           onSave={handlePatchCovernote}
+        />
+      )}
+
+      {confirmDialog && (
+        <Dialog
+          open={confirmDialog.open}
+          onOpenChange={(next) => {
+            if (!next && !confirmBusy) setConfirmDialog(null);
+          }}
+          title={confirmDialog.title}
+          description={confirmDialog.description}
+          confirmLabel={confirmDialog.confirmLabel}
+          confirmVariant={confirmDialog.variant}
+          loading={confirmBusy}
+          onConfirm={async () => {
+            try {
+              setConfirmBusy(true);
+              await confirmDialog.action();
+              setConfirmDialog(null);
+            } finally {
+              setConfirmBusy(false);
+            }
+          }}
         />
       )}
     </div>

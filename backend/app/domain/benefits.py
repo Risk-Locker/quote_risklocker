@@ -76,6 +76,7 @@ class BenefitValue(BaseModel):
         "package_plan",
         "custom",
         "text",
+        "string",
     ]
     value: Decimal | int | str | bool | None = None
     unit: str | None = Field(default=None, max_length=40)
@@ -99,6 +100,8 @@ class BenefitValue(BaseModel):
     label: str | None = Field(default=None, max_length=255)
     hideCoverage: bool | None = False
     hideCost: bool | None = False
+    hide_limit: bool | None = None
+    hide_price: bool | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -140,9 +143,9 @@ class BenefitValue(BaseModel):
         elif self.type == "formula":
             if not (self.expression or "").strip():
                 raise ValueError("Formula requires an expression.")
-        elif self.type == "custom":
-            if not (self.display_text or "").strip():
-                raise ValueError("Custom reviewed values require display text.")
+        elif self.type in {"custom", "text", "string"}:
+            # Allow empty display_text when user explicitly clears/hides coverage or stores description overrides
+            pass
         elif self.type == "region" and not self.region:
             raise ValueError("Region values require a region.")
         elif self.type == "enum" and not self.enum_key:

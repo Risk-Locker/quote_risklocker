@@ -485,10 +485,10 @@ export function formatAddonValue(rawVal: unknown): string {
     }
   }
 
-  // 10. General Word Clamping: Ensure coverage info is never longer than 4 words
-  const words = s.split(" ");
-  if (words.length > 4) {
-    return words.slice(0, 4).join(" ");
+  // 10. General Word Clamping: Never turn prose descriptions (>3 words or >28 chars) into coverage limits
+  const words = s.split(/\s+/);
+  if (words.length > 3 || s.length > 28) {
+    return "";
   }
 
   return s;
@@ -866,28 +866,64 @@ export function extractFreeCoverageItems(
     return tNorm.includes("towing") && !tNorm.includes("battery");
   };
 
-  const formatTowingTitle = (baseLabel: string, limitVal: string): string => {
-    const cleanTitle = (baseLabel || "Emergency Towing Assistance").trim();
-    const cleanVal = (limitVal || "").trim();
-    if (!cleanVal) return cleanTitle;
-    const valCompact = cleanVal.replace(/\.00\b/g, "").toLowerCase();
+  const isCoverageHiddenOrCleared = (raw: any): boolean => {
+    if (raw?.hide_coverage === true || raw?.show_coverage === false) return true;
+    for (const k of ["typed_value_override", "typed_value"]) {
+      const tv = raw?.[k];
+      if (tv && typeof tv === "object") {
+        if (tv.hide_limit === true || tv.hideCoverage === true) return true;
+        if ("display_text" in tv && String(tv.display_text ?? "").trim() === "" && (tv.value === undefined || tv.value === null || tv.value === "")) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const stripTrailingMetricParens = (titleStr: string): string => {
+    return (titleStr || "")
+      .trim()
+      .replace(/\s*\((?:(?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|unlimited[^)]*)\)\s*$/i, "")
+      .trim();
+  };
+
+  const formatTowingTitle = (baseLabel: string, limitVal: string, isManualVal: boolean = false): string => {
+    let cleanTitle = (baseLabel || "Emergency Towing Assistance").trim();
+    const rawVal = (limitVal || "").trim();
+    if (!rawVal) return cleanTitle;
+    if (isManualVal) {
+      cleanTitle = stripTrailingMetricParens(cleanTitle);
+    }
+    const isConciseLimit =
+      (isManualVal && rawVal.length <= 40) ||
+      /^(?:unlimited(?:\s*(?:-\s*[a-z0-9 ]+|km|distance|mileage|towing|costs?))?|(?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km)$/i.test(rawVal);
+    if (!isConciseLimit) return cleanTitle;
+    const valCompact = rawVal.replace(/\.00\b/g, "").toLowerCase();
     const titleLow = cleanTitle.toLowerCase();
-    if (titleLow.includes(cleanVal.toLowerCase()) || (valCompact && titleLow.includes(valCompact))) {
+    if (titleLow.includes(rawVal.toLowerCase()) || (valCompact && titleLow.includes(valCompact))) {
       return cleanTitle;
     }
     if (/\([^)]+\)$/.test(cleanTitle)) return cleanTitle;
-    return `${cleanTitle} (${cleanVal})`;
+    return `${cleanTitle} (${rawVal})`;
   };
 
   for (const raw of activeBenefits || []) {
     if (raw?.is_extra || raw?.cost_status === "paid" || hasPositivePrice(raw)) continue;
 
+    const isHideCov = isCoverageHiddenOrCleared(raw);
+    const hasManualValOvr = Boolean(raw?.has_manual_value_override);
+
     if (isBaseTowingCard(raw)) {
-      const cTitle = String(raw.label || raw.title || "Emergency Towing Assistance").trim();
-      const cVal = String(raw.value || raw.display_value || raw.coverage_limit || "").trim();
+      let cTitle = String(raw.label || raw.title || "Emergency Towing Assistance").trim();
+      const cVal = isHideCov ? "" : String(raw.value || raw.display_value || raw.coverage_limit || "").trim();
+      if (isHideCov) {
+        cTitle = stripTrailingMetricParens(cTitle);
+      }
       const cDesc = String(raw.description || raw.short_description || "").trim();
       const hasManualOverride = Boolean(
         raw.has_manual_override ||
+        hasManualValOvr ||
+        isHideCov ||
         raw.is_manual ||
         String(raw.source || "").toLowerCase() === "manual" ||
         raw.label_override
@@ -902,7 +938,7 @@ export function extractFreeCoverageItems(
           towingUpgrade = detectTowingUpgrade(activeBenefits, insNameStr);
         }
       }
-      const outTitle = towingUpgrade ? towingUpgrade.title : formatTowingTitle(cTitle, cVal);
+      const outTitle = towingUpgrade ? towingUpgrade.title : formatTowingTitle(cTitle, cVal, hasManualValOvr);
       const outDesc = towingUpgrade
         ? towingUpgrade.description
         : cDesc || "24/7 accidental towing service to nearest panel workshop or approved repairer.";
@@ -917,20 +953,21 @@ export function extractFreeCoverageItems(
       continue;
     }
 
-    const title = String(raw?.title || raw?.label || "").trim();
+    let title = String(raw?.title || raw?.label || "").trim();
     if (!title) continue;
+    if (isHideCov) {
+      title = stripTrailingMetricParens(title);
+    } else if (hasManualValOvr) {
+      const cVal = String(raw?.value || "").trim();
+      if (cVal && cVal.length <= 40 && !title.toLowerCase().includes(cVal.toLowerCase())) {
+        title = `${stripTrailingMetricParens(title)} (${cVal})`;
+      }
+    }
     const norm = normalizeCode(title);
     if (seen.has(norm)) continue;
     seen.add(norm);
-    let desc = String(raw?.description || raw?.short_description || "").trim();
-    const val = formatAddonValue(raw?.value ?? raw?.coverage_limit);
-    if (val) {
-      const valCompact = val.replace(/\.00\b/, "").toLowerCase();
-      const descNorm = desc.toLowerCase();
-      if (!descNorm.includes(val.toLowerCase()) && !descNorm.includes(valCompact)) {
-        desc = desc ? `${desc} (${val})` : val;
-      }
-    }
+    // Box 1 standard cards render Title + Description only unless manually overridden
+    const desc = String(raw?.description || raw?.short_description || "").trim();
     items.push({ title, description: desc });
     if (items.length >= finalLimit) break;
   }

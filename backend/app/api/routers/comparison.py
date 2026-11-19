@@ -106,6 +106,9 @@ class ComparisonEntryUpsertRequest(BaseModel):
     windscreen_sum_insured: float | None = None
     special_perils: str | None = None
     llp_llop: str | None = None
+    extra_addons: dict[str, str] | None = None
+    betterment_rate: float | None = None
+    betterment_mode: str | None = None
     is_recommended: bool = False
     is_manual: bool = True
     notes: str | None = None
@@ -629,10 +632,13 @@ class UpdateComparisonEntryPatch(BaseModel):
     agreed_value: bool | None = None
     valuation_type: str | None = None
     waiver_betterment: bool | None = None
+    betterment_rate: float | None = None
+    betterment_mode: str | None = None
     basic_figure_amount: float | None = None
     towing_limit: str | None = None
     special_perils: str | None = None
     llp_llop: str | None = None
+    extra_addons: dict[str, str] | None = None
     excess: float | None = None
     windscreen_sum_insured: float | None = None
     notes: str | None = None
@@ -689,10 +695,17 @@ def patch_comparison_entry(
         raise HTTPException(status_code=422, detail="Sum insured cannot be negative.")
     if payload.motor_premium is not None and payload.motor_premium < 0:
         raise HTTPException(status_code=422, detail="Motor premium cannot be negative.")
+    if payload.betterment_rate is not None and (payload.betterment_rate < 0 or payload.betterment_rate > 100):
+        raise HTTPException(status_code=422, detail="Betterment rate must be between 0 and 100%.")
 
     from datetime import datetime, timezone
     from decimal import Decimal
-    from app.services.marketing_comparison.ncd_evaluator import get_standard_betterment_rate
+    from app.services.marketing_comparison.dynamic_addons import sanitize_extra_addons_map
+    from app.services.marketing_comparison.ncd_evaluator import (
+        check_has_betterment_peril,
+        evaluate_betterment_rules,
+        get_standard_betterment_rate,
+    )
     from app.services.marketing_comparison.workspace_sync import sync_session_draft_from_comparison
 
     tenure = db.get(InsuranceTenure, tenure_id)
@@ -717,8 +730,22 @@ def patch_comparison_entry(
         entry.valuation_type = "agreed_value" if is_agreed else "market_value"
         edited_fields.extend(["agreed_value", "valuation_type"])
 
-    if payload.waiver_betterment is not None:
-        entry.waiver_betterment = bool(payload.waiver_betterment)
+    b_mode = str(payload.betterment_mode or "").strip().lower()
+    if b_mode == "auto":
+        clear_field = "waiver_betterment"
+    elif payload.betterment_rate is not None:
+        b_rate_val = round(float(payload.betterment_rate), 2)
+        entry.waiver_betterment = b_rate_val == 0.0
+        entry.betterment_rate = b_rate_val
+        entry.betterment_display = (
+            "No (0%)"
+            if b_rate_val == 0.0
+            else f"Yes ({int(b_rate_val) if float(b_rate_val).is_integer() else b_rate_val}%)"
+        )
+        edited_fields.extend(["waiver_betterment", "betterment_rate"])
+    elif payload.waiver_betterment is not None or b_mode in ("waived", "copay"):
+        waived_flag = (b_mode == "waived") if b_mode in ("waived", "copay") else bool(payload.waiver_betterment)
+        entry.waiver_betterment = waived_flag
         if entry.waiver_betterment:
             entry.betterment_rate = 0.0
             entry.betterment_display = "No (0%)"
@@ -730,6 +757,12 @@ def patch_comparison_entry(
             entry.betterment_rate = b_rate
             entry.betterment_display = b_disp
         edited_fields.append("waiver_betterment")
+
+    if payload.extra_addons is not None:
+        cleaned_ea = sanitize_extra_addons_map(payload.extra_addons)
+        entry.extra_addons = {**dict(getattr(entry, "extra_addons", None) or {}), **cleaned_ea}
+        flag_modified(entry, "extra_addons")
+        edited_fields.append("extra_addons")
 
     if payload.motor_premium is not None:
         entry.motor_premium = round(float(payload.motor_premium), 2)
@@ -830,6 +863,32 @@ def patch_comparison_entry(
                 entry.special_perils = b_rev.get("special_perils")
             elif clear_field == "llp_llop":
                 entry.llp_llop = b_rev.get("llp_llop")
+            elif clear_field == "extra_addons":
+                entry.extra_addons = dict(b_rev.get("extra_addons") or {})
+                flag_modified(entry, "extra_addons")
+            elif clear_field in ("waiver_betterment", "betterment_rate"):
+                if isinstance(f_rev.get("waiver_of_betterment"), dict) and f_rev["waiver_of_betterment"].get("status") == "manual_override":
+                    f_rev.pop("waiver_of_betterment", None)
+                if isinstance(f_rev.get("betterment_rate"), dict):
+                    f_rev.pop("betterment_rate", None)
+                if s_rev.draft:
+                    s_rev.draft.fields = f_rev
+                    flag_modified(s_rev.draft, "fields")
+                veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if (tenure and getattr(tenure, "tracked_vehicle", None)) else None
+                quote_year = tenure.coverage_start_date.year if (tenure and tenure.coverage_start_date) else datetime.now(timezone.utc).year
+                has_p = check_has_betterment_peril(f_rev, b_rev.get("combined_text", ""))
+                comp_obj = db.get(InsuranceCompany, s_rev.company_id) if getattr(s_rev, "company_id", None) else None
+                w_auto, r_auto, d_auto = evaluate_betterment_rules(
+                    yom=veh_yom,
+                    quote_year=quote_year,
+                    company_name=entry.company_name,
+                    has_betterment_peril=has_p,
+                    coverage_start_date=tenure.coverage_start_date if tenure else None,
+                    company_obj=comp_obj,
+                )
+                entry.waiver_betterment = w_auto
+                entry.betterment_rate = r_auto
+                entry.betterment_display = d_auto
             elif clear_field == "windscreen_sum_insured":
                 entry.windscreen_sum_insured = b_rev.get("windscreen_sum_insured")
             elif clear_field == "excess":
@@ -841,11 +900,33 @@ def patch_comparison_entry(
             entry.special_perils = None
         elif clear_field == "llp_llop":
             entry.llp_llop = None
+        elif clear_field == "extra_addons":
+            entry.extra_addons = {}
+            flag_modified(entry, "extra_addons")
+        elif clear_field in ("waiver_betterment", "betterment_rate"):
+            veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if (tenure and getattr(tenure, "tracked_vehicle", None)) else None
+            quote_year = tenure.coverage_start_date.year if (tenure and tenure.coverage_start_date) else datetime.now(timezone.utc).year
+            w_auto, r_auto, d_auto = evaluate_betterment_rules(
+                yom=veh_yom,
+                quote_year=quote_year,
+                company_name=entry.company_name,
+                has_betterment_peril=False,
+                coverage_start_date=tenure.coverage_start_date if tenure else None,
+            )
+            entry.waiver_betterment = w_auto
+            entry.betterment_rate = r_auto
+            entry.betterment_display = d_auto
         elif clear_field == "notes":
             entry.notes = None
 
     if edited_fields or clear_field:
-        record_manual_overrides(entry, edited_fields=edited_fields, clear_field=clear_field)
+        record_manual_overrides(
+            entry,
+            edited_fields=edited_fields,
+            clear_field=clear_field,
+        )
+        if b_mode == "auto":
+            record_manual_overrides(entry, clear_field="betterment_rate")
         entry.version = (entry.version or 1) + 1
 
     # Sync edited fields & benefits bidirectionally to linked QuotationDraft
@@ -861,9 +942,11 @@ def patch_comparison_entry(
                 "agreed_value": entry.agreed_value,
                 "valuation_type": entry.valuation_type,
                 "waiver_betterment": entry.waiver_betterment,
+                "betterment_rate": float(entry.betterment_rate) if entry.betterment_rate is not None else None,
                 "towing_limit": entry.towing_limit,
                 "special_perils": entry.special_perils or "Not Included",
                 "llp_llop": entry.llp_llop or "Not Included",
+                "extra_addons": getattr(entry, "extra_addons", None) or {},
                 "excess": entry.excess,
                 "windscreen_sum_insured": entry.windscreen_sum_insured,
             },
@@ -922,6 +1005,10 @@ def patch_comparison_entry(
         "towing_km": entry.towing_limit if "towing_limit" in get_entry_overrides(entry) else (entry.towing_km or entry.towing_limit),
         "special_perils": entry.special_perils,
         "llp_llop": entry.llp_llop,
+        "extra_addons": getattr(entry, "extra_addons", None) or {},
+        "betterment_is_auto": not any(
+            k in get_entry_overrides(entry) for k in ("waiver_betterment", "betterment_rate")
+        ),
         "excess": float(entry.excess or 0.0),
         "windscreen_sum_insured": float(entry.windscreen_sum_insured) if entry.windscreen_sum_insured else None,
         "notes": entry.notes,
@@ -1182,14 +1269,25 @@ class CovernotePatchRequest(BaseModel):
     coverage_end_date: str | None = None
     sum_insured: float | None = None
     motor_premium: float | None = None
+    total_payable: float | None = None
+    road_tax: float | None = None
+    runner_fee: float | None = None
+    include_road_tax: bool | None = None
+    include_runner_fee: bool | None = None
+    vehicle_model: str | None = None
+    manufacture_year: int | None = None
     agreed_value: bool | None = None
     valuation_type: str | None = None
     windscreen_sum_insured: float | None = None
     towing_limit: str | None = None
     special_perils: str | None = None
     llp_llop: str | None = None
+    extra_addons: dict[str, str] | None = None
+    included_perils: list[str] | None = None
     excess: float | None = None
     waiver_betterment: bool | None = None
+    betterment_rate: float | None = None
+    betterment_mode: str | None = None
 
 
 @router.patch("/{tenure_id}/covernote")
@@ -1199,12 +1297,22 @@ def patch_tenure_covernote(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Edit Cover Note policy number, insurer, dates, financials, and benefits inline or via modal."""
+    """Edit Cover Note policy number, insurer, dates, financials, perils, vehicle specs, and benefits inline or via modal."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     if payload.sum_insured is not None and payload.sum_insured < 0:
         raise HTTPException(status_code=422, detail="Sum insured cannot be negative.")
     if payload.motor_premium is not None and payload.motor_premium < 0:
         raise HTTPException(status_code=422, detail="Motor premium cannot be negative.")
+    if payload.total_payable is not None and payload.total_payable < 0:
+        raise HTTPException(status_code=422, detail="Total payable cannot be negative.")
+    if payload.road_tax is not None and payload.road_tax < 0:
+        raise HTTPException(status_code=422, detail="Road tax cannot be negative.")
+    if payload.runner_fee is not None and payload.runner_fee < 0:
+        raise HTTPException(status_code=422, detail="Runner fee cannot be negative.")
+    if payload.betterment_rate is not None and (payload.betterment_rate < 0 or payload.betterment_rate > 100):
+        raise HTTPException(status_code=422, detail="Betterment rate must be between 0 and 100%.")
+    if payload.manufacture_year is not None and (payload.manufacture_year < 1900 or payload.manufacture_year > 2100):
+        raise HTTPException(status_code=422, detail="Manufacture year must be a valid 4-digit year.")
     if payload.excess is not None and payload.excess < 0:
         raise HTTPException(status_code=422, detail="Excess cannot be negative.")
     if payload.windscreen_sum_insured is not None and payload.windscreen_sum_insured < 0:

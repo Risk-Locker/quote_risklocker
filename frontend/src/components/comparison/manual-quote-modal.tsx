@@ -14,6 +14,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { extractDateFromFilename } from "@/components/upload/upload-workspace";
+import {
+  BettermentEditorControls,
+  type BettermentModeSelection,
+} from "./components/BettermentEditorControls";
+import { DEFAULT_DYNAMIC_ADDON_CATALOG } from "./components/DynamicAddonsControl";
+import { TowingLimitSelector } from "./components/TowingLimitSelector";
+import type { DynamicAddonDefinition } from "./types";
 
 interface ManualQuoteModalProps {
   isOpen: boolean;
@@ -22,6 +29,7 @@ interface ManualQuoteModalProps {
   initialData?: any;
   tenureId?: string;
   tenureStartDate?: string;
+  dynamicAddonCatalog?: DynamicAddonDefinition[];
   onUploadSuccess?: () => void;
 }
 
@@ -45,6 +53,7 @@ export function ManualQuoteModal({
   initialData,
   tenureId,
   tenureStartDate,
+  dynamicAddonCatalog = DEFAULT_DYNAMIC_ADDON_CATALOG,
   onUploadSuccess,
 }: ManualQuoteModalProps) {
   const [activeTab, setActiveTab] = useState<"upload" | "manual">("upload");
@@ -58,11 +67,15 @@ export function ManualQuoteModal({
   const [towingLimit, setTowingLimit] = useState("Unlimited");
   const [agreedValue, setAgreedValue] = useState(true);
   const [waiverBetterment, setWaiverBetterment] = useState(true);
+  const [bettermentRate, setBettermentRate] = useState<number | null>(null);
+  const [bettermentMode, setBettermentMode] = useState<"auto" | "waived" | "copay">("auto");
+  const [extraAddons, setExtraAddons] = useState<Record<string, string>>({});
   const [excess, setExcess] = useState("0");
   const [windscreen, setWindscreen] = useState("");
   const [specialPerils, setSpecialPerils] = useState("");
   const [llpLlop, setLlpLlop] = useState("");
   const [notes, setNotes] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Advanced Breakdown & Rating States
@@ -91,7 +104,18 @@ export function ManualQuoteModal({
       setMotorPremium(initialData.motor_premium !== undefined && initialData.motor_premium !== null ? String(initialData.motor_premium) : "0");
       setTowingLimit(initialData.towing_limit || "Unlimited");
       setAgreedValue(initialData.agreed_value ?? true);
-      setWaiverBetterment(initialData.waiver_betterment ?? true);
+      const wb = Boolean(initialData.waiver_betterment ?? true);
+      setWaiverBetterment(wb);
+      setBettermentRate(initialData.betterment_rate != null ? Number(initialData.betterment_rate) : null);
+      setBettermentMode(
+        initialData.betterment_is_auto ? "auto" : wb ? "waived" : "copay"
+      );
+      setExtraAddons(
+        initialData.extra_addons && typeof initialData.extra_addons === "object"
+          ? { ...initialData.extra_addons }
+          : {}
+      );
+      setFormError(null);
       setExcess(initialData.excess !== undefined && initialData.excess !== null ? String(initialData.excess) : "0");
       setWindscreen(initialData.windscreen_sum_insured ? String(initialData.windscreen_sum_insured) : "");
       setSpecialPerils(initialData.special_perils || "");
@@ -120,6 +144,10 @@ export function ManualQuoteModal({
       setTowingLimit("Unlimited");
       setAgreedValue(true);
       setWaiverBetterment(true);
+      setBettermentRate(null);
+      setBettermentMode("auto");
+      setExtraAddons({});
+      setFormError(null);
       setExcess("0");
       setWindscreen("");
       setSpecialPerils("");
@@ -169,11 +197,12 @@ export function ManualQuoteModal({
     if (!tenureId || !initialData?.id || initialData.is_manual) return;
     try {
       setSaving(true);
+      setFormError(null);
       await api(`/comparison/${tenureId}/entry/${initialData.id}/reset`, { method: "POST" });
       onClose();
       if (onUploadSuccess) onUploadSuccess();
     } catch (err: any) {
-      alert("Failed to reset entry: " + err.message);
+      setFormError("Failed to reset entry: " + err.message);
     } finally {
       setSaving(false);
     }
@@ -181,9 +210,23 @@ export function ManualQuoteModal({
 
   if (!isOpen) return null;
 
+  const handleBettermentSelect = (sel: BettermentModeSelection) => {
+    setBettermentMode(sel.mode);
+    if (sel.mode === "waived") {
+      setWaiverBetterment(true);
+      setBettermentRate(0);
+    } else if (sel.mode === "copay") {
+      setWaiverBetterment(false);
+      setBettermentRate(sel.betterment_rate ?? 20);
+    } else {
+      setBettermentRate(null);
+    }
+  };
+
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setFormError(null);
     try {
       const finalCompany = companyName === "Other" ? (customCompany.trim() || "Other Insurer") : companyName;
       await onSave({
@@ -195,6 +238,9 @@ export function ManualQuoteModal({
         towing_limit: towingLimit,
         agreed_value: agreedValue,
         waiver_betterment: waiverBetterment,
+        betterment_mode: bettermentMode,
+        ...(bettermentMode !== "auto" ? { betterment_rate: bettermentRate } : {}),
+        ...(Object.keys(extraAddons).length > 0 ? { extra_addons: extraAddons } : {}),
         excess: parseFloat(excess) || 0,
         windscreen_sum_insured: windscreen ? parseFloat(windscreen) : null,
         special_perils: specialPerils || null,
@@ -205,8 +251,8 @@ export function ManualQuoteModal({
         is_manual: true,
       });
       onClose();
-    } catch (err) {
-      console.error("Failed to save manual quote:", err);
+    } catch (err: any) {
+      setFormError(err?.message || "Failed to save quote entry");
     } finally {
       setSaving(false);
     }
@@ -668,18 +714,12 @@ export function ManualQuoteModal({
             </span>
 
             {/* Key Perils & Endorsements */}
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="space-y-3 pt-1">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
-                  Towing Limit
+                  Towing Limit (RM / KM / Unlimited)
                 </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Unlimited or 300 KM"
-                  value={towingLimit}
-                  onChange={(e) => setTowingLimit(e.target.value)}
-                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
-                />
+                <TowingLimitSelector value={towingLimit} onChange={setTowingLimit} compact />
               </div>
 
               <div>
@@ -692,7 +732,7 @@ export function ManualQuoteModal({
                   placeholder="e.g. 1500"
                   value={windscreen}
                   onChange={(e) => setWindscreen(e.target.value)}
-                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+                  className="w-full rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] bg-white px-3 py-2 text-sm font-mono text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
                 />
               </div>
             </div>
@@ -740,28 +780,73 @@ export function ManualQuoteModal({
               />
             </div>
 
-            {/* Checkbox Features */}
-            <div className="grid grid-cols-2 gap-3 pt-2">
+            {/* Agreed Value & Betterment Formula Controls */}
+            <div className="space-y-3 pt-2">
               <label className="flex items-center gap-2 text-xs font-medium text-[#1b1717] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={agreedValue}
-                  onChange={(e) => setAgreedValue(e.target.checked)}
+                  onChange={(e) => {
+                    setAgreedValue(e.target.checked);
+                    setValuationType(e.target.checked ? "agreed_value" : "market_value");
+                  }}
                   className="rounded border-[#e5e5ea] text-[#1b1717] focus:ring-[#1b1717]"
                 />
                 <span>Agreed Value (约定价值)</span>
               </label>
 
-              <label className="flex items-center gap-2 text-xs font-medium text-[#1b1717] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={waiverBetterment}
-                  onChange={(e) => setWaiverBetterment(e.target.checked)}
-                  className="rounded border-[#e5e5ea] text-[#1b1717] focus:ring-[#1b1717]"
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  Waiver of Betterment
+                </label>
+                <BettermentEditorControls
+                  waiverBetterment={waiverBetterment}
+                  bettermentRate={bettermentRate}
+                  isAuto={bettermentMode === "auto"}
+                  companyName={companyName === "Other" ? customCompany : companyName}
+                  onSelect={handleBettermentSelect}
+                  compact
                 />
-                <span>Waiver of Betterment</span>
-              </label>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  Conditional Add-ons (Shown When Active)
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {dynamicAddonCatalog.map((addon) => {
+                    const cur = extraAddons[addon.key] || "No";
+                    const isYes = cur === "Yes";
+                    return (
+                      <button
+                        key={addon.key}
+                        type="button"
+                        onClick={() =>
+                          setExtraAddons((prev) => ({
+                            ...prev,
+                            [addon.key]: isYes ? "No" : "Yes",
+                          }))
+                        }
+                        className={`flex items-center justify-between rounded-[var(--rl-radius-sm)] border px-2 py-1 text-[11px] font-semibold cursor-pointer ${
+                          isYes
+                            ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                            : "bg-[#f5f5f7] border-[#e5e5ea] text-[#6e6e73]"
+                        }`}
+                      >
+                        <span className="truncate">{addon.label}</span>
+                        <span>{cur}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
+
+            {formError && (
+              <p className="rounded-[var(--rl-radius-sm)] border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-[#ed1c24]">
+                {formError}
+              </p>
+            )}
 
             {/* Expandable Advanced Breakdown, Rating & PDF Detection Audit */}
             <div className="pt-2 border-t border-[#e5e5ea]">

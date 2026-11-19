@@ -75,10 +75,10 @@ def test_render_design2_html_structure_and_assets():
     assert "data:image/" in html  # Official logo & QRs embedded
     assert "admin@risklocker.com" in html
     assert "Contact Us On Whatsapp" in html
-    # Visual parity invariants: value-only underline, #F8F9FC panel, 108px footer, structural dividers
+    # Visual parity invariants: value-only underline, #F8F9FC panel, 98px footer (v30.7 enlarged typography), structural dividers
     assert "border-bottom: 1px solid #334155;" in html
     assert "background: #F8F9FC;" in html
-    assert "height: 108px;" in html
+    assert "height: 98px;" in html
     assert "height: 46px; background: rgba(255, 255, 255, 0.72);" in html
 
 

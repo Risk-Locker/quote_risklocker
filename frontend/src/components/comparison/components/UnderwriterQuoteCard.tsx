@@ -17,8 +17,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { formatShortInsurerName, formatBenefitCoverage } from "@/lib/benefit-utils";
 import { formatLlpLlop, isLlpLlopIncluded, formatMoneyWithRounding } from "../types";
-import type { ComparisonEntry, TenureSpec, RoundingMode } from "../types";
+import type {
+  ComparisonEntry,
+  DynamicAddonDefinition,
+  TenureSpec,
+  RoundingMode,
+} from "../types";
 import { InlineComparisonFieldEditor } from "./InlineComparisonFieldEditor";
+import { DynamicAddonsControl } from "./DynamicAddonsControl";
 
 export interface UnderwriterQuoteCardProps {
   entry: ComparisonEntry;
@@ -50,6 +56,8 @@ export interface UnderwriterQuoteCardProps {
   onDeleteEntry: (id: string, deleteCompany: boolean) => void;
   onPatchEntryField?: (entry: ComparisonEntry, patch: Record<string, any>) => Promise<void>;
   roundingMode?: RoundingMode;
+  activeDynamicAddons?: DynamicAddonDefinition[];
+  dynamicAddonCatalog?: DynamicAddonDefinition[];
 }
 
 export function UnderwriterQuoteCard({
@@ -77,6 +85,8 @@ export function UnderwriterQuoteCard({
   onDeleteEntry,
   onPatchEntryField,
   roundingMode = "exact",
+  activeDynamicAddons = [],
+  dynamicAddonCatalog,
 }: UnderwriterQuoteCardProps) {
   const isWinner = entry.is_recommended;
   const overrides = entry.manual_overrides || [];
@@ -92,7 +102,7 @@ export function UnderwriterQuoteCard({
   return (
     <div
       key={entry.id}
-      className={`w-[275px] shrink-0 rounded-2xl bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${isViewingPdf
+      className={`w-[275px] shrink-0 rounded-[var(--rl-radius)] bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${isViewingPdf
           ? "border-2 border-[#1b1717] ring-4 ring-[#1b1717]/15 shadow-xl scale-[1.01]"
           : isWinner
             ? "border-2 border-[#1b1717] shadow-lg ring-1 ring-black/5"
@@ -101,7 +111,7 @@ export function UnderwriterQuoteCard({
     >
       {/* Equal Height Standardized Top Slot (h-8) for Perfect Grid Row Alignment */}
       {isWinner ? (
-        <div className="h-8 bg-[#1b1717] text-white text-xs font-bold px-3 flex items-center justify-between rounded-t-xl shrink-0 print:bg-black print:text-white">
+        <div className="h-8 bg-[#1b1717] text-white text-xs font-bold px-3 flex items-center justify-between rounded-t-[6px] shrink-0 print:bg-black print:text-white">
           <span className="flex items-center gap-1.5">
             <Star weight="fill" size={13} className="text-amber-400" />
             RECOMMENDED WINNER
@@ -109,7 +119,7 @@ export function UnderwriterQuoteCard({
           <ShieldCheck size={15} weight="bold" />
         </div>
       ) : (
-        <div className="h-8 bg-[#f5f5f7]/80 text-[#6e6e73] px-3 flex items-center justify-between rounded-t-xl shrink-0 border-b border-[#e5e5ea]/60">
+        <div className="h-8 bg-[#f5f5f7]/80 text-[#6e6e73] px-3 flex items-center justify-between rounded-t-[6px] shrink-0 border-b border-[#e5e5ea]/60">
           <span className="text-[11px] font-semibold text-neutral-600">Quotation Option</span>
           <span className="text-[10px] text-neutral-400 font-mono">Rank #{visibleRanksMap[entry.id] ?? entry.rank ?? 1}</span>
         </div>
@@ -530,7 +540,11 @@ export function UnderwriterQuoteCard({
                 field="waiver_betterment"
                 label="Betterment"
                 currentValue={entry.waiver_betterment ? "No (0%)" : entry.betterment_display || "Yes"}
-                isOverridden={isFieldOverridden("waiver_betterment")}
+                isOverridden={isFieldOverridden("waiver_betterment") || isFieldOverridden("betterment_rate")}
+                companyName={entry.company_name}
+                manufactureYear={tenure.manufacture_year}
+                bettermentRate={entry.betterment_rate}
+                isBettermentAuto={entry.betterment_is_auto}
                 onSave={(patch) => onPatchEntryField(entry, patch)}
               >
                 <span
@@ -676,6 +690,45 @@ export function UnderwriterQuoteCard({
             )}
           </div>
 
+          {/* Conditional Dynamic Extra Add-ons (rendered ONLY when >=1 quote/CN has one) */}
+          {activeDynamicAddons.map((addon) => {
+            const val = (entry.extra_addons && entry.extra_addons[addon.key]) || "No";
+            const isYes = val === "Yes";
+            return (
+              <div key={addon.key} className="h-8 flex items-center justify-between pt-2">
+                <span className="text-[#6e6e73]">{addon.label}:</span>
+                {onPatchEntryField ? (
+                  <InlineComparisonFieldEditor
+                    field={`extra_addon:${addon.key}`}
+                    label={addon.label}
+                    currentValue={val}
+                    isOverridden={isFieldOverridden("extra_addons")}
+                    onSave={(patch) => onPatchEntryField(entry, patch)}
+                  >
+                    <span className={`font-bold ${isYes ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                      {val}
+                    </span>
+                  </InlineComparisonFieldEditor>
+                ) : (
+                  <span className={`font-bold ${isYes ? "text-emerald-700" : "text-[#6e6e73]"}`}>
+                    {val}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+
+          {onPatchEntryField && (
+            <div className="pt-2 flex items-center justify-between">
+              <span className="text-[10px] text-[#6e6e73] font-semibold">Extra Add-ons:</span>
+              <DynamicAddonsControl
+                currentExtraAddons={entry.extra_addons}
+                catalog={dynamicAddonCatalog}
+                onSetAddon={(key, val) => onPatchEntryField(entry, { extra_addons: { [key]: val } })}
+              />
+            </div>
+          )}
+
           {/* Notes / Endorsements */}
           <div className="pt-2">
             <div className="flex items-center justify-between mb-0.5">
@@ -710,32 +763,31 @@ export function UnderwriterQuoteCard({
       <div className="p-3.5 border-t border-[#e5e5ea] bg-[#f5f5f7]/70 space-y-2 no-print print:hidden">
         {/* Source PDF Viewing Option */}
         {entry.session_id ? (
-          <button
+          <Button
             type="button"
+            variant={isViewingPdf ? "primary" : "secondary"}
+            size="sm"
             onClick={() =>
               onViewPdf({
                 sessionId: entry.session_id!,
                 companyName: entry.company_name,
               })
             }
-            className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer ${isViewingPdf
-                ? "bg-[#1b1717] text-white border border-[#1b1717]"
-                : "bg-white hover:bg-neutral-100 text-[#1b1717] border border-[#e5e5ea]"
-              }`}
+            icon={<FilePdf size={15} weight="bold" className={isViewingPdf ? "text-amber-300" : "text-[#ed1c24]"} />}
+            className={`w-full text-xs ${isViewingPdf ? "bg-[#1b1717] hover:bg-black text-white border-[#1b1717]" : ""}`}
             title="View uploaded underwriter quotation PDF to verify values"
           >
-            <FilePdf size={15} weight="bold" className={isViewingPdf ? "text-amber-300" : "text-[#ed1c24]"} />
             <span>{isViewingPdf ? "Viewing PDF ★" : "View Source PDF"}</span>
-          </button>
+          </Button>
         ) : null}
 
         {/* Winner Selection Button */}
         <Button
           variant={isWinner ? "primary" : "secondary"}
           size="sm"
-          className={`w-full text-xs font-bold transition-all group ${isWinner
+          className={`w-full text-xs group ${isWinner
               ? "bg-[#1b1717] hover:bg-black text-white"
-              : "border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717]"
+              : "bg-white hover:border-[#1b1717] text-[#1b1717]"
             }`}
           loading={selectingWinnerId === entry.id}
           icon={<Star weight={isWinner ? "fill" : "bold"} size={14} className={isWinner ? "text-amber-400" : ""} />}
@@ -758,7 +810,7 @@ export function UnderwriterQuoteCard({
             href={`/sessions/${entry.session_id}/review` as Route}
             target="_blank"
             rel="noopener noreferrer"
-            className={`flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg text-xs font-bold transition-all shadow-2xs ${isWinner
+            className={`flex items-center justify-center gap-1.5 w-full min-h-[32px] py-1.5 px-3 rounded-[var(--rl-radius-sm)] text-xs font-semibold transition-colors ${isWinner
                 ? "text-[#ed1c24] bg-rose-50 hover:bg-rose-100 border border-rose-200"
                 : "text-[#1b1717] bg-white hover:bg-neutral-100 border border-[#e5e5ea]"
               }`}
@@ -769,29 +821,33 @@ export function UnderwriterQuoteCard({
           </Link>
         ) : null}
 
-        {/* Edit Quote Details Button (prominent and always editable) */}
-        <button
+        {/* Edit Quote Details Button */}
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           onClick={() => onEditEntry(entry)}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-semibold bg-white hover:bg-neutral-50 text-[#1b1717] border border-[#e5e5ea] shadow-2xs cursor-pointer transition-colors"
+          icon={<PencilSimple size={13} weight="bold" />}
+          className="w-full text-xs"
           title="Edit underwriter quotation details, sums insured, motor premium, excess, and perils"
         >
-          <PencilSimple size={13} weight="bold" />
           <span>Edit Quote Details</span>
-        </button>
+        </Button>
 
         {/* Promote to Official Issued Cover Note */}
         {entry.session_id && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
+            loading={promotingEntryId === entry.id}
             onClick={() => onPromoteToCovernote(entry)}
-            disabled={promotingEntryId === entry.id}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 cursor-pointer disabled:opacity-50"
+            icon={<CheckCircle size={14} weight="bold" className="text-emerald-700" />}
+            className="w-full text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300"
             title="Promote this underwriter quote to official issued Cover Note"
           >
-            <CheckCircle size={14} weight="bold" className="text-emerald-700" />
             <span>{promotingEntryId === entry.id ? "Promoting..." : "Mark as Issued Cover Note"}</span>
-          </button>
+          </Button>
         )}
 
         <div className="flex items-center justify-between px-1 pt-1 border-t border-neutral-100 mt-1">
