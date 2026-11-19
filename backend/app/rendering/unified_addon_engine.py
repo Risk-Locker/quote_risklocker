@@ -938,17 +938,26 @@ def extract_free_coverage_items(
             return clean_title
         return f"{clean_title} ({clean_val})"
 
+    def _has_manual_value_override(raw: dict[str, Any]) -> bool:
+        if raw.get("has_manual_value_override"):
+            return True
+        for k in ("typed_value_override", "typed_value"):
+            tv = raw.get(k)
+            if isinstance(tv, dict) and (tv.get("type") == "custom" or "display_text" in tv):
+                return True
+        return False
+
     for raw in active_benefits or []:
         if raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
             continue
 
         is_hide_cov = _is_coverage_hidden_or_cleared(raw)
-        has_manual_val_ovr = bool(raw.get("has_manual_value_override"))
+        has_manual_val_ovr = _has_manual_value_override(raw)
 
         if _is_base_towing_card(raw):
             c_title = str(raw.get("label") or raw.get("title") or "Emergency Towing Assistance").strip()
             c_val = "" if is_hide_cov else str(raw.get("value") or raw.get("display_value") or raw.get("coverage_limit") or "").strip()
-            if is_hide_cov:
+            if is_hide_cov or has_manual_val_ovr:
                 c_title = _strip_trailing_metric_parens(c_title)
             c_desc = str(raw.get("description") or raw.get("short_description") or "").strip()
             has_manual_override = bool(
@@ -993,8 +1002,11 @@ def extract_free_coverage_items(
             title = _strip_trailing_metric_parens(title)
         elif has_manual_val_ovr:
             c_val = str(raw.get("value") or "").strip()
-            if c_val and len(c_val) <= 40 and c_val.lower() not in title.lower():
-                title = f"{_strip_trailing_metric_parens(title)} ({c_val})"
+            clean_base = _strip_trailing_metric_parens(title)
+            if c_val and len(c_val) <= 40 and c_val.lower() not in clean_base.lower():
+                title = f"{clean_base} ({c_val})"
+            else:
+                title = clean_base
         norm_title = _normalize_benefit_code(title)
         if norm_title in seen_titles:
             continue

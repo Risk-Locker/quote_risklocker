@@ -361,8 +361,8 @@ export function BenefitsManagerPanel({
               </div>
             </div>
 
-            {/* Inclusions List - Clean cards with 1-click movement */}
-            <div className={`grid ${layoutMode === "side_by_side" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"} gap-2.5 max-h-[460px] overflow-y-auto pr-1`}>
+            {/* Inclusions List - Spacious cards */}
+            <div className={`grid ${layoutMode === "side_by_side" ? "grid-cols-1 gap-3" : "grid-cols-1 xl:grid-cols-2 gap-3.5"} max-h-[780px] overflow-y-auto pr-1`}>
               {filteredFocCards.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center p-6 text-center text-xs text-[var(--rl-text-muted)]">
                   {searchQuery ? (
@@ -522,7 +522,7 @@ export function BenefitsManagerPanel({
             )}
 
             {/* Matrix Addons Grid - Both Selected (Floated to Top) and Optional */}
-            <div className={`grid ${layoutMode === "side_by_side" ? "grid-cols-1 2xl:grid-cols-2" : "grid-cols-1 md:grid-cols-2"} gap-3 max-h-[460px] overflow-y-auto pr-1`}>
+            <div className={`grid ${layoutMode === "side_by_side" ? "grid-cols-1 gap-3" : "grid-cols-1 xl:grid-cols-2 gap-3.5"} max-h-[780px] overflow-y-auto pr-1`}>
               {filteredPurchasedAddons.length === 0 && filteredAddonCards.length === 0 ? (
                 <div className="col-span-full flex flex-col items-center justify-center p-8 text-center text-xs text-[var(--rl-text-muted)]">
                   {searchQuery ? (

@@ -228,21 +228,19 @@ def render_design2_html(
             else '<div style="width: 10px; height: 10px; border: 1.6px solid #677184; border-radius: 1.5px; background: #FFFFFF;"></div>'
         )
 
-        desc_clamp = 2
-
         addon_grid_html += f"""
         <div class="d2-card">
             <div style="flex: 0 0 36px; display: flex; align-items: center; justify-content: center; padding-left: 2px;">
                 {icon_media_html}
             </div>
-            <div style="flex: 1; min-width: 0; padding: 4px 5px 3px 2px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
-                <div style="min-height: 0; overflow: hidden;">
+            <div style="flex: 1; min-width: 0; padding: 3.5px 5px 3px 2px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="min-height: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2px;">
-                        <div style="font-size: 10.0px; font-weight: 600; color: #0F172A; line-height: 1.14; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{title}</div>
+                        <div style="font-size: 10.0px; font-weight: 600; color: #0F172A; line-height: 1.14; word-break: break-word;">{title}</div>
                         <div style="font-size: 8.1px; font-weight: 600; color: #475569; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
                     </div>
-                    {f'<div style="font-size: 9.1px; font-weight: 600; color: #15803D; margin-top: 1px; line-height: 1.12; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{val}</div>' if val else ''}
-                    {f'<div style="font-size: 8.6px; font-weight: 400; color: #334155; line-height: 1.18; margin-top: 1px; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: {desc_clamp}; -webkit-box-orient: vertical;">{desc}</div>' if desc else ''}
+                    {f'<div style="font-size: 9.1px; font-weight: 600; color: #15803D; margin-top: 1px; line-height: 1.12; word-break: break-word;">{val}</div>' if val else ''}
+                    {f'<div style="font-size: 8.6px; font-weight: 400; color: #334155; line-height: 1.15; margin-top: 1px; word-break: break-word; white-space: normal;">{desc}</div>' if desc else ''}
                 </div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: auto; padding-top: 1px; flex-shrink: 0;">
                     {indicator_html}
@@ -395,8 +393,8 @@ body {{
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.045);
     display: flex;
     align-items: stretch;
-    height: 73px;
-    overflow: hidden;
+    min-height: 68px;
+    height: auto;
 }}
 </style>
 </head>
@@ -511,7 +509,7 @@ body {{
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6.5px 7px;">
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: minmax(68px, auto); gap: 5px 6.5px;">
                 {addon_grid_html}
             </div>
             {overflow_banner}

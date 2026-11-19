@@ -652,20 +652,33 @@ def get_runner_fee_default(db: Session) -> float:
     setting = db.get(AppSetting, "default_runner_fee")
     if not setting or not isinstance(setting.value, dict):
         return 20.0
-    return float(setting.value.get("amount", 20.0))
+    try:
+        val = float(setting.value.get("amount", 20.0))
+        return val if val >= 0 else 20.0
+    except (TypeError, ValueError):
+        return 20.0
 
 
 def set_runner_fee_default(db: Session, user, amount: float) -> float:
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
     require_admin(user)
+    try:
+        dec = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise AppError("Runner fee default must be a valid amount.", 422) from exc
+    if dec < Decimal("0.00") or dec > Decimal("10000.00"):
+        raise AppError("Runner fee default must be between RM 0.00 and RM 10,000.00.", 422)
+    clean_amount = float(dec)
     setting = db.get(AppSetting, "default_runner_fee")
     if not setting:
-        setting = AppSetting(key="default_runner_fee", value={"amount": amount, "currency": "MYR"})
+        setting = AppSetting(key="default_runner_fee", value={"amount": clean_amount, "currency": "MYR"})
         db.add(setting)
     else:
-        setting.value = {"amount": amount, "currency": "MYR"}
+        setting.value = {"amount": clean_amount, "currency": "MYR"}
     db.commit()
     db.refresh(setting)
-    return amount
+    return clean_amount
 
 
 def get_bulk_upload_limit(db: Session | Any) -> int:

@@ -95,18 +95,18 @@ export function IncludedCard({
     if (selectionId && !pending) {
       onQueue(
         { op: "benefit_update", selection_id: selectionId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
-        `benefits.${selectionId}.hide_limit`
+        `benefits.${selectionId}.limit`
       );
     } else if (card.offering_id) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
-        `benefits.offer.${card.offering_id}`
+        `benefits.offer.${card.offering_id}.limit`
       );
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue(
         { op: "benefit_update", selection_id: targetId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
-        `benefits.${targetId}.hide_limit`
+        `benefits.${targetId}.limit`
       );
     }
   };
@@ -119,7 +119,7 @@ export function IncludedCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, label: clean }, `benefits.${selectionId}.label`);
     } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, label: clean }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, label: clean }, `benefits.offer.${card.offering_id}.label`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, label: clean }, `benefits.${targetId}.label`);
@@ -145,7 +145,7 @@ export function IncludedCard({
     } else if (card.offering_id) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
-        `benefits.offer.${card.offering_id}`
+        `benefits.offer.${card.offering_id}.limit`
       );
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
@@ -351,27 +351,27 @@ export function IncludedCard({
   const handleRemove = () => setConfirmRemoveOpen(true);
 
   return (
-    <article className={`group flex items-start justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border p-2.5 shadow-xs transition-all ${card.is_detected
+    <article className={`group flex items-start justify-between gap-3.5 rounded-[var(--rl-radius-sm)] border p-4 shadow-xs transition-all ${card.is_detected
       ? "border-amber-300 bg-amber-50/50 ring-1 ring-amber-300/60"
       : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
       }`}>
       {/* Left: index + image */}
-      <div className="flex items-start gap-2 shrink-0">
-        <span className="flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)] mt-0.5">
+      <div className="flex items-start gap-2.5 shrink-0">
+        <span className="flex h-8 min-w-8 px-1.5 items-center justify-center rounded bg-neutral-100 font-mono text-[16px] font-bold text-[var(--rl-text-muted)] mt-0.5">
           #{index + 1}
         </span>
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
+        <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
           {assetUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={fileUrl(assetUrl)} alt={card.label} className="h-full w-full object-contain" />
           ) : (
-            <Sparkle size={18} className="text-[var(--rl-text-muted)]" />
+            <Sparkle size={22} className="text-[var(--rl-text-muted)]" />
           )}
         </div>
       </div>
       {/* Body: title, detected badge, value, description, price */}
-      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-        <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
           {isEditingTitle ? (
             <input
               type="text"
@@ -383,42 +383,42 @@ export function IncludedCard({
                 if (e.key === "Enter") handleTitleCommit(titleInput);
                 if (e.key === "Escape") { setIsEditingTitle(false); setTitleInput(card.label); }
               }}
-              className="h-5 w-full rounded border border-[var(--rl-black)] px-1.5 font-bold text-xs text-[var(--rl-text-strong)] focus:outline-none"
+              className="h-8 w-full rounded border border-[var(--rl-black)] px-2 font-bold text-[20px] text-[var(--rl-text-strong)] focus:outline-none"
             />
           ) : (
-            <div className="group/title flex items-center gap-1 max-w-full">
-              <h3 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight break-words">{card.label}</h3>
+            <div className="group/title flex items-center gap-1.5 max-w-full">
+              <h3 className="text-[20px] font-bold text-[var(--rl-text-strong)] leading-snug break-words">{card.label}</h3>
               <button
                 type="button"
                 onClick={() => setIsEditingTitle(true)}
-                className="opacity-70 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer shrink-0"
+                className="opacity-70 group-hover/title:opacity-100 p-1 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity cursor-pointer shrink-0"
                 title="Edit title"
               >
-                <PencilSimple size={10} />
+                <PencilSimple size={15} />
               </button>
             </div>
           )}
           {card.is_detected ? (
-            <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[12px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
           ) : null}
           {card.cost_status === "unknown" ? (
             <span
-              className="rounded bg-amber-50 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-800 shrink-0 flex items-center gap-0.5"
+              className="rounded bg-amber-50 border border-amber-300 px-1.5 py-0.5 text-[12px] font-bold text-amber-800 shrink-0 flex items-center gap-0.5"
               title="Unclassified cost status from source quotation: Review whether this is Free/Included or a Paid add-on"
             >
               ⚠️ Review Cost
             </span>
           ) : null}
           {savedField ? (
-            <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5">
-              <Check size={10} weight="bold" /> Saved
+            <span className="text-[13px] font-bold text-emerald-600 flex items-center gap-0.5">
+              <Check size={14} weight="bold" /> Saved
             </span>
           ) : null}
         </div>
 
         {/* Coverage Limit: Editable, Hideable, and Removable for all Box 1 & Box 2 cards */}
-        <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-[11px]">
-          <span className="text-[10px] font-semibold text-[var(--rl-text-muted)]">Coverage:</span>
+        <div className="flex items-center gap-2 flex-wrap mt-0.5 text-[18px]">
+          <span className="text-[18px] font-semibold text-[var(--rl-text-muted)]">Coverage:</span>
           {isEditingLimit ? (
             <input
               type="text"
@@ -431,14 +431,14 @@ export function IncludedCard({
                 if (e.key === "Enter") handleLimitCommit(limitInput);
                 if (e.key === "Escape") { setIsEditingLimit(false); setLimitInput(displayLimitVal || ""); }
               }}
-              className="h-5 w-40 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+              className="h-8 w-56 rounded border border-[var(--rl-black)] px-2 font-mono text-[18px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
             />
           ) : displayLimitVal && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional", "Standard"].includes(displayLimitVal) ? (
-            <div className="group/limit flex items-center gap-1 flex-wrap">
+            <div className="group/limit flex items-center gap-1.5 flex-wrap">
               <button
                 type="button"
                 onClick={() => setIsEditingLimit(true)}
-                className={`text-[11px] font-bold leading-tight break-words text-left transition-colors cursor-pointer hover:underline ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[#5ABA00]"}`}
+                className={`text-[18px] font-bold leading-snug break-words text-left transition-colors cursor-pointer hover:underline ${isLimitHidden ? "text-[var(--rl-text-muted)] line-through" : "text-[#5ABA00]"}`}
                 title="Click to edit coverage amount"
               >
                 {displayLimitVal}
@@ -446,37 +446,37 @@ export function IncludedCard({
               <button
                 type="button"
                 onClick={() => setIsEditingLimit(true)}
-                className="p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-colors cursor-pointer"
+                className="p-1 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-colors cursor-pointer"
                 title="Edit coverage amount"
               >
-                <PencilSimple size={10} />
+                <PencilSimple size={15} />
               </button>
               <button
                 type="button"
                 onClick={handleToggleCoverageVisibility}
-                className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
+                className={`p-1 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
                 title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
               >
-                {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
+                {isLimitHidden ? <EyeSlash size={16} weight="bold" /> : <Eye size={16} />}
               </button>
               <button
                 type="button"
                 onClick={handleRemoveCoverage}
-                className="p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors cursor-pointer"
+                className="p-1 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors cursor-pointer"
                 title="Remove coverage amount"
                 aria-label="Remove coverage amount"
               >
-                <X size={10} weight="bold" />
+                <X size={15} weight="bold" />
               </button>
             </div>
           ) : (
             <button
               type="button"
               onClick={() => { setLimitInput(""); setIsEditingLimit(true); }}
-              className="text-[10px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors cursor-pointer"
+              className="text-[16px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-1 transition-colors cursor-pointer"
               title="Set coverage amount"
             >
-              <PencilSimple size={9} />
+              <PencilSimple size={14} />
               <span>+ Coverage</span>
             </button>
           )}
@@ -494,40 +494,40 @@ export function IncludedCard({
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleDescCommit(descInput); }
               if (e.key === "Escape") { setIsEditingDesc(false); setDescInput(card.description || ""); }
             }}
-            className="w-full rounded border border-[var(--rl-black)] p-1 text-[10px] text-[var(--rl-text-strong)] leading-snug focus:outline-none mt-0.5"
+            className="w-full rounded border border-[var(--rl-black)] p-1.5 text-[17px] text-[var(--rl-text-strong)] leading-relaxed focus:outline-none mt-0.5"
           />
         ) : card.description ? (
-          <div className="group/desc flex items-start gap-1 mt-0.5">
-            <p className="text-[10px] text-[var(--rl-text-muted)] leading-snug break-words whitespace-normal flex-1">
+          <div className="group/desc flex items-start gap-1.5 mt-0.5">
+            <p className="text-[17px] text-[var(--rl-text-muted)] leading-relaxed break-words whitespace-normal flex-1">
               {card.description}
             </p>
             <button
               type="button"
               onClick={() => setIsEditingDesc(true)}
-              className="opacity-70 group-hover/desc:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity shrink-0 mt-0.5 cursor-pointer"
+              className="opacity-70 group-hover/desc:opacity-100 p-1 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60 transition-opacity shrink-0 mt-0.5 cursor-pointer"
               title="Edit description"
             >
-              <PencilSimple size={10} />
+              <PencilSimple size={15} />
             </button>
           </div>
         ) : (
           <button
             type="button"
             onClick={() => setIsEditingDesc(true)}
-            className="text-[9px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors mt-0.5 cursor-pointer"
+            className="text-[15px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-1 transition-colors mt-0.5 cursor-pointer"
             title="Add description"
           >
-            <PencilSimple size={9} />
+            <PencilSimple size={14} />
             <span>+ Description</span>
           </button>
         )}
 
         {/* Price Tag & Revert Controls for Included/Purchased Add-ons */}
         {(currentPriceNum !== null || Boolean((card as any).is_extra) || card.cost_status === "paid") && (
-          <div className="flex items-center gap-1.5 mt-1">
+          <div className="flex items-center gap-2 mt-1">
             {isEditingPrice ? (
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-bold text-[var(--rl-text-muted)]">RM</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[16px] font-bold text-[var(--rl-text-muted)]">RM</span>
                 <input
                   type="number"
                   step="any"
@@ -540,19 +540,19 @@ export function IncludedCard({
                     if (e.key === "Enter") handlePriceCommit(priceInput);
                     if (e.key === "Escape") { setIsEditingPrice(false); setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : ""); }
                   }}
-                  className="h-5 w-16 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+                  className="h-8 w-24 rounded border border-[var(--rl-black)] px-2 font-mono text-[16px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
                 />
               </div>
             ) : (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setIsEditingPrice(true)}
-                  className={`group/price flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${currentPriceNum !== null ? "bg-amber-100/80 hover:bg-amber-200 text-amber-900" : "bg-neutral-100 hover:bg-neutral-200 text-neutral-600"}`}
+                  className={`group/price flex items-center gap-1.5 rounded px-2 py-0.5 text-[16px] font-bold transition-colors ${currentPriceNum !== null ? "bg-amber-100/80 hover:bg-amber-200 text-amber-900" : "bg-neutral-100 hover:bg-neutral-200 text-neutral-600"}`}
                   title="Click to edit price (clear or 0 for FOC)"
                 >
                   <span>{currentPriceNum !== null ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "FOC / Free"}</span>
-                  <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-black)]" />
+                  <PencilSimple size={14} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-black)]" />
                 </button>
               </div>
             )}
@@ -560,10 +560,10 @@ export function IncludedCard({
               <button
                 type="button"
                 onClick={handleRevertPrice}
-                className="flex items-center gap-0.5 rounded bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 text-[9px] font-semibold text-gray-600 transition-colors"
+                className="flex items-center gap-1 rounded bg-gray-100 hover:bg-gray-200 px-2 py-0.5 text-[14px] font-semibold text-gray-600 transition-colors"
                 title={`Revert to initial catalog price (RM ${initialPriceNum})`}
               >
-                <ArrowCounterClockwise size={10} weight="bold" />
+                <ArrowCounterClockwise size={14} weight="bold" />
                 <span>Revert (RM {initialPriceNum})</span>
               </button>
             ) : null}
@@ -574,20 +574,12 @@ export function IncludedCard({
       <div className="flex items-center gap-1 shrink-0 mt-0.5">
         <button
           type="button"
-          onClick={handleMakePaid}
-          className="flex items-center gap-0.5 rounded-[var(--rl-radius-sm)] bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors cursor-pointer"
-          title="Move this benefit to Box 2: Add-On Upgrades (TO Add-on Matrix)"
-        >
-          <span>➔ TO addon</span>
-        </button>
-        <button
-          type="button"
           aria-label={`Remove ${card.label} from this quotation`}
           onClick={handleRemove}
-          className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
+          className="rounded p-1.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
           title="Remove benefit completely"
         >
-          <X size={14} weight="bold" />
+          <X size={18} weight="bold" />
         </button>
       </div>
       <ConfirmDialog
@@ -1227,18 +1219,18 @@ export function MatrixAddonCard({
     if (selectionId && !pending) {
       onQueue(
         { op: "benefit_update", selection_id: selectionId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
-        `benefits.${selectionId}.hide_limit`
+        `benefits.${selectionId}.limit`
       );
     } else if (card.offering_id) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
-        `benefits.offer.${card.offering_id}`
+        `benefits.offer.${card.offering_id}.limit`
       );
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue(
         { op: "benefit_update", selection_id: targetId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
-        `benefits.${targetId}.hide_limit`
+        `benefits.${targetId}.limit`
       );
     }
   };
@@ -1251,7 +1243,7 @@ export function MatrixAddonCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, label: clean }, `benefits.${selectionId}.label`);
     } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, label: clean }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, label: clean }, `benefits.offer.${card.offering_id}.label`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, label: clean }, `benefits.${targetId}.label`);
@@ -1277,7 +1269,7 @@ export function MatrixAddonCard({
     } else if (card.offering_id) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
-        `benefits.offer.${card.offering_id}`
+        `benefits.offer.${card.offering_id}.limit`
       );
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
@@ -1420,7 +1412,7 @@ export function MatrixAddonCard({
 
   return (
     <article
-      className={`group flex items-start gap-3 rounded-[var(--rl-radius-sm)] border p-3 shadow-xs transition-all ${
+      className={`group flex items-start gap-3.5 rounded-[var(--rl-radius-sm)] border p-4 shadow-xs transition-all ${
         isSelected
           ? "border-emerald-300 bg-emerald-50/40 ring-1 ring-emerald-400/40"
           : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
@@ -1430,39 +1422,39 @@ export function MatrixAddonCard({
       <button
         type="button"
         onClick={() => onToggleSelect(!isSelected)}
-        className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md transition-transform hover:scale-105 cursor-pointer"
+        className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md transition-transform hover:scale-105 cursor-pointer"
         title={isSelected ? "Ticked on Quote (Click to untick)" : "Unticked (Click to tick and push to top #01)"}
       >
         {isSelected ? (
-          <div className="flex size-6 items-center justify-center rounded-full bg-[#5ABA00] text-white shadow-xs">
-            <Check size={14} weight="bold" />
+          <div className="flex size-7 items-center justify-center rounded-full bg-[#5ABA00] text-white shadow-xs">
+            <Check size={16} weight="bold" />
           </div>
         ) : (
-          <div className="size-5 rounded-md border-2 border-neutral-400 bg-white hover:border-[#5ABA00] transition-colors" />
+          <div className="size-6 rounded-md border-2 border-neutral-400 bg-white hover:border-[#5ABA00] transition-colors" />
         )}
       </button>
 
       {/* 2. Number + Asset Media */}
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-2.5 shrink-0">
         <span
-          className={`flex h-6 min-w-6 px-1 items-center justify-center rounded font-mono text-[11px] font-bold ${
+          className={`flex h-8 min-w-8 px-1.5 items-center justify-center rounded font-mono text-[16px] font-bold ${
             isSelected ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-600"
           }`}
         >
           #{serialStr}
         </span>
-        <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
+        <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
           {assetUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={fileUrl(assetUrl)} alt={card.label} className="size-full object-contain" />
           ) : (
-            <Sparkle size={18} className={isSelected ? "text-emerald-600" : "text-[var(--rl-text-muted)]"} />
+            <Sparkle size={22} className={isSelected ? "text-emerald-600" : "text-[var(--rl-text-muted)]"} />
           )}
         </div>
       </div>
 
       {/* 3. Middle Body: Title, Limit, Price, Description */}
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
         {/* Title Row */}
         <div className="flex items-center gap-2 flex-wrap">
           {isEditingTitle ? (
@@ -1476,47 +1468,47 @@ export function MatrixAddonCard({
                 if (e.key === "Enter") handleTitleCommit(titleInput);
                 if (e.key === "Escape") { setIsEditingTitle(false); setTitleInput(card.label); }
               }}
-              className="h-6 w-full max-w-sm rounded border border-[var(--rl-black)] px-1.5 font-bold text-xs text-[var(--rl-text-strong)] focus:outline-none"
+              className="h-8 w-full max-w-md rounded border border-[var(--rl-black)] px-2 font-bold text-[20px] text-[var(--rl-text-strong)] focus:outline-none"
             />
           ) : (
             <div className="group/title flex items-center gap-1.5 max-w-full">
-              <h4 className="text-xs font-bold text-[var(--rl-text-strong)] leading-tight break-words">
+              <h4 className="text-[20px] font-bold text-[var(--rl-text-strong)] leading-snug break-words">
                 {card.label}
               </h4>
               <button
                 type="button"
                 onClick={() => setIsEditingTitle(true)}
-                className="opacity-70 group-hover/title:opacity-100 p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity cursor-pointer shrink-0"
+                className="opacity-70 group-hover/title:opacity-100 p-1 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity cursor-pointer shrink-0"
                 title="Edit title"
               >
-                <PencilSimple size={11} />
+                <PencilSimple size={15} />
               </button>
             </div>
           )}
 
           {isSelected && (
-            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800 shrink-0">
+            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[12px] font-bold text-emerald-800 shrink-0">
               ✔ Ticked on Quote
             </span>
           )}
 
           {card.is_detected && (
-            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800 shrink-0">
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[12px] font-bold text-amber-800 shrink-0">
               ★ Detected
             </span>
           )}
 
           {savedField && (
-            <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5">
-              <Check size={10} weight="bold" /> Saved
+            <span className="text-[13px] font-bold text-emerald-600 flex items-center gap-0.5">
+              <Check size={14} weight="bold" /> Saved
             </span>
           )}
         </div>
 
         {/* Coverage Limit & Price Row (Spacious & Clean) */}
-        <div className="flex items-center gap-3 flex-wrap text-xs">
+        <div className="flex items-center gap-4 flex-wrap text-[18px]">
           {/* Coverage Limit */}
-          <div className="flex items-center gap-1 text-[11px] flex-wrap">
+          <div className="flex items-center gap-1.5 text-[18px] flex-wrap">
             <span className="font-semibold text-[var(--rl-text-muted)]">Coverage:</span>
             {isEditingLimit ? (
               <input
@@ -1530,10 +1522,10 @@ export function MatrixAddonCard({
                   if (e.key === "Enter") handleLimitCommit(limitInput);
                   if (e.key === "Escape") { setIsEditingLimit(false); setLimitInput(displayLimitVal || ""); }
                 }}
-                className="h-5 w-32 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+                className="h-8 w-52 rounded border border-[var(--rl-black)] px-2 font-mono text-[18px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
               />
             ) : displayLimitVal && !["", "Included standard cover", "Included", "FOC", "As quoted", "Optional", "Standard"].includes(displayLimitVal) ? (
-              <div className="group/limit flex items-center gap-1 flex-wrap">
+              <div className="group/limit flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={() => setIsEditingLimit(true)}
@@ -1545,48 +1537,48 @@ export function MatrixAddonCard({
                 <button
                   type="button"
                   onClick={() => setIsEditingLimit(true)}
-                  className="p-0.5 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-colors cursor-pointer"
+                  className="p-1 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-colors cursor-pointer"
                   title="Edit coverage limit"
                 >
-                  <PencilSimple size={10} />
+                  <PencilSimple size={15} />
                 </button>
                 <button
                   type="button"
                   onClick={handleToggleCoverageVisibility}
-                  className={`p-0.5 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
+                  className={`p-1 rounded transition-colors cursor-pointer ${isLimitHidden ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] hover:bg-neutral-200/60"}`}
                   title={isLimitHidden ? "Coverage is hidden on quotation (click to show)" : "Hide coverage on quotation"}
                 >
-                  {isLimitHidden ? <EyeSlash size={11} weight="bold" /> : <Eye size={11} />}
+                  {isLimitHidden ? <EyeSlash size={16} weight="bold" /> : <Eye size={16} />}
                 </button>
                 <button
                   type="button"
                   onClick={handleRemoveCoverage}
-                  className="p-0.5 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors cursor-pointer"
+                  className="p-1 rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] hover:bg-[var(--rl-red-light)] transition-colors cursor-pointer"
                   title="Remove coverage amount"
                   aria-label="Remove coverage amount"
                 >
-                  <X size={10} weight="bold" />
+                  <X size={15} weight="bold" />
                 </button>
               </div>
             ) : (
               <button
                 type="button"
                 onClick={() => { setLimitInput(""); setIsEditingLimit(true); }}
-                className="text-[10px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors cursor-pointer"
+                className="text-[16px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-1 transition-colors cursor-pointer"
                 title="Set coverage amount"
               >
-                <PencilSimple size={9} />
+                <PencilSimple size={14} />
                 <span>+ Coverage</span>
               </button>
             )}
           </div>
 
           {/* Premium Price */}
-          <div className="flex items-center gap-1 text-[11px]">
+          <div className="flex items-center gap-1.5 text-[16px]">
             <span className="font-semibold text-[var(--rl-text-muted)]">Price:</span>
             {isEditingPrice ? (
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-bold text-[var(--rl-text-muted)]">RM</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[16px] font-bold text-[var(--rl-text-muted)]">RM</span>
                 <input
                   type="number"
                   step="any"
@@ -1599,15 +1591,15 @@ export function MatrixAddonCard({
                     if (e.key === "Enter") handlePriceCommit(priceInput);
                     if (e.key === "Escape") { setIsEditingPrice(false); setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : ""); }
                   }}
-                  className="h-5 w-20 rounded border border-[var(--rl-black)] px-1 font-mono text-[11px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+                  className="h-8 w-24 rounded border border-[var(--rl-black)] px-2 font-mono text-[16px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
                 />
               </div>
             ) : (
-              <div className="group/price flex items-center gap-1">
+              <div className="group/price flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setIsEditingPrice(true)}
-                  className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono font-bold transition-colors ${
+                  className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-[16px] font-mono font-bold transition-colors ${
                     isSelected
                       ? currentPriceNum !== null && currentPriceNum > 0
                         ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
@@ -1623,16 +1615,16 @@ export function MatrixAddonCard({
                       ? "FOC / Free"
                       : "+ Set Price"}
                   </span>
-                  <PencilSimple size={10} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-black)]" />
+                  <PencilSimple size={14} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-black)]" />
                 </button>
                 {hasPriceDiff && (
                   <button
                     type="button"
                     onClick={handleRevertPrice}
-                    className="flex items-center gap-0.5 rounded bg-gray-100 hover:bg-gray-200 px-1 py-0.5 text-[9px] font-semibold text-gray-600 transition-colors"
+                    className="flex items-center gap-1 rounded bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 text-[14px] font-semibold text-gray-600 transition-colors"
                     title={`Revert to initial catalog price (RM ${initialPriceNum})`}
                   >
-                    <ArrowCounterClockwise size={10} weight="bold" />
+                    <ArrowCounterClockwise size={14} weight="bold" />
                     <span>Revert</span>
                   </button>
                 )}
@@ -1653,53 +1645,45 @@ export function MatrixAddonCard({
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleDescCommit(descInput); }
               if (e.key === "Escape") { setIsEditingDesc(false); setDescInput(card.description || ""); }
             }}
-            className="w-full rounded border border-[var(--rl-black)] p-1 text-[11px] text-[var(--rl-text-strong)] leading-snug focus:outline-none"
+            className="w-full rounded border border-[var(--rl-black)] p-1.5 text-[17px] text-[var(--rl-text-strong)] leading-relaxed focus:outline-none"
           />
         ) : card.description ? (
-          <div className="group/desc flex items-start gap-1">
-            <p className="text-[11px] text-[var(--rl-text-muted)] leading-relaxed break-words whitespace-normal flex-1">
+          <div className="group/desc flex items-start gap-1.5">
+            <p className="text-[17px] text-[var(--rl-text-muted)] leading-relaxed break-words whitespace-normal flex-1">
               {card.description}
             </p>
             <button
               type="button"
               onClick={() => setIsEditingDesc(true)}
-              className="opacity-70 group-hover/desc:opacity-100 p-0.5 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity shrink-0 cursor-pointer"
+              className="opacity-70 group-hover/desc:opacity-100 p-1 text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] transition-opacity shrink-0 cursor-pointer"
               title="Edit description"
             >
-              <PencilSimple size={10} />
+              <PencilSimple size={15} />
             </button>
           </div>
         ) : (
           <button
             type="button"
             onClick={() => setIsEditingDesc(true)}
-            className="text-[10px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-0.5 transition-colors cursor-pointer"
+            className="text-[15px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-1 transition-colors cursor-pointer"
             title="Add description"
           >
-            <PencilSimple size={10} />
+            <PencilSimple size={14} />
             <span>+ Description</span>
           </button>
         )}
       </div>
 
-      {/* 4. Action Buttons: Move to Free Coverage + Delete */}
+      {/* 4. Action Button: Delete */}
       <div className="flex items-center gap-1 shrink-0 self-start">
-        <button
-          type="button"
-          onClick={handleMakeFoc}
-          className="flex items-center gap-0.5 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 transition-colors cursor-pointer"
-          title="Move this benefit to Box 1: Complimentary & Default Inclusions (Free Added Coverage)"
-        >
-          <span>⬅ Free Coverage</span>
-        </button>
         <button
           type="button"
           aria-label={`Remove ${card.label}`}
           onClick={handleRemove}
-          className="rounded p-1 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
+          className="rounded p-1.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
           title="Remove add-on completely"
         >
-          <X size={15} weight="bold" />
+          <X size={18} weight="bold" />
         </button>
       </div>
       <ConfirmDialog

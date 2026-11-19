@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import current_user
 from app.db.session import get_db
 from app.models.tables import User
+from app.services.realtime_hub import publish_realtime_update
 from app.services.pic_service import (
     create_pic,
     delete_pic,
@@ -76,6 +77,7 @@ def add_pic(
         is_owner=payload.is_owner,
         notes=payload.notes,
     )
+    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="PIC created", extra_scopes=("clients",))
     return {
         "id": pic.id,
         "name": pic.name,
@@ -126,6 +128,7 @@ def update_single_pic(
     )
     if not pic:
         raise HTTPException(status_code=404, detail="Person in charge not found")
+    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="PIC updated", extra_scopes=("clients",))
     return {
         "id": pic.id,
         "name": pic.name,
@@ -150,4 +153,5 @@ def remove_pic(
     success = delete_pic(db, pic_id)
     if not success:
         raise HTTPException(status_code=404, detail="Person in charge not found")
+    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="PIC deleted", extra_scopes=("clients",))
     return {"ok": True}

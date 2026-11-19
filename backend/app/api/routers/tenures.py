@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import current_user
 from app.db.session import get_db
+from app.services.realtime_hub import publish_realtime_update
 from app.models.tables import (
     CustomerAccount,
     InsuranceTenure,
@@ -219,6 +220,7 @@ def create_tenure(
             tenure.tracked_vehicle.engine_no = payload.engine_no.strip()
 
     db.commit()
+    publish_realtime_update(scope="ledger", resource_id=tenure.id, actor=user, summary="Tenure created")
     return {
         "id": tenure.id,
         "tenure": {
@@ -1208,6 +1210,13 @@ def update_tenure_ledger_fields(
 
     tenure.last_activity_at = now
     db.commit()
+    publish_realtime_update(
+        scope="ledger",
+        resource_id=tenure.id,
+        actor=user,
+        summary="Ledger fields updated",
+        extra_scopes=("comparison",),
+    )
     return {"success": True, "id": tenure.id, "stage": tenure.stage, "is_main": tenure.is_main}
 
 
@@ -1235,6 +1244,7 @@ def bulk_confirm_hit(
             updated_ids.append(t.id)
 
     db.commit()
+    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="Bulk confirmed hit")
     return {"success": True, "updated_count": len(updated_ids), "updated_ids": updated_ids}
 
 
@@ -1266,6 +1276,7 @@ def set_tenure_as_main(
 
     db.commit()
     db.refresh(tenure)
+    publish_realtime_update(scope="ledger", resource_id=tenure.id, actor=user, summary="Main policy updated")
     return {"status": "success", "tenure_id": tenure.id, "is_main": tenure.is_main}
 
 
@@ -1430,6 +1441,7 @@ def bulk_delete_tenures(
         deleted_ids.append(tid)
 
     db.commit()
+    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="Tenures deleted", extra_scopes=("comparison",))
     return {"success": True, "deleted_count": len(deleted_ids), "deleted_ids": deleted_ids}
 
 
@@ -1455,6 +1467,7 @@ def delete_tenure_endpoint(
 
     db.delete(tenure)
     db.commit()
+    publish_realtime_update(scope="ledger", resource_id=tenure_id, actor=user, summary="Tenure deleted", extra_scopes=("comparison",))
     return {"success": True, "deleted_tenure_id": tenure_id}
 
 
@@ -1549,6 +1562,7 @@ def update_tenure_outcome(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    publish_realtime_update(scope="ledger", resource_id=tenure_id, actor=user, summary="Tenure outcome updated", extra_scopes=("comparison",))
     return {
         "success": True,
         "tenure": get_tenure_timeline(db, tenure_id),
@@ -1590,6 +1604,7 @@ def shift_tenure_coverage_dates(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    publish_realtime_update(scope="ledger", resource_id=updated.id, actor=user, summary="Coverage dates shifted", extra_scopes=("comparison",))
     return {
         "success": True,
         "tenure": get_tenure_timeline(db, updated.id),
@@ -1615,6 +1630,7 @@ def lapse_tenure(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    publish_realtime_update(scope="ledger", resource_id=lapsed.id, actor=user, summary="Tenure marked lapsed", extra_scopes=("comparison",))
     return {
         "success": True,
         "tenure": get_tenure_timeline(db, lapsed.id),

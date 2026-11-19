@@ -291,6 +291,8 @@ def resolve_or_create_tenure(
         expected_start = prev_end + timedelta(days=1)
         delay_days = max(0, (start_dt - expected_start).days)
 
+    from app.services.admin_service import get_runner_fee_default
+
     # 3. Create new InsuranceTenure
     tenure = InsuranceTenure(
         id=new_id(),
@@ -306,6 +308,7 @@ def resolve_or_create_tenure(
         previous_tenure_id=prev_id,
         tenure_chain_id=chain_id,
         delay_days=delay_days,
+        runner_fee=get_runner_fee_default(db),
         reminder_window_start=start_dt - timedelta(days=90),
         created_by_id=created_by_id,
     )
@@ -739,6 +742,8 @@ def create_next_year_renewal_tenure(
         car_model=getattr(_tv, "car_model", None) if _tv else None,
         capacity_str=getattr(_tv, "engine_cc", None) if _tv else None,
     )
+    from app.services.admin_service import get_runner_fee_default
+
     now = datetime.now(timezone.utc)
     next_tenure = InsuranceTenure(
         id=new_id(),
@@ -756,7 +761,7 @@ def create_next_year_renewal_tenure(
         previous_tenure_id=tenure.id,
         tenure_chain_id=tenure.tenure_chain_id,
         road_tax=0.0 if _is_comm_renew else float(tenure.road_tax or 0.0),
-        runner_fee=0.0 if _is_comm_renew else float(tenure.runner_fee or 0.0),
+        runner_fee=0.0 if _is_comm_renew else (float(tenure.runner_fee) if (tenure.runner_fee is not None and float(tenure.runner_fee) > 0) else get_runner_fee_default(db)),
         include_road_tax=False if _is_comm_renew else tenure.include_road_tax,
         include_runner_fee=False if _is_comm_renew else tenure.include_runner_fee,
         pic_id=tenure.pic_id,
@@ -829,8 +834,9 @@ def ensure_next_year_renewal_tenures(
         if v_no in existing_in_target:
             continue
         new_t = create_next_year_renewal_tenure(db, prev_tenure, user_id=user_id)
-        created_tenures.append(new_t)
-        existing_in_target.add(v_no)
+        if new_t is not None:
+            created_tenures.append(new_t)
+            existing_in_target.add(v_no)
 
     if created_tenures:
         db.flush()

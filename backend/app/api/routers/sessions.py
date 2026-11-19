@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import AuthContext, current_auth, current_auth_optional, current_user, ensure_trusted_origin, settings_dep
+from app.services.realtime_hub import publish_realtime_update
 from app.api.schemas import (
     BenefitAliasSaveRequest,
     BenefitCatalogSaveRequest,
@@ -568,6 +569,7 @@ def draft_update(draft_id: str, payload: DraftUpdateRequest, db: Session = Depen
         template_id=payload.template_id,
         layout_override=payload.layout_override,
     )
+    publish_realtime_update(scope="workspace", resource_id=draft_id, actor=user, summary="Draft updated", extra_scopes=("sessions", "comparison"))
     return {"draft": serialize_draft(draft, db)}
 
 
@@ -653,8 +655,8 @@ def sessions_bulk_delete(payload: BulkDeleteRequest, db: Session = Depends(get_d
             permanent_delete_session(db, user, sid, SupabaseStorage(settings))
         except Exception:
             pass # Skip if not found or already deleted
+    publish_realtime_update(scope="sessions", resource_id="all", actor=user, summary="Sessions deleted", extra_scopes=("comparison", "ledger"))
     return {"deleted": True}
-
 
 
 @router.post("/sessions/bulk-status")
@@ -665,7 +667,7 @@ def sessions_bulk_status(
 ) -> dict:
     from app.services.quotation_activity_service import bulk_update_quotation_status
 
-    return bulk_update_quotation_status(
+    res = bulk_update_quotation_status(
         db=db,
         session_ids=payload.session_ids,
         status=payload.status,
@@ -676,6 +678,8 @@ def sessions_bulk_status(
         coverage_start_date=payload.coverage_start_date,
         coverage_end_date=payload.coverage_end_date,
     )
+    publish_realtime_update(scope="sessions", resource_id="all", actor=user, summary="Session statuses updated", extra_scopes=("comparison", "ledger"))
+    return res
 
 
 
@@ -853,6 +857,7 @@ def update_session(
         session.detected_company = payload.detected_company
 
     db.commit()
+    publish_realtime_update(scope="sessions", resource_id=session_id, actor=user, summary="Session updated", extra_scopes=("comparison", "ledger"))
     return {"status": "success", "session": serialize_session(session), "document_type": session.document_type}
 
 
@@ -886,6 +891,7 @@ def session_delete(
 
     session.status = "trash"
     db.commit()
+    publish_realtime_update(scope="sessions", resource_id=session_id, actor=user, summary="Session deleted", extra_scopes=("comparison", "ledger"))
     return {"deleted": True, "session_id": session_id}
 
 
@@ -1161,15 +1167,15 @@ def draft_workspace_patch(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    return {
-        "workspace": apply_workspace_patch(
-            db,
-            user,
-            draft_id,
-            base_revision=payload.base_revision,
-            operations=payload.operations,
-        )
-    }
+    workspace = apply_workspace_patch(
+        db,
+        user,
+        draft_id,
+        base_revision=payload.base_revision,
+        operations=payload.operations,
+    )
+    publish_realtime_update(scope="workspace", resource_id=draft_id, actor=user, summary="Workspace saved", extra_scopes=("sessions", "comparison"))
+    return {"workspace": workspace}
 
 
 

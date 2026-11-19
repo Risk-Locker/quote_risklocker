@@ -273,7 +273,12 @@ def reconcile_vehicle_capacity_and_fees(
 
     if not inc_rf:
         fields["service_fee"] = {"value": "0.00", "status": "ready", "warnings": [], "message": ""}
-    elif not (fields.get("service_fee") or {}).get("value"):
+    elif db is not None:
+        from app.services.admin_service import get_runner_fee_default
+
+        default_rf = get_runner_fee_default(db)
+        fields["service_fee"] = {"value": f"{default_rf:.2f}", "status": "ready", "warnings": [], "message": ""}
+    else:
         fields["service_fee"] = {"value": "", "status": "ready", "warnings": [], "message": ""}
 
     auto_rt = 0.0

@@ -113,7 +113,6 @@ DEFAULT_ALIASES = {
     "premium": ["total premium", "premium payable", "jumlah premium", "total contribution", "jumlah caruman", "net premium", "gross premium", "premium kasar", "premium"],
     "total_amount": ["total payable", "total amount", "amount payable", "gross amount", "jumlah bayaran", "total / jumlah"],
     "optional_cover_amount": ["total optional cover amount", "total optional cover", "extra benefit", "manfaat tambahan", "optional cover amount"],
-    "service_fee": ["service fee", "runner fee", "runner charge", "upah runner"],
     "ncd_percent": ["ncd", "ncb", "no claim discount", "no claim bonus", "dtt", "diskaun tanpa tuntutan", "kadar ncd", "kadar dtt", "ncd / dtt", "ncb / dtt"],
     "windscreen": ["windscreen", "cermin hadapan"],
     "valuation_type": ["valuation type", "valuation basis", "basis of sum insured", "type of sum insured", "basis of valuation", "agreed value", "vehicle agreed value", "market value"],
@@ -1205,7 +1204,7 @@ def find_candidates(
             _add(results, "vehicle_year", year, "pattern_year", 0.67, text, match.start(), match.end(), page_text)
 
     money_pattern = MONEY_RE
-    for label, field in [("total payable", "total_amount"), ("amount payable", "total_amount"), ("gross amount", "total_amount"), ("gross premium", "premium"), ("premium", "premium"), ("sum insured", "coverage_amount"), ("service fee", "service_fee"), ("runner fee", "service_fee")]:
+    for label, field in [("total payable", "total_amount"), ("amount payable", "total_amount"), ("gross amount", "total_amount"), ("gross premium", "premium"), ("premium", "premium"), ("sum insured", "coverage_amount")]:
         for match in re.finditer(rf"(?i){re.escape(label)}[^\dRM]{{0,25}}(?P<money>{money_pattern})", text):
             _add(results, field, match.group("money"), "label_money", 0.84, text, match.start(), match.end(), page_text)
 

@@ -675,7 +675,7 @@ export function Design2CanvasView({
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6.5px 7px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gridAutoRows: "minmax(68px, auto)", gap: "5px 6.5px" }}>
               {page1Cards.map((card: UnifiedAddonCard) => (
                 <div
                   key={card.id}
@@ -685,28 +685,24 @@ export function Design2CanvasView({
                     boxShadow: "0 1px 2px rgba(15, 23, 42, 0.045)",
                     display: "flex",
                     alignItems: "stretch",
-                    height: "73px",
+                    minHeight: "68px",
+                    height: "auto",
                     boxSizing: "border-box",
-                    overflow: "hidden",
                   }}
                 >
                   <div style={{ flex: "0 0 36px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "2px" }}>
                     <Design2CardIconMedia assetId={card.asset_id} iconHint={card.icon_hint} size={38} />
                   </div>
-                  <div style={{ flex: 1, minWidth: 0, padding: "4px 5px 3px 2px", display: "flex", flexDirection: "column", justifyContent: "space-between", overflow: "hidden" }}>
-                    <div style={{ minHeight: 0, overflow: "hidden" }}>
+                  <div style={{ flex: 1, minWidth: 0, padding: "3.5px 5px 3px 2px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                    <div style={{ minHeight: 0 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "2px" }}>
                         <div
                           style={{
                             fontSize: "10.0px",
                             fontWeight: 600,
                             color: "#0F172A",
-                            lineHeight: 1.15,
+                            lineHeight: 1.14,
                             wordBreak: "break-word",
-                            overflow: "hidden",
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical",
                           }}
                         >
                           {card.title}
@@ -716,7 +712,7 @@ export function Design2CanvasView({
                         </div>
                       </div>
                       {card.value && (
-                        <div style={{ fontSize: "9.1px", fontWeight: 600, color: "#15803D", marginTop: "1px", lineHeight: 1.12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div style={{ fontSize: "9.1px", fontWeight: 600, color: "#15803D", marginTop: "1px", lineHeight: 1.12, wordBreak: "break-word" }}>
                           {card.value}
                         </div>
                       )}
@@ -726,13 +722,10 @@ export function Design2CanvasView({
                             fontSize: "8.6px",
                             fontWeight: 400,
                             color: "#334155",
-                            lineHeight: 1.18,
+                            lineHeight: 1.15,
                             marginTop: "1px",
                             wordBreak: "break-word",
-                            overflow: "hidden",
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical",
+                            whiteSpace: "normal",
                           }}
                         >
                           {card.description}

@@ -11,6 +11,7 @@ const items: Array<{ href: Route; label: string }> = [
   { href: "/builder/global-benefits" as Route, label: "Global Benefits" },
   { href: "/builder/assets" as Route, label: "Asset Library" },
   { href: "/builder/uploads" as Route, label: "Upload Limits" },
+  { href: "/builder/runner-fee" as Route, label: "Runner Fee" },
 ];
 
 export function BuilderNav() {

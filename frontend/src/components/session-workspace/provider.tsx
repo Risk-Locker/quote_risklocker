@@ -16,6 +16,7 @@ import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import type {
   BenefitCardSummary,
   MutationState,
@@ -43,6 +44,13 @@ type ActionsContextValue = {
 const DataContext = createContext<DataContextValue | null>(null);
 const ActionsContext = createContext<ActionsContextValue | null>(null);
 const MutationContext = createContext<MutationState | null>(null);
+const RealtimeContext = createContext<ReturnType<typeof useRealtimeSync> | null>(null);
+
+function stripTrailingMetric(label: string): string {
+  return label
+    .replace(/\s*\((?:(?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|unlimited[^)]*)\)\s*$/i, "")
+    .trim();
+}
 
 function parseMoneyVal(raw: unknown): number {
   if (raw === null || raw === undefined || typeof raw === "boolean") return 0;
@@ -214,10 +222,11 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
   }
   if (operation.op === "select_catalog_offering") {
     const offeringId = String(operation.offering_id || "");
+    const inAddonsExisting = snapshot.benefit_cards.available_addons.some((item) => item.offering_id === offeringId);
     const offer = snapshot.benefit_cards.available_addons.find((item) => item.offering_id === offeringId) ||
       snapshot.benefit_cards.current_benefits.find((item) => item.offering_id === offeringId);
     if (!offer) return snapshot;
-    const isAddon = operation.state === "available_addon";
+    const isAddon = operation.state ? operation.state === "available_addon" : inAddonsExisting;
     const isRemoved = operation.state === "removed";
     const selectionId = offer.selection_id && !String(offer.selection_id).startsWith("pending:")
       ? offer.selection_id
@@ -229,7 +238,17 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     const costStatus = String(operation.cost_status || (isAddon ? (priceVal ? "paid" : "included") : (priceVal ? "paid" : "included")));
 
     const labelVal = (operation as any).label || (operation as any).label_override;
-    const descVal = (operation as any).description || (operation as any).description_override;
+    const descVal = (operation as any).description !== undefined ? (operation as any).description : (operation as any).description_override;
+    const typed = ((operation as any).typed_value !== undefined
+      ? (operation as any).typed_value
+      : (operation as any).typed_value_override) as Record<string, unknown> | null | undefined;
+    const hasTyped = typed !== undefined && typed !== null;
+    const typedDisplay = hasTyped ? String(typed.display_text ?? typed.value ?? "") : undefined;
+    const hideCov = hasTyped
+      ? Boolean(typed.hide_limit || String(typed.display_text ?? "").trim() === "")
+      : Boolean((offer as any).hide_coverage);
+    const baseLabel = labelVal || offer.label;
+    const resolvedLabel = !labelVal && (hideCov || hasTyped) ? (stripTrailingMetric(baseLabel) || baseLabel) : baseLabel;
 
     const updatedCard: BenefitCardSummary = {
       ...offer,
@@ -237,8 +256,16 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       selection_id: selectionId,
       cost_status: costStatus,
       price: priceVal as any,
-      ...(labelVal ? { label: labelVal } : {}),
+      label: resolvedLabel,
       ...(descVal !== undefined ? { description: descVal } : {}),
+      ...(hasTyped
+        ? {
+            value: typedDisplay ?? "",
+            typed_value: typed,
+            hide_coverage: hideCov,
+            has_manual_value_override: true,
+          }
+        : {}),
     };
 
     const replacedCurrent = snapshot.benefit_cards.current_benefits.filter(
@@ -299,7 +326,9 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
         state: isAddon ? "available_addon" : "current",
         cost_status: costStatus,
         item_kind: "catalog",
-      });
+        ...(resolvedLabel !== offer.label ? { label_override: resolvedLabel } : {}),
+        ...(hasTyped ? { typed_value_override: typed as any } : {}),
+      } as any);
     }
 
     const updatedSnap: WorkspaceSnapshot = {
@@ -318,17 +347,23 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
           const selectionId = String(operation.selection_id || "");
           const state = operation.state ? String(operation.state) : null;
           const costStatus = operation.cost_status ? String(operation.cost_status) : null;
-          const typed = operation.typed_value as Record<string, unknown> | null | undefined;
+          const typed = (operation.typed_value !== undefined
+            ? operation.typed_value
+            : (operation as any).typed_value_override) as Record<string, unknown> | null | undefined;
+          const hasTyped = typed !== undefined && typed !== null;
+          const hideCov = hasTyped
+            ? Boolean(typed.hide_limit || String(typed.display_text ?? "").trim() === "")
+            : undefined;
           const hasPrice = "price" in operation;
           const priceVal = (operation as any).price;
           const labelVal = (operation as any).label || (operation as any).label_override;
-          const descVal = (operation as any).description || (operation as any).description_override;
+          const descVal = (operation as any).description !== undefined ? (operation as any).description : (operation as any).description_override;
 
           const nextBenefits = snapshot.benefits.map((item) => item.id === selectionId ? {
             ...item,
             ...(state ? { state } : {}),
             ...(costStatus ? { cost_status: costStatus } : {}),
-            ...(operation.typed_value !== undefined ? { typed_value: typed } : {}),
+            ...(operation.typed_value !== undefined ? { typed_value: typed, typed_value_override: typed } : {}),
             ...(labelVal ? { label_override: labelVal } : {}),
           } : item);
 
@@ -393,12 +428,21 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       // Update in-place
       const updateCard = (item: BenefitCardSummary): BenefitCardSummary => {
         if (item.selection_id !== selectionId && item.card_key !== selectionId) return item;
+        const baseLbl = labelVal || item.label;
+        const nextLbl = !labelVal && (hideCov || hasTyped) ? (stripTrailingMetric(baseLbl) || baseLbl) : baseLbl;
         return {
           ...item,
           ...(costStatus ? { cost_status: costStatus } : {}),
-          ...(labelVal ? { label: labelVal } : {}),
+          label: nextLbl,
           ...(descVal !== undefined ? { description: descVal } : {}),
-          ...(typed ? { value: String(typed.display_text ?? typed.value ?? item.value) } : {}),
+          ...(hasTyped
+            ? {
+                value: String(typed.display_text ?? typed.value ?? ""),
+                typed_value: typed,
+                hide_coverage: Boolean(hideCov),
+                has_manual_value_override: true,
+              }
+            : {}),
           ...(hasPrice ? { price: priceVal as any } : {}),
         };
       };
@@ -857,10 +901,37 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                   lastSavedAt,
                 }), [dirtyPaths, saving, saveError, lastSavedAt]);
 
+                // Google-Sheet style 1200ms debounced auto-save for buffered workspace edits
+                useEffect(() => {
+                  if (!dirtyPaths.length || saving || saveError) return;
+                  const timer = setTimeout(() => {
+                    void save().catch(() => undefined);
+                  }, 1200);
+                  return () => clearTimeout(timer);
+                }, [dirtyPaths, saving, saveError, save]);
+
+                const realtime = useRealtimeSync({
+                  scope: "workspace",
+                  resourceId: serverSnapshot?.draft_id || sessionId,
+                  hasUnsavedChanges: dirtyPaths.length > 0,
+                  onRemoteUpdate: async () => {
+                    await reload();
+                  },
+                });
+
+                useEffect(() => {
+                  if (dirtyPaths.length > 0) {
+                    void realtime.reportEditing(dirtyPaths[0]);
+                  } else {
+                    void realtime.clearEditing();
+                  }
+                }, [dirtyPaths, realtime.reportEditing, realtime.clearEditing]);
+
                 return (
                   <DataContext.Provider value={data}>
                     <ActionsContext.Provider value={actions}>
                       <MutationContext.Provider value={mutation}>
+                        <RealtimeContext.Provider value={realtime}>
                         {children}
                         <Dialog
                           open={Boolean(pendingNavHref)}
@@ -908,10 +979,15 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                             </Button>
                           </div>
                         </Dialog>
+                        </RealtimeContext.Provider>
                       </MutationContext.Provider>
                     </ActionsContext.Provider>
                   </DataContext.Provider>
                 );
+              }
+
+              export function useWorkspaceRealtime() {
+                return useContext(RealtimeContext);
               }
 
               export function useWorkspaceData() {

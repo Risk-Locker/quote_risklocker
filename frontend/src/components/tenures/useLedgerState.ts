@@ -238,7 +238,7 @@ export function useLedgerState() {
         params.set("stage", stageFilter);
       }
       if (debouncedSearch.trim()) {
-        params.set("q", debouncedSearch.trim());
+        params.set("search", debouncedSearch.trim());
       }
       if (statusFilter && statusFilter !== "all") {
         params.set("status", statusFilter);
@@ -246,7 +246,7 @@ export function useLedgerState() {
       if (showHidden) {
         params.set("show_hidden", "true");
       }
-      params.set("limit", "1000");
+      params.set("page_size", "500");
 
       const res = await api<{ items: TenureRow[]; total: number }>(
         `/tenures?${params.toString()}`

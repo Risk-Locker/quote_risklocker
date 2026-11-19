@@ -290,10 +290,6 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     for s in sessions_desc:
         if s.draft and isinstance(s.draft.fields, dict):
             f = s.draft.fields
-            if road_tax_val == 0.0:
-                cand_rt = _to_float(f.get("roadtax") or f.get("road_tax"))
-                if cand_rt > 0.0:
-                    road_tax_val = cand_rt
             if not detected_model:
                 detected_model = _safe_str(f.get("car_model") or f.get("vehicle_model"))
             if not detected_brand:
@@ -403,7 +399,9 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     elif float(tenure.runner_fee) > 0.0:
         runner_fee_val = float(tenure.runner_fee)
     else:
-        calc_runner = detect_runner_fee_from_id(cand_ic)
+        from app.services.admin_service import get_runner_fee_default
+
+        calc_runner = get_runner_fee_default(db)
         if calc_runner > 0.0:
             runner_fee_val = calc_runner
             tenure.runner_fee = calc_runner

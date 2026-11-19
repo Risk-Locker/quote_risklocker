@@ -546,7 +546,8 @@ def test_m2_design2_typography_enlarged_and_fits_a4_height():
     )
     assert "font-size: 10.0px" in html
     assert "font-size: 8.6px" in html
-    assert "height: 73px" in html
+    assert "min-height: 68px;" in html
+    assert "height: auto;" in html
     assert "1123px" in html
 
 

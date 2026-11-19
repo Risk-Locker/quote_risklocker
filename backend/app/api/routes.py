@@ -385,6 +385,7 @@ from app.api.routers import templates as templates_router_mod
 from app.api.routers import tenures as tenures_router_mod
 from app.api.routers import comparison as comparison_router_mod
 from app.api.routers import pic as pic_router_mod
+from app.api.routers import realtime as realtime_router_mod
 from app.api.routers.common import _pdf_response
 
 router = APIRouter()
@@ -399,6 +400,7 @@ router.include_router(templates_router_mod.router)
 router.include_router(tenures_router_mod.router)
 router.include_router(comparison_router_mod.router)
 router.include_router(pic_router_mod.router)
+router.include_router(realtime_router_mod.router)
 
 _all_subrouter_modules = [
     auth_router_mod,
@@ -411,6 +413,7 @@ _all_subrouter_modules = [
     tenures_router_mod,
     comparison_router_mod,
     pic_router_mod,
+    realtime_router_mod,
 ]
 
 # Expose all endpoint functions on the module namespace for backward compatibility

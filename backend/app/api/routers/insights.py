@@ -25,6 +25,7 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.db.session import get_db
 from app.models.tables import User
+from app.services.realtime_hub import publish_realtime_update
 from app.services.client_dossier_service import get_client_dossiers
 from app.services.client_record_service import (
     delete_view as delete_record_view,
@@ -116,6 +117,7 @@ def client_record_detail(record_id: str, db: Session = Depends(get_db), user: Us
 @router.patch("/client-records/{record_id}")
 def client_record_update(record_id: str, payload: ClientRecordUpdateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     record = update_record(db, record_id, payload.model_dump(exclude_none=True))
+    publish_realtime_update(scope="clients", resource_id=record_id, actor=user, summary="Client record updated", extra_scopes=("ledger",))
     return {"record": serialize_record(record)}
 
 
@@ -123,6 +125,7 @@ def client_record_update(record_id: str, payload: ClientRecordUpdateRequest, db:
 def client_record_delete(record_id: str, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
     from app.services.trash_service import delete_client_record
     delete_client_record(db, settings, user, record_id)
+    publish_realtime_update(scope="clients", resource_id=record_id, actor=user, summary="Client record deleted", extra_scopes=("ledger",))
     return {"deleted": True}
 
 
@@ -137,6 +140,8 @@ def client_records_bulk_delete(payload: BulkClientRecordDeleteRequest, db: Sessi
             deleted.append(record_id)
         except AppError as exc:
             failed.append({"id": record_id, "message": str(exc)})
+    if deleted:
+        publish_realtime_update(scope="clients", resource_id="all", actor=user, summary="Client records deleted", extra_scopes=("ledger",))
     return {"deleted": deleted, "failed": failed}
 
 
@@ -147,6 +152,8 @@ def client_records_bulk_action(payload: RecordBulkActionRequest, db: Session = D
         raise AppError("Choose at least one matching record.", 422)
     if payload.action in {"archive", "unarchive"}:
         changed = set_records_archived(db, user, record_ids, archived=payload.action == "archive")
+        if changed:
+            publish_realtime_update(scope="clients", resource_id="all", actor=user, summary="Client records updated", extra_scopes=("ledger",))
         return {"changed": changed, "failed": []}
     from app.services.trash_service import delete_client_record
     changed: list[str] = []
@@ -157,6 +164,8 @@ def client_records_bulk_action(payload: RecordBulkActionRequest, db: Session = D
             changed.append(record_id)
         except AppError as exc:
             failed.append({"id": record_id, "message": str(exc)})
+    if changed:
+        publish_realtime_update(scope="clients", resource_id="all", actor=user, summary="Client records updated", extra_scopes=("ledger",))
     return {"changed": changed, "failed": failed}
 
 
@@ -475,6 +484,7 @@ def update_customer_endpoint(
 
     db.commit()
     db.refresh(cust)
+    publish_realtime_update(scope="clients", resource_id=cust.id, actor=user, summary="Customer updated", extra_scopes=("ledger", "sessions"))
     return {
         "success": True,
         "customer": {

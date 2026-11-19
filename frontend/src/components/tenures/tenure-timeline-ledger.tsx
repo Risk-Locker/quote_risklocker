@@ -10,6 +10,8 @@ import { LedgerTable } from "./LedgerTable";
 import { LedgerCalendarView } from "./LedgerCalendarView";
 import { LedgerModalsContainer } from "./LedgerModals";
 import { Dialog } from "@/components/ui/dialog";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
+import { RealtimePresenceBanner } from "@/components/realtime/RealtimePresenceBanner";
 import type {
   LedgerSortColumn,
   YoYStatItem,
@@ -100,8 +102,37 @@ export function TenureTimelineLedger() {
     }
   }, [searchParams, state]);
 
+  const realtime = useRealtimeSync({
+    scope: "ledger",
+    resourceId: "all",
+    hasUnsavedChanges: Boolean(modals.activeDrawerTenureId || modals.addVehicleModalOpen),
+    onRemoteUpdate: () => {
+      state.loadMonths();
+      state.loadStageSummary();
+      state.loadTenures();
+      state.loadYoyStats();
+    },
+  });
+
+  useEffect(() => {
+    if (modals.activeDrawerTenureId) {
+      void realtime.reportEditing(`tenure:${modals.activeDrawerTenureId}`);
+    } else if (modals.addVehicleModalOpen) {
+      void realtime.reportEditing("new-vehicle");
+    } else {
+      void realtime.clearEditing();
+    }
+  }, [modals.activeDrawerTenureId, modals.addVehicleModalOpen, realtime.reportEditing, realtime.clearEditing]);
+
   return (
     <div className="space-y-4">
+      <RealtimePresenceBanner
+        connected={realtime.connected}
+        otherEditors={realtime.otherEditors}
+        pendingUpdate={realtime.pendingUpdate}
+        onRefreshNow={() => void realtime.refreshNow()}
+        onDismissPending={realtime.dismissPendingUpdate}
+      />
       {/* 1. TOP STAGE KPI BANNER: 5 SUMMARY CARDS */}
       <LedgerKpiCards
         summary={state.summary}

@@ -907,16 +907,27 @@ export function extractFreeCoverageItems(
     return `${cleanTitle} (${rawVal})`;
   };
 
+  const hasManualValueOverride = (raw: any): boolean => {
+    if (raw?.has_manual_value_override) return true;
+    for (const k of ["typed_value_override", "typed_value"]) {
+      const tv = raw?.[k];
+      if (tv && typeof tv === "object" && (tv.type === "custom" || "display_text" in tv)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   for (const raw of activeBenefits || []) {
     if (raw?.is_extra || raw?.cost_status === "paid" || hasPositivePrice(raw)) continue;
 
     const isHideCov = isCoverageHiddenOrCleared(raw);
-    const hasManualValOvr = Boolean(raw?.has_manual_value_override);
+    const hasManualValOvr = hasManualValueOverride(raw);
 
     if (isBaseTowingCard(raw)) {
       let cTitle = String(raw.label || raw.title || "Emergency Towing Assistance").trim();
       const cVal = isHideCov ? "" : String(raw.value || raw.display_value || raw.coverage_limit || "").trim();
-      if (isHideCov) {
+      if (isHideCov || hasManualValOvr) {
         cTitle = stripTrailingMetricParens(cTitle);
       }
       const cDesc = String(raw.description || raw.short_description || "").trim();
@@ -959,8 +970,11 @@ export function extractFreeCoverageItems(
       title = stripTrailingMetricParens(title);
     } else if (hasManualValOvr) {
       const cVal = String(raw?.value || "").trim();
-      if (cVal && cVal.length <= 40 && !title.toLowerCase().includes(cVal.toLowerCase())) {
-        title = `${stripTrailingMetricParens(title)} (${cVal})`;
+      const cleanBase = stripTrailingMetricParens(title);
+      if (cVal && cVal.length <= 40 && !cleanBase.toLowerCase().includes(cVal.toLowerCase())) {
+        title = `${cleanBase} (${cVal})`;
+      } else {
+        title = cleanBase;
       }
     }
     const norm = normalizeCode(title);

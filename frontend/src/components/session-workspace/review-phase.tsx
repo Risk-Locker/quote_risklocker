@@ -9,7 +9,9 @@ import {
   useWorkspaceActions,
   useWorkspaceData,
   useWorkspaceMutation,
+  useWorkspaceRealtime,
 } from "@/components/session-workspace/provider";
+import { RealtimePresenceBanner } from "@/components/realtime/RealtimePresenceBanner";
 import { api, fileUrl } from "@/lib/api";
 
 import { ReviewHeaderCard } from "./review-components/ReviewHeaderCard";
@@ -36,6 +38,7 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
   const { workspace, loading, loadError } = useWorkspaceData();
   const { queueOperation, reload, save, discard, decideField } = useWorkspaceActions();
   const mutation = useWorkspaceMutation();
+  const realtime = useWorkspaceRealtime();
 
   const [globalConcepts, setGlobalConcepts] = useState<GlobalConcept[]>([]);
   const [templateCollapsed, setTemplateCollapsed] = useState(false);
@@ -151,6 +154,15 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
       />
 
       <section className="grid gap-4 w-full max-w-[1800px] mx-auto pb-12 pt-6 px-4 sm:px-6">
+        {realtime && (
+          <RealtimePresenceBanner
+            connected={realtime.connected}
+            otherEditors={realtime.otherEditors}
+            pendingUpdate={realtime.pendingUpdate}
+            onRefreshNow={() => void realtime.refreshNow()}
+            onDismissPending={realtime.dismissPendingUpdate}
+          />
+        )}
         {state.actionError || mutation.saveError ? (
           <div role="alert" className="rounded-[var(--rl-radius-sm)] bg-[var(--rl-red-light)] p-3 text-sm font-semibold text-[var(--rl-red)]">
             {state.actionError || mutation.saveError}

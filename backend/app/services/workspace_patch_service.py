@@ -1462,7 +1462,7 @@ def apply_workspace_patch(
                         if has_benefit_mutation:
                             from app.services.marketing_comparison.benefits_extractor import _resolve_comparison_benefits
                             from app.services.marketing_comparison.materialize import record_manual_overrides
-                            from app.services.marketing_comparison.ncd_evaluator import get_standard_betterment_rate
+                            from app.services.marketing_comparison.ncd_evaluator import evaluate_betterment_rules
 
                             b_sync = _resolve_comparison_benefits(
                                 db,
@@ -1486,17 +1486,23 @@ def apply_workspace_patch(
                                 for s in selections
                             )
                             if has_bet_active or has_bet_inactive:
+                                veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if getattr(tenure, "tracked_vehicle", None) else None
+                                reg_date = getattr(tenure.tracked_vehicle, "registration_date", None) if getattr(tenure, "tracked_vehicle", None) else None
+                                quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year
+                                company_obj = db.get(InsuranceCompany, ce.company_id) if ce.company_id else None
+                                _, b_rate, b_disp = evaluate_betterment_rules(
+                                    yom=veh_yom,
+                                    quote_year=quote_year,
+                                    company_name=getattr(company_obj, "name", None) if company_obj else None,
+                                    has_betterment_peril=has_bet_active,
+                                    registration_date=reg_date,
+                                    coverage_start_date=tenure.coverage_start_date,
+                                    coverage_type=getattr(tenure, "coverage_type", None) or _extract_f_val("coverage_type"),
+                                    company_obj=company_obj,
+                                )
                                 ce.waiver_betterment = has_bet_active
-                                if ce.waiver_betterment:
-                                    ce.betterment_rate = 0.0
-                                    ce.betterment_display = "No (0%)"
-                                else:
-                                    veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if getattr(tenure, "tracked_vehicle", None) else None
-                                    quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year
-                                    veh_age = max(0, quote_year - (veh_yom or quote_year))
-                                    b_rate, b_disp = get_standard_betterment_rate(veh_age)
-                                    ce.betterment_rate = b_rate
-                                    ce.betterment_display = b_disp
+                                ce.betterment_rate = 0.0 if has_bet_active else b_rate
+                                ce.betterment_display = "No (0%)" if has_bet_active else b_disp
 
                             for clr_key in ("windscreen_sum_insured", "special_perils", "llp_llop", "towing_limit", "waiver_betterment", "motor_premium"):
                                 record_manual_overrides(ce, clear_field=clr_key)

@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
+import { RealtimePresenceBanner } from "@/components/realtime/RealtimePresenceBanner";
 import Link from "next/link";
 import type { Route } from "next";
 import {
@@ -754,6 +756,16 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const searchParams = useSearchParams();
   const isFromUpload = searchParams.get("from_upload") === "true";
   const [isCompilingBatch, setIsCompilingBatch] = useState(isFromUpload);
+
+  const realtime = useRealtimeSync({
+    scope: "comparison",
+    resourceId: tenureId || "all",
+    enabled: Boolean(tenureId),
+    hasUnsavedChanges: false,
+    onRemoteUpdate: async () => {
+      await fetchComparison(true);
+    },
+  });
 
   useEffect(() => {
     if (!tenureId) return;
@@ -1513,6 +1525,14 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         </div>
 
         {/* Live Batch Extraction Notification Banner */}
+        <RealtimePresenceBanner
+          connected={realtime.connected}
+          otherEditors={realtime.otherEditors}
+          pendingUpdate={realtime.pendingUpdate}
+          onRefreshNow={() => void realtime.refreshNow()}
+          onDismissPending={realtime.dismissPendingUpdate}
+          className="no-print print:hidden"
+        />
         {isCompilingBatch && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 flex items-center justify-between text-xs text-amber-900 font-medium no-print print:hidden">
             <span className="flex items-center gap-2">

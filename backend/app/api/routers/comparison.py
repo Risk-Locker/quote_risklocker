@@ -16,6 +16,7 @@ from app.api.deps import current_user, settings_dep
 from app.auth.rbac import require_role
 from app.core.config import Settings
 from app.db.session import get_db
+from app.services.realtime_hub import publish_realtime_update
 from app.models.enums import Role
 from app.models.tables import InsuranceTenure, Session as SessionModel, TenureComparisonEntry, UploadedFile, User, new_id
 from app.services.marketing_comparison_service import (
@@ -230,7 +231,7 @@ def update_fixed_costs(
     """Update tenure-level fixed costs and coverage dates."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
-        return update_tenure_fixed_costs(
+        res = update_tenure_fixed_costs(
             db,
             tenure_id,
             road_tax=payload.road_tax,
@@ -254,6 +255,8 @@ def update_fixed_costs(
             manufacture_year=payload.manufacture_year,
             quotation_discount=payload.quotation_discount,
         )
+        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Fixed costs updated", extra_scopes=("ledger",))
+        return res
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -281,7 +284,7 @@ def toggle_tenure_fees(
     inc_rf = payload.include_runner_fee if payload.include_runner_fee is not None else (tenure.include_runner_fee is not False)
 
     try:
-        return update_tenure_fixed_costs(
+        res = update_tenure_fixed_costs(
             db,
             tenure_id,
             road_tax=rt,
@@ -289,6 +292,8 @@ def toggle_tenure_fees(
             include_road_tax=inc_rt,
             include_runner_fee=inc_rf,
         )
+        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Fees toggled", extra_scopes=("ledger",))
+        return res
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -306,7 +311,9 @@ def upsert_entry(
     """Create or update an underwriter comparison column."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
-        return save_comparison_entry(db, tenure_id, payload.model_dump())
+        res = save_comparison_entry(db, tenure_id, payload.model_dump())
+        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Comparison entry saved", extra_scopes=("ledger",))
+        return res
     except ValueError as e:
         err_msg = str(e)
         if "Concurrent modification conflict" in err_msg:
@@ -328,7 +335,9 @@ def delete_entry(
     """Delete a comparison column."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
-        return delete_comparison_entry(db, tenure_id, entry_id, delete_all_versions=all_versions)
+        res = delete_comparison_entry(db, tenure_id, entry_id, delete_all_versions=all_versions)
+        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Comparison entry deleted", extra_scopes=("ledger",))
+        return res
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -364,13 +373,15 @@ def choose_winner(
     """Select or toggle the winning underwriter from comparison and prepare Quotation Builder draft."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
-        return select_winner_and_generate_draft(
+        res = select_winner_and_generate_draft(
             db,
             tenure_id,
             payload.entry_id,
             user.id,
             force_state=payload.force_state,
         )
+        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Winner updated", extra_scopes=("ledger", "sessions"))
+        return res
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -985,6 +996,7 @@ def patch_comparison_entry(
         auto_recommend_rank1=False,
     )
     db.commit()
+    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Comparison entry updated", extra_scopes=("ledger",))
     return {
         "status": "success",
         "entry_id": entry_id,
@@ -1030,6 +1042,7 @@ def rerank_deal_entries(
     entries = list(db.scalars(select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure_id)).all())
     ranked = evaluate_logical_value_rerank(entries)
     db.commit()
+    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Comparison entry updated", extra_scopes=("ledger",))
     return {
         "status": "success",
         "ranked_count": len(ranked),
@@ -1180,6 +1193,7 @@ def convert_session_document_type(
             pass
 
     db.commit()
+    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Document type converted", extra_scopes=("ledger", "sessions"))
     return {"status": "success", "session_id": session_id, "document_type": target_type}
 
 
@@ -1222,6 +1236,7 @@ def unlink_tenure_covernote(
         pass
 
     db.commit()
+    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Cover note unlinked", extra_scopes=("ledger",))
     return {"status": "success", "tenure_id": tenure_id, "message": "Cover note unlinked successfully"}
 
 
@@ -1258,6 +1273,7 @@ def link_tenure_covernote(
         pass
 
     db.commit()
+    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Cover note linked", extra_scopes=("ledger",))
     return {"status": "success", "tenure_id": tenure_id, "session_id": sess.id, "message": "Policy linked successfully"}
 
 
@@ -1324,12 +1340,14 @@ def patch_tenure_covernote(
 
     data = payload.model_dump(exclude_unset=True)
     try:
-        return sync_and_update_covernote(
+        res = sync_and_update_covernote(
             db,
             tenure_id,
             data,
             user_id=str(user.id) if getattr(user, "id", None) else None,
         )
+        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Cover note updated", extra_scopes=("ledger",))
+        return res
     except ValueError as exc:
         msg = str(exc)
         code = 404 if "not found" in msg.lower() or "no active cover note" in msg.lower() else 422

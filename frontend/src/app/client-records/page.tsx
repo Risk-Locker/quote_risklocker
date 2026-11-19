@@ -33,6 +33,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
+import { RealtimePresenceBanner } from "@/components/realtime/RealtimePresenceBanner";
 
 interface ClientDossierItem {
   client_id: string;
@@ -149,6 +151,15 @@ export default function ClientRecordsPage() {
     }
   }, [activeTab, loadClients, loadPics]);
 
+  const realtime = useRealtimeSync({
+    scope: "clients",
+    resourceId: "all",
+    onRemoteUpdate: () => {
+      if (activeTab === "clients") return loadClients();
+      return loadPics();
+    },
+  });
+
   function handleOpenAddPic() {
     setEditingPic(null);
     setPicFormData({
@@ -257,6 +268,14 @@ export default function ClientRecordsPage() {
             <p className="mt-1 text-sm text-[var(--rl-text-muted)]">
               Unified relationship management for Individual Clients, Corporate Fleets, and Persons In Charge (PIC) / SubAgents.
             </p>
+            <RealtimePresenceBanner
+              connected={realtime.connected}
+              otherEditors={realtime.otherEditors}
+              pendingUpdate={realtime.pendingUpdate}
+              onRefreshNow={() => void realtime.refreshNow()}
+              onDismissPending={realtime.dismissPendingUpdate}
+              className="mt-2"
+            />
           </div>
 
           <div className="flex items-center gap-2.5">

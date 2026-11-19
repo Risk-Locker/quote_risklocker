@@ -366,12 +366,13 @@ def process_extraction_job(
         fields["roadtax"] = {"value": "0.00", "status": "ready", "message": ""}
         fields["service_fee"] = {"value": "0.00", "status": "ready", "message": ""}
     else:
-        fee_setting = db.get(AppSetting, "default_runner_fee")
-        if fee_setting is not None and str(fields.get("service_fee", {}).get("value") or "").strip() == "":
-            try:
-                fields["service_fee"] = {"value": f"{float((fee_setting.value or {}).get('amount', 0)):.2f}", "status": "ready", "message": ""}
-            except (TypeError, ValueError):
-                pass
+        from app.services.admin_service import get_runner_fee_default
+
+        fields["service_fee"] = {
+            "value": f"{get_runner_fee_default(db):.2f}",
+            "status": "ready",
+            "message": "",
+        }
 
     # Configurable Third Party Only (TPO) Extra Premium Surcharge
     cov_val = str((fields.get("coverage_type") or {}).get("value") or "").strip().lower()

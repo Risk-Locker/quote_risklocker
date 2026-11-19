@@ -30,6 +30,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { getVehicleDisplayName } from "@/lib/vehicle-utils";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
+import { RealtimePresenceBanner } from "@/components/realtime/RealtimePresenceBanner";
 
 interface SessionItem {
   id: string;
@@ -194,6 +196,12 @@ export default function SessionsPage() {
     fetchSessions();
   }, [fetchSessions]);
 
+  const realtime = useRealtimeSync({
+    scope: "sessions",
+    resourceId: "all",
+    onRemoteUpdate: () => fetchSessions(),
+  });
+
   const handleRedetectSession = async (sessionId: string) => {
     setRedetectingId(sessionId);
     try {
@@ -270,6 +278,14 @@ export default function SessionsPage() {
             <p className="text-xs text-[var(--rl-text-muted)] mt-0.5">
               Chronological feed of every uploaded quotation, issued cover note, and isolated sandbox test session.
             </p>
+            <RealtimePresenceBanner
+              connected={realtime.connected}
+              otherEditors={realtime.otherEditors}
+              pendingUpdate={realtime.pendingUpdate}
+              onRefreshNow={() => void realtime.refreshNow()}
+              onDismissPending={realtime.dismissPendingUpdate}
+              className="mt-2"
+            />
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">

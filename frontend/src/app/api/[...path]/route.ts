@@ -77,6 +77,17 @@ async function proxy(request: NextRequest, context: RouteContext): Promise<Respo
     }
 
     const isNullBodyStatus = upstream.status === 204 || upstream.status === 205 || upstream.status === 304;
+    const contentType = upstream.headers.get("content-type") || "";
+    if (!isNullBodyStatus && contentType.includes("text/event-stream") && upstream.body) {
+      responseHeaders.set("cache-control", "no-cache, no-transform");
+      responseHeaders.set("x-accel-buffering", "no");
+      return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: responseHeaders,
+      });
+    }
+
     const responseBody = isNullBodyStatus ? null : await upstream.arrayBuffer();
 
     return new Response(responseBody, {

@@ -81,20 +81,13 @@ def _apply_service_fee_if_included(
         return
     if explicit_service_fee and str(explicit_service_fee).strip():
         return
-    if str((fields.get("service_fee") or {}).get("value") or "").strip():
-        return
-    fee_setting = db.get(AppSetting, "default_runner_fee")
-    if fee_setting is not None:
-        try:
-            fields["service_fee"] = {
-                "value": f"{float((fee_setting.value or {}).get('amount', 0)):.2f}",
-                "status": "ready",
-                "message": "",
-            }
-            return
-        except (TypeError, ValueError):
-            pass
-    fields.setdefault("service_fee", {"value": "", "status": "ready", "message": ""})
+    from app.services.admin_service import get_runner_fee_default
+
+    fields["service_fee"] = {
+        "value": f"{get_runner_fee_default(db):.2f}",
+        "status": "ready",
+        "message": "",
+    }
 
 
 def apply_gemini_result(
@@ -192,7 +185,6 @@ def apply_gemini_result(
         db,
         fields,
         inc_rf=inc_rf,
-        explicit_service_fee=gemini_res.get("service_fee"),
     )
 
     # Recompute quotation total_amount when fees are disabled vs enabled
