@@ -2,36 +2,6 @@
   "schema_version": "1.0",
   "active_soft_limit": 50,
   "skills": {
-    "agent-browser": {
-      "location": "active",
-      "path": ".agents/skills/agent-browser",
-      "category": "testing-browser",
-      "scope": "universal",
-      "source": "risklocker-custom",
-      "description_chars": 219,
-      "est_boot_tokens": 64,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "baseline-ui": {
-      "location": "active",
-      "path": ".agents/skills/baseline-ui",
-      "category": "frontend",
-      "scope": "universal",
-      "source": "local-repo",
-      "description_chars": 234,
-      "est_boot_tokens": 67,
-      "updated_at": "2026-11-13T21:45:55+08:00"
-    },
-    "clean-code-and-refactoring": {
-      "location": "active",
-      "path": ".agents/skills/clean-code-and-refactoring",
-      "category": "architecture",
-      "scope": "universal",
-      "source": "risklocker-custom",
-      "description_chars": 237,
-      "est_boot_tokens": 72,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
     "design2-pdf-parity": {
       "location": "active",
       "path": ".agents/skills/design2-pdf-parity",
@@ -42,15 +12,15 @@
       "est_boot_tokens": 70,
       "updated_at": "2026-11-11T16:02:03+08:00"
     },
-    "edge-case-and-scenario-matrix": {
+    "lean-context": {
       "location": "active",
-      "path": ".agents/skills/edge-case-and-scenario-matrix",
-      "category": "testing-browser",
+      "path": ".agents/skills/lean-context",
+      "category": "general",
       "scope": "universal",
-      "source": "risklocker-custom",
-      "description_chars": 248,
-      "est_boot_tokens": 75,
-      "updated_at": "2026-11-13T21:43:47+08:00"
+      "source": "local-repo",
+      "description_chars": 123,
+      "est_boot_tokens": 40,
+      "updated_at": "2026-11-19T15:33:29+08:00"
     },
     "malaysian-motor-insurance": {
       "location": "active",
@@ -62,16 +32,6 @@
       "est_boot_tokens": 80,
       "updated_at": "2026-11-11T12:58:06+08:00"
     },
-    "playwright": {
-      "location": "active",
-      "path": ".agents/skills/playwright",
-      "category": "testing-browser",
-      "scope": "universal",
-      "source": "curated-global+risklocker",
-      "description_chars": 209,
-      "est_boot_tokens": 61,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
     "postgres-ledger-migrations": {
       "location": "active",
       "path": ".agents/skills/postgres-ledger-migrations",
@@ -81,66 +41,6 @@
       "description_chars": 215,
       "est_boot_tokens": 66,
       "updated_at": "2026-11-11T12:58:06+08:00"
-    },
-    "python-testing": {
-      "location": "active",
-      "path": ".agents/skills/python-testing",
-      "category": "testing-browser",
-      "scope": "universal",
-      "source": "risklocker-custom",
-      "description_chars": 208,
-      "est_boot_tokens": 62,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "security-best-practices": {
-      "location": "active",
-      "path": ".agents/skills/security-best-practices",
-      "category": "security",
-      "scope": "universal",
-      "source": "curated-global",
-      "description_chars": 226,
-      "est_boot_tokens": 68,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "shadcn": {
-      "location": "active",
-      "path": ".agents/skills/shadcn",
-      "category": "frontend",
-      "scope": "universal",
-      "source": "risklocker-custom+radix",
-      "description_chars": 214,
-      "est_boot_tokens": 61,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "system-design-and-architecture": {
-      "location": "active",
-      "path": ".agents/skills/system-design-and-architecture",
-      "category": "architecture",
-      "scope": "universal",
-      "source": "risklocker-custom",
-      "description_chars": 249,
-      "est_boot_tokens": 76,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "systematic-debugging": {
-      "location": "active",
-      "path": ".agents/skills/systematic-debugging",
-      "category": "general",
-      "scope": "universal",
-      "source": "obra/superpowers",
-      "description_chars": 91,
-      "est_boot_tokens": 34,
-      "updated_at": "2026-11-11T16:02:03+08:00"
-    },
-    "test-driven-development": {
-      "location": "active",
-      "path": ".agents/skills/test-driven-development",
-      "category": "testing-browser",
-      "scope": "universal",
-      "source": "obra/superpowers",
-      "description_chars": 79,
-      "est_boot_tokens": 32,
-      "updated_at": "2026-11-11T16:02:03+08:00"
     },
     "domain-interrogation-and-reality-gate": {
       "location": "vault/architecture",

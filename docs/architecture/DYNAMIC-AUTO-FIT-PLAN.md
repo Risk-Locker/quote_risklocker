@@ -81,7 +81,7 @@ On a standard A4 portrait canvas (794px × 1123px):
 
 ## 4. Multi-Phase Implementation Plan & Model Execution
 
-> Executed under Max-Force `Gemini 3.8 Flash (High)` (`inherit` / `swarm` `parallel-variant-tournament` per `.agents/manifest.yaml` `v2.3` & `.agents/rules/05-live-reality-and-freshness.md`).
+> Executed under Max-Force `Gemini 3.8 Flash (High)` (`inherit` / `swarm` `parallel-variant-tournament` per `.agents/manifest.yaml` `v2.3` & live-reality-and-freshness rules).
 
 ### Phase 1: Multi-Line Title Wrap & Dynamic Typography
 - **Assigned Execution Mode**: `07-frontend-ux-lead` + `06-backend-ledger-lead` (`Gemini 3.8 Flash (High)` / Fast-to-Deep Parity).

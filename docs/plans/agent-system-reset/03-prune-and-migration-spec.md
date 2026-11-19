@@ -18,11 +18,11 @@ Every action is reversible through git. Nothing is deleted outside this list. Ex
 Result: always-on rules go from about 28 KB to about 3 KB (core) plus 1.2 KB (UI rule, loaded on demand).
 
 Other always-on files:
-- `.agents/plugins/risklocker-ui/rules/AGENTS.md` (0.9 KB): merge its 4 lines into Rule 03. Delete the plugin rule file.
-- `.agents/plugins/ui-21st-dev/rules/AGENTS.md` (0.7 KB): check if the plugin is used. If not, delete the folder.
+- legacy risklocker-ui plugin rule (0.9 KB): merge its 4 lines into Rule 03. Delete the plugin rule file.
+- legacy ui-21st-dev plugin rule (0.7 KB): check if the plugin is used. If not, delete the folder.
 - Per-folder `AGENTS.md`: remove sentences that repeat the core. Target 1.5 KB each.
 
-## 2. Role subagents (`.agents/agents/`, 9 files, 38 KB)
+## 2. Role subagents (legacy agents dir, 9 files, 38 KB)
 
 Rule 01 says no roleplay. The nine numbered "company roles" are roleplay. Proposal:
 

@@ -10,7 +10,7 @@ Method: file sizes measured with PowerShell, rule text read in full, hooks and C
 | Root `AGENTS.md` + plugin `AGENTS.md` | 3 | 8.5 KB | Every turn |
 | Per-folder `AGENTS.md` (backend, frontend, migrations) | 3 | 6.1 KB | When working in that folder |
 | Skills (21 active, descriptions always, body on trigger) | 21 | 163 KB (SKILL.md only) | Description always; body on demand |
-| Role subagents (`.agents/agents`) | 9 | 38 KB | Listed every turn |
+| Role subagents (legacy agents dir) | 9 | 38 KB | Listed every turn |
 | Hooks | 5 scripts | 64 KB | All four lifecycle hooks are `enabled: false`; only `daily_radar.py` is used (by CI) |
 | Logs and proposals | 8 | 410 KB | Never useful to a model (400 KB is one archive log) |
 | Skills vault (dormant) | 96 | 767 KB | Never, unless mounted |

@@ -4,28 +4,18 @@
 
 ## Budget Snapshot
 
-- **Active Mounted Skills (`.agents/skills/`):** `14` / `50` soft budget (`~888` estimated boot prompt tokens)
+- **Active Mounted Skills (`.agents/skills/`):** `4` / `50` soft budget (`~256` estimated boot prompt tokens)
 - **Cold Vault Skills (`.agents/skills-vault/`):** `37` (`0` boot prompt tokens until mounted)
-- **Universal Scope Skills (`init-ai-factory.py`):** `48`
+- **Universal Scope Skills (`init-ai-factory.py`):** `38`
 
 ## Active Mounted Skills
 
 | Skill | Category | Scope | Source | Est. Tokens |
 | :--- | :--- | :--- | :--- | ---: |
-| `agent-browser` | `testing-browser` | `universal` | `risklocker-custom` | ~64 |
-| `baseline-ui` | `frontend` | `universal` | `local-repo` | ~67 |
-| `clean-code-and-refactoring` | `architecture` | `universal` | `risklocker-custom` | ~72 |
 | `design2-pdf-parity` | `domain` | `project` | `risklocker-custom` | ~70 |
-| `edge-case-and-scenario-matrix` | `testing-browser` | `universal` | `risklocker-custom` | ~75 |
+| `lean-context` | `general` | `universal` | `local-repo` | ~40 |
 | `malaysian-motor-insurance` | `domain` | `project` | `risklocker-custom` | ~80 |
-| `playwright` | `testing-browser` | `universal` | `curated-global+risklocker` | ~61 |
 | `postgres-ledger-migrations` | `backend-db` | `project` | `risklocker-custom` | ~66 |
-| `python-testing` | `testing-browser` | `universal` | `risklocker-custom` | ~62 |
-| `security-best-practices` | `security` | `universal` | `curated-global` | ~68 |
-| `shadcn` | `frontend` | `universal` | `risklocker-custom+radix` | ~61 |
-| `system-design-and-architecture` | `architecture` | `universal` | `risklocker-custom` | ~76 |
-| `systematic-debugging` | `general` | `universal` | `obra/superpowers` | ~34 |
-| `test-driven-development` | `testing-browser` | `universal` | `obra/superpowers` | ~32 |
 
 ## Cold Vault Skills
 
