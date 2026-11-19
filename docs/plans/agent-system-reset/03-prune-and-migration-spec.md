@@ -1,8 +1,8 @@
-﻿# Prune and Migration Spec
+# Prune and Migration Spec
 
 Every action is reversible through git. Nothing is deleted outside this list. Execute one milestone at a time (see `00-master-plan.md`).
 
-## 1. Rules (`.agents/rules/`)
+## 1. Rules (legacy rules dir)
 
 | File | Size | Action | Where the content goes |
 | :-- | :-- | :-- | :-- |

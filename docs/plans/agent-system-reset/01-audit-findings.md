@@ -1,4 +1,4 @@
-﻿# Agent System Audit (2026-11-17)
+# Agent System Audit (2026-11-17)
 
 Method: file sizes measured with PowerShell, rule text read in full, hooks and CI inspected, rule trigger types checked against the Antigravity rules guide. Nothing was changed.
 
@@ -6,7 +6,7 @@ Method: file sizes measured with PowerShell, rule text read in full, hooks and C
 
 | Layer | Files | Size | Loaded when |
 | :-- | :-- | :-- | :-- |
-| Always-on rules (`.agents/rules` 00,01,02,04,05,06 + OVH local) | 7 | 19.5 KB | Every turn |
+| Always-on rules (legacy rules 00,01,02,04,05,06 + OVH local) | 7 | 19.5 KB | Every turn |
 | Root `AGENTS.md` + plugin `AGENTS.md` | 3 | 8.5 KB | Every turn |
 | Per-folder `AGENTS.md` (backend, frontend, migrations) | 3 | 6.1 KB | When working in that folder |
 | Skills (21 active, descriptions always, body on trigger) | 21 | 163 KB (SKILL.md only) | Description always; body on demand |
