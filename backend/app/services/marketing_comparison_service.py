@@ -762,12 +762,6 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         explicit_winning_ref=tenure.winning_quotation_ref,
         auto_recommend_rank1=False,
     )
-    visible_for_reason = [e for e in entries if not getattr(e, "is_hidden", False)]
-    ranking_explanations_map: dict[str, str] = {}
-    for e in visible_for_reason:
-        ranking_explanations_map[e.id] = build_underwriter_ranking_explanation(
-            e, visible_for_reason, int(e.rank or 1)
-        )
 
     # 6. Preserve persisted entry version (never drift in-memory on GET)
     for e in entries:
@@ -839,8 +833,24 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             ).first()
 
         prev_sum_ins = float(best_prev.sum_insured) if best_prev else 0.0
-        prev_motor_prem = float(prev_tenure.won_premium) if prev_tenure.won_premium is not None else (float(best_prev.motor_premium) if best_prev else 0.0)
+        prev_motor_prem = float(best_prev.motor_premium) if (best_prev and float(best_prev.motor_premium or 0) > 0) else 0.0
+        prev_total_pay = float(prev_tenure.won_premium) if prev_tenure.won_premium is not None else (float(best_prev.total_payable) if best_prev else 0.0)
+        if prev_motor_prem <= 0.0 and prev_total_pay > 0.0:
+            prev_motor_prem = prev_total_pay
         prev_company = (prev_tenure.winning_company.name if prev_tenure.winning_company else None) or (best_prev.company_name if best_prev else None)
+        prev_agreed = bool(best_prev.agreed_value) if best_prev else None
+        prev_val_type = best_prev.valuation_type if best_prev else None
+        prev_waiver = bool(best_prev.waiver_betterment) if best_prev else None
+        prev_bet_rate = float(best_prev.betterment_rate) if (best_prev and best_prev.betterment_rate is not None) else None
+        prev_bet_disp = best_prev.betterment_display if best_prev else None
+        prev_excess = float(best_prev.excess) if (best_prev and best_prev.excess is not None) else None
+        prev_rate_pct = float(best_prev.rate_percentage) if (best_prev and best_prev.rate_percentage is not None) else None
+        prev_windscreen = float(best_prev.windscreen_sum_insured) if (best_prev and best_prev.windscreen_sum_insured) else None
+        prev_sp = best_prev.special_perils if best_prev else None
+        prev_llp = best_prev.llp_llop if best_prev else None
+        prev_ea = dict(best_prev.extra_addons or {}) if best_prev else {}
+        prev_towing = (best_prev.towing_km or best_prev.towing_limit) if best_prev else None
+        prev_doc_type = (best_prev_sess.document_type if best_prev_sess else None) or ("covernote" if prev_tenure.covernote_session_id else "quotation")
 
         if best_prev_sess:
             p_f = best_prev_sess.draft.fields if best_prev_sess.draft and isinstance(best_prev_sess.draft.fields, dict) else {}
@@ -854,6 +864,24 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 prev_sum_ins = _extract_vehicle_sum_insured(p_f, s_obj=best_prev_sess)
             if prev_motor_prem <= 0.0:
                 prev_motor_prem = _extract_vehicle_motor_premium(p_f)
+            if prev_total_pay <= 0.0:
+                prev_total_pay = round(prev_motor_prem + float(prev_tenure.road_tax or 0.0) + float(prev_tenure.runner_fee or 0.0), 2)
+            if prev_windscreen is None:
+                prev_windscreen = p_res.get("windscreen_sum_insured")
+            if prev_sp is None:
+                prev_sp = p_res.get("special_perils")
+            if prev_llp is None:
+                prev_llp = p_res.get("llp_llop")
+            if not prev_ea:
+                prev_ea = dict(p_res.get("extra_addons") or {})
+            if not prev_towing:
+                prev_towing = p_res.get("towing_km")
+            if prev_excess is None:
+                prev_excess = _extract_excess(p_f, s_obj=best_prev_sess)
+            if prev_agreed is None:
+                vtype_str = _safe_str(p_f.get("valuation_type") or p_f.get("sum_insured_type"))
+                prev_agreed = "agreed" in vtype_str.lower()
+                prev_val_type = "agreed_value" if prev_agreed else "market_value"
 
         prev_perils_str = ", ".join(prev_perils) if prev_perils else "Standard Policy Coverage"
 
@@ -862,22 +890,43 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "year": prev_tenure.coverage_start_date.year if prev_tenure.coverage_start_date else (current_year - 1),
             "period": f"{prev_tenure.coverage_start_date.strftime('%d/%m/%Y')} - {prev_tenure.coverage_end_date.strftime('%d/%m/%Y')}" if (prev_tenure.coverage_start_date and prev_tenure.coverage_end_date) else f"{current_year - 1}",
             "insurer": prev_company or "Previous Insurer",
-            "policy_number": prev_tenure.policy_number,
+            "policy_number": prev_tenure.policy_number or (best_prev_sess.quotation_ref if best_prev_sess else None),
+            "document_type": prev_doc_type,
             "ncd_percentage": float(prev_tenure.ncd_percentage) if prev_tenure.ncd_percentage is not None else None,
             "sum_insured": prev_sum_ins,
+            "valuation_type": prev_val_type or ("agreed_value" if prev_agreed else "market_value"),
+            "agreed_value": prev_agreed,
             "insurance_premium": prev_motor_prem,
+            "total_payable": prev_total_pay,
+            "road_tax": float(best_prev.road_tax) if best_prev else float(prev_tenure.road_tax or 0.0),
+            "runner_fee": float(best_prev.runner_fee) if best_prev else float(prev_tenure.runner_fee or 0.0),
             "perils": prev_perils_str,
             "model": (tenure.tracked_vehicle.car_model if tenure.tracked_vehicle else None) or (prev_tenure.tracked_vehicle.car_model if prev_tenure.tracked_vehicle else "Standard Model"),
             "yom": getattr(tenure.tracked_vehicle, "manufacture_year", None) or getattr(prev_tenure.tracked_vehicle, "manufacture_year", None) or 2023,
             "sub_agent": tenure.sub_agent_name or prev_tenure.sub_agent_name or "",
-            "windscreen": float(best_prev.windscreen_sum_insured) if best_prev and best_prev.windscreen_sum_insured else None,
-            "towing": best_prev.towing_km or best_prev.towing_limit if best_prev else "Unlimited",
+            "windscreen": prev_windscreen,
+            "towing": prev_towing or "Unlimited",
+            "waiver_betterment": prev_waiver,
+            "betterment_rate": prev_bet_rate,
+            "betterment_display": prev_bet_disp,
+            "excess": prev_excess,
+            "rate_percentage": prev_rate_pct,
+            "special_perils": prev_sp,
+            "llp_llop": prev_llp,
+            "extra_addons": prev_ea,
         }
 
         # Carry over NCD percentage if not yet set on current tenure
         if tenure.ncd_percentage is None and prev_tenure.ncd_percentage is not None:
             tenure.ncd_percentage = prev_tenure.ncd_percentage
             needs_commit = True
+
+    visible_for_reason = [e for e in entries if not getattr(e, "is_hidden", False)]
+    ranking_explanations_map: dict[str, str] = {}
+    for e in visible_for_reason:
+        ranking_explanations_map[e.id] = build_underwriter_ranking_explanation(
+            e, visible_for_reason, int(e.rank or 1), prev_policy=prev_policy_data
+        )
 
     # 4. Formulate Recommended Sum Insured matrix
     # 4. Formulate Recommended Sum Insured matrix (genuine underwriter figures only)
@@ -1319,11 +1368,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "manual_overrides": get_entry_overrides(e),
             "sort_order": e.sort_order,
             "notes": e.notes,
-            "ranking_explanation": (
-                e.notes
-                if (e.notes and e.notes.startswith(("Ranked #", "Manual Rank #", "Best Value:")))
-                else ranking_explanations_map.get(e.id)
-            ),
+            "ranking_explanation": ranking_explanations_map.get(e.id) or e.notes,
             "customer_name": (
                 (f_obj.get("customer_name", {}).get("value") if isinstance(f_obj.get("customer_name"), dict) else f_obj.get("customer_name"))
                 if f_obj else None

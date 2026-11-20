@@ -18,7 +18,7 @@ from app.core.config import Settings
 from app.db.session import get_db
 from app.services.realtime_hub import publish_realtime_update
 from app.models.enums import Role
-from app.models.tables import InsuranceTenure, Session as SessionModel, TenureComparisonEntry, UploadedFile, User, new_id
+from app.models.tables import InsuranceCompany, InsuranceTenure, Session as SessionModel, TenureComparisonEntry, UploadedFile, User, new_id
 from app.services.marketing_comparison_service import (
     delete_comparison_entry,
     format_whatsapp_teaser,
@@ -570,34 +570,39 @@ async def upload_previous_policy(
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Upload a quotation or schedule PDF specifically for the previous policy year (e.g. 2025)."""
+    """Upload a Cover Note or Quotation PDF for the previous policy year, extract everything, and link it in the ledger."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
     if not tenure:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenure not found")
 
-    current_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
-    prev_year = current_year - 1
+    from dateutil.relativedelta import relativedelta
 
-    year_start = date(prev_year, 1, 1)
-    year_end = date(prev_year, 12, 31)
+    current_start = tenure.coverage_start_date or datetime.now(timezone.utc)
+    if current_start.tzinfo is None:
+        current_start = current_start.replace(tzinfo=timezone.utc)
+    prev_year = current_start.year - 1
+    year_start = datetime(prev_year, 1, 1, tzinfo=timezone.utc)
+    year_end = datetime(prev_year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 
-    prev_tenure = db.scalar(
-        select(InsuranceTenure)
-        .where(
-            InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id,
-            InsuranceTenure.coverage_start_date >= year_start,
-            InsuranceTenure.coverage_start_date <= year_end,
+    prev_tenure = db.get(InsuranceTenure, tenure.previous_tenure_id) if tenure.previous_tenure_id else None
+    if not prev_tenure:
+        prev_tenure = db.scalar(
+            select(InsuranceTenure)
+            .where(
+                InsuranceTenure.tracked_vehicle_id == tenure.tracked_vehicle_id,
+                InsuranceTenure.id != tenure.id,
+                InsuranceTenure.coverage_start_date >= year_start,
+                InsuranceTenure.coverage_start_date <= year_end,
+                InsuranceTenure.is_discarded == False,
+            )
+            .order_by(InsuranceTenure.coverage_start_date.desc())
+            .limit(1)
         )
-        .limit(1)
-    )
 
     if not prev_tenure:
-        from datetime import timedelta
-        st_month = tenure.coverage_start_date.month if tenure.coverage_start_date else 1
-        st_day = min(tenure.coverage_start_date.day if tenure.coverage_start_date else 1, 28)
-        prev_start = date(prev_year, st_month, st_day)
-        prev_end = date(current_year, st_month, st_day) - timedelta(days=1)
+        prev_start = current_start - relativedelta(years=1)
+        prev_end = current_start - relativedelta(days=1)
         prev_tenure = InsuranceTenure(
             id=new_id(),
             tracked_vehicle_id=tenure.tracked_vehicle_id,
@@ -606,15 +611,30 @@ async def upload_previous_policy(
             customer_name=tenure.customer_name,
             coverage_start_date=prev_start,
             coverage_end_date=prev_end,
-            status="completed",
-            expiry_month=prev_end.strftime("%B"),
+            status="hit",
+            stage="Close - Win",
+            business_type="Renewal",
+            tenure_chain_id=tenure.tenure_chain_id,
+            expiry_month=prev_end.strftime("%Y-%m"),
             road_tax=float(tenure.road_tax),
             runner_fee=float(tenure.runner_fee),
+            include_road_tax=tenure.include_road_tax,
+            include_runner_fee=tenure.include_runner_fee,
             sub_agent_name=tenure.sub_agent_name,
+            created_by_id=user.id,
+            is_hidden=False,
+            is_projected=False,
+            is_discarded=False,
         )
         db.add(prev_tenure)
-        db.commit()
-        db.refresh(prev_tenure)
+        db.flush()
+
+    if tenure.previous_tenure_id != prev_tenure.id:
+        tenure.previous_tenure_id = prev_tenure.id
+    if prev_tenure.tenure_chain_id != tenure.tenure_chain_id:
+        prev_tenure.tenure_chain_id = tenure.tenure_chain_id
+    db.commit()
+    db.refresh(prev_tenure)
 
     idempotency_key = f"prev_comp_{prev_tenure.id}_{new_id()[:12]}"
     try:
@@ -633,6 +653,67 @@ async def upload_previous_policy(
             queued.session.is_tenure_active = True
             db.commit()
 
+        # Run extraction synchronously so Cover Note or Quotation fields & ledger populate immediately
+        if queued.job and queued.job.state == "queued":
+            try:
+                from app.storage.supabase import SupabaseStorage
+                from app.workers.extraction_worker import process_extraction_job
+
+                try:
+                    storage_inst = SupabaseStorage(settings)
+                except Exception:
+                    storage_inst = None
+                process_extraction_job(
+                    db,
+                    settings,
+                    queued.job,
+                    worker_id=f"prev_policy_{new_id()[:8]}",
+                    storage=storage_inst,
+                )
+            except Exception as extract_exc:
+                logger.warning("Inline extraction warning for previous policy job %s: %s", queued.job.id, extract_exc)
+
+        # Materialize comparison entry on prev_tenure so Quotations and Cover Notes both populate full fields
+        try:
+            get_marketing_comparison(db, prev_tenure.id)
+        except Exception as mat_exc:
+            logger.warning("Could not materialize comparison for prev_tenure %s: %s", prev_tenure.id, mat_exc)
+
+        db.refresh(prev_tenure)
+        prev_entries = list(
+            db.scalars(
+                select(TenureComparisonEntry)
+                .where(TenureComparisonEntry.tenure_id == prev_tenure.id)
+                .order_by(TenureComparisonEntry.is_recommended.desc(), TenureComparisonEntry.total_payable.asc())
+            ).all()
+        )
+        best_prev = prev_entries[0] if prev_entries else None
+        if best_prev:
+            if not prev_tenure.winning_company_id and best_prev.company_id:
+                prev_tenure.winning_company_id = best_prev.company_id
+            if prev_tenure.won_premium is None and float(best_prev.total_payable or 0) > 0:
+                prev_tenure.won_premium = float(best_prev.total_payable)
+            if not prev_tenure.winning_quotation_ref and getattr(best_prev, "quotation_ref", None):
+                prev_tenure.winning_quotation_ref = best_prev.quotation_ref
+
+        if prev_tenure.coverage_end_date:
+            prev_tenure.expiry_month = prev_tenure.coverage_end_date.strftime("%Y-%m")
+        prev_tenure.status = "hit"
+        prev_tenure.stage = "Close - Win"
+        prev_tenure.is_hidden = False
+        prev_tenure.is_projected = False
+        if tenure.ncd_percentage is None and prev_tenure.ncd_percentage is not None:
+            tenure.ncd_percentage = prev_tenure.ncd_percentage
+        record_stage_timestamp(prev_tenure, "Close - Win")
+        db.commit()
+
+        publish_realtime_update(
+            scope="comparison",
+            resource_id=tenure_id,
+            actor=user,
+            summary="Previous policy extracted and linked to ledger",
+            extra_scopes=("ledger",),
+        )
         return {
             "status": "success",
             "prev_tenure_id": prev_tenure.id,
@@ -733,6 +814,42 @@ def patch_comparison_entry(
     edited_fields: list[str] = []
     clear_field: str | None = payload.clear_override_field.strip() if payload.clear_override_field else None
 
+    # Capture non-overridden PDF-detected baseline values BEFORE applying this edit so reverting back to detected auto-clears Manual
+    s_baseline_sess = db.get(SessionModel, entry.session_id) if entry.session_id else None
+    detected_baseline: dict[str, Any] = {}
+    if s_baseline_sess and s_baseline_sess.draft:
+        existing_overrides = set(get_entry_overrides(entry))
+        opts_b = dict(s_baseline_sess.draft.display_options or {})
+        detected_baseline = dict(opts_b.get("comparison_detected_baseline") or {})
+        baseline_dirty = False
+        baseline_fields = (
+            "sum_insured",
+            "motor_premium",
+            "agreed_value",
+            "valuation_type",
+            "waiver_betterment",
+            "betterment_rate",
+            "towing_limit",
+            "special_perils",
+            "llp_llop",
+            "extra_addons",
+            "excess",
+            "windscreen_sum_insured",
+        )
+        for bf in baseline_fields:
+            if bf not in existing_overrides and bf not in detected_baseline:
+                bval = getattr(entry, bf, None)
+                if isinstance(bval, Decimal):
+                    bval = float(bval)
+                elif isinstance(bval, dict):
+                    bval = dict(bval)
+                detected_baseline[bf] = bval
+                baseline_dirty = True
+        if baseline_dirty:
+            opts_b["comparison_detected_baseline"] = detected_baseline
+            s_baseline_sess.draft.display_options = opts_b
+            flag_modified(s_baseline_sess.draft, "display_options")
+
     if payload.is_hidden is not None:
         entry.is_hidden = payload.is_hidden
     if payload.manual_rank is not None:
@@ -744,14 +861,14 @@ def patch_comparison_entry(
 
     if payload.agreed_value is not None or payload.valuation_type is not None:
         if payload.valuation_type is not None:
-            is_agreed = str(payload.valuation_type).strip().lower() in ("agreed value", "agreed_value")
+            is_agreed = payload.valuation_type.strip().lower() in ("agreed value", "agreed_value")
         else:
             is_agreed = bool(payload.agreed_value)
         entry.agreed_value = is_agreed
         entry.valuation_type = "agreed_value" if is_agreed else "market_value"
         edited_fields.extend(["agreed_value", "valuation_type"])
 
-    b_mode = str(payload.betterment_mode or "").strip().lower()
+    b_mode = (payload.betterment_mode or "").strip().lower()
     if b_mode == "auto":
         clear_field = "waiver_betterment"
     elif payload.betterment_rate is not None:
@@ -944,23 +1061,65 @@ def patch_comparison_entry(
         elif clear_field == "notes":
             entry.notes = None
 
-    if edited_fields or clear_field:
+    auto_cleared_fields: list[str] = []
+    if edited_fields and detected_baseline:
+        def _norm_opt_text(val: Any) -> str:
+            s = str(val or "").strip().lower()
+            return "" if s in {"", "-", "—", "none", "nil", "no", "not included", "not covered", "tiada"} else s
+
+        def _matches_detected_val(fk: str, cur_val: Any, base_val: Any) -> bool:
+            if fk in ("sum_insured", "motor_premium", "excess", "windscreen_sum_insured", "betterment_rate"):
+                return abs(float(cur_val or 0.0) - float(base_val or 0.0)) < 0.01
+            if fk in ("agreed_value", "waiver_betterment"):
+                return bool(cur_val) == bool(base_val)
+            if fk in ("special_perils", "llp_llop"):
+                return _norm_opt_text(cur_val) == _norm_opt_text(base_val)
+            if fk in ("towing_limit", "valuation_type"):
+                return str(cur_val or "").strip().lower() == str(base_val or "").strip().lower()
+            if fk == "extra_addons":
+                c_map = {str(k): str(v) for k, v in (cur_val or {}).items() if str(v).strip().lower() == "yes"}
+                b_map = {str(k): str(v) for k, v in (base_val or {}).items() if str(v).strip().lower() == "yes"}
+                return c_map == b_map
+            return False
+
+        remaining_edited: list[str] = []
+        for ef in edited_fields:
+            if ef in detected_baseline and _matches_detected_val(ef, getattr(entry, ef, None), detected_baseline[ef]):
+                if ef not in auto_cleared_fields:
+                    auto_cleared_fields.append(ef)
+            else:
+                remaining_edited.append(ef)
+        if "agreed_value" in auto_cleared_fields and "valuation_type" not in auto_cleared_fields:
+            auto_cleared_fields.append("valuation_type")
+        if "valuation_type" in auto_cleared_fields and "agreed_value" not in auto_cleared_fields:
+            auto_cleared_fields.append("agreed_value")
+        if "waiver_betterment" in auto_cleared_fields and "betterment_rate" not in auto_cleared_fields:
+            auto_cleared_fields.append("betterment_rate")
+        if "betterment_rate" in auto_cleared_fields and "waiver_betterment" not in auto_cleared_fields:
+            auto_cleared_fields.append("waiver_betterment")
+        edited_fields = [f for f in remaining_edited if f not in auto_cleared_fields]
+
+    sync_fields = list(dict.fromkeys([*edited_fields, *auto_cleared_fields]))
+
+    if edited_fields or clear_field or auto_cleared_fields:
         record_manual_overrides(
             entry,
             edited_fields=edited_fields,
             clear_field=clear_field,
         )
+        for cf in auto_cleared_fields:
+            record_manual_overrides(entry, clear_field=cf)
         if b_mode == "auto":
             record_manual_overrides(entry, clear_field="betterment_rate")
         entry.version = (entry.version or 1) + 1
 
     # Sync edited fields & benefits bidirectionally to linked QuotationDraft
-    if edited_fields and entry.session_id:
+    if sync_fields and entry.session_id:
         prem_delta_dec = sync_session_draft_from_comparison(
             db,
             tenure,
             entry.session_id,
-            edited_fields=edited_fields,
+            edited_fields=sync_fields,
             field_values={
                 "sum_insured": entry.sum_insured,
                 "motor_premium": entry.motor_premium,
@@ -975,11 +1134,37 @@ def patch_comparison_entry(
                 "excess": entry.excess,
                 "windscreen_sum_insured": entry.windscreen_sum_insured,
             },
-            explicit_motor_premium=("motor_premium" in edited_fields),
-            user_id=str(user.id) if getattr(user, "id", None) else None,
+            explicit_motor_premium=("motor_premium" in sync_fields),
+            user_id=user.id if getattr(user, "id", None) else None,
         )
-        if prem_delta_dec != Decimal("0.00") and "motor_premium" not in edited_fields:
+        if prem_delta_dec != Decimal("0.00") and "motor_premium" not in sync_fields:
             entry.motor_premium = round(max(0.0, float(entry.motor_premium or 0.0) + float(prem_delta_dec)), 2)
+
+        if auto_cleared_fields and s_baseline_sess and s_baseline_sess.draft and isinstance(s_baseline_sess.draft.fields, dict):
+            draft_clear_map = {
+                "sum_insured": ("sum_insured", "coverage_amount"),
+                "motor_premium": ("motor_premium", "premium", "premium_due"),
+                "agreed_value": ("valuation_type",),
+                "valuation_type": ("valuation_type",),
+                "towing_limit": ("towing", "towing_limit"),
+                "special_perils": ("special_perils",),
+                "llp_llop": ("llp_llop",),
+                "waiver_betterment": ("waiver_of_betterment",),
+                "betterment_rate": ("betterment_rate",),
+                "excess": ("excess", "excess_amount"),
+                "windscreen_sum_insured": ("windscreen_sum_insured", "windscreen"),
+                "extra_addons": ("extra_addons",),
+            }
+            df_clean = dict(s_baseline_sess.draft.fields)
+            df_touched = False
+            for cf in auto_cleared_fields:
+                for dk in draft_clear_map.get(cf, ()):
+                    if isinstance(df_clean.get(dk), dict) and df_clean[dk].get("status") == "manual_override":
+                        df_clean[dk] = {**df_clean[dk], "status": "ready"}
+                        df_touched = True
+            if df_touched:
+                s_baseline_sess.draft.fields = df_clean
+                flag_modified(s_baseline_sess.draft, "fields")
 
     eff_rt = float(tenure.road_tax) if (tenure and tenure.include_road_tax is not False) else 0.0
     eff_rf = float(tenure.runner_fee) if (tenure and tenure.include_runner_fee is not False) else 0.0
@@ -1030,9 +1215,9 @@ def patch_comparison_entry(
         "motor_premium": float(entry.motor_premium or 0.0),
         "total_payable": float(entry.total_payable or 0.0),
         "rate_percentage": float(entry.rate_percentage or 0.0),
-        "agreed_value": bool(entry.agreed_value),
+        "agreed_value": entry.agreed_value,
         "valuation_type": entry.valuation_type,
-        "waiver_betterment": bool(entry.waiver_betterment),
+        "waiver_betterment": entry.waiver_betterment,
         "betterment_rate": float(entry.betterment_rate or 0.0),
         "betterment_display": entry.betterment_display,
         "towing_limit": entry.towing_limit,
@@ -1366,7 +1551,7 @@ def patch_tenure_covernote(
             db,
             tenure_id,
             data,
-            user_id=str(user.id) if getattr(user, "id", None) else None,
+            user_id=user.id if getattr(user, "id", None) else None,
         )
         publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Cover note updated", extra_scopes=("ledger",))
         return res

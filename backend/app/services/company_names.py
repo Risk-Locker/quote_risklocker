@@ -35,6 +35,9 @@ OFFICIAL_INSURER_NAMES: dict[str, str] = {
     "TOKIO_MARINE": "Tokio Marine Insurans (Malaysia) Berhad",
     "RHB": "RHB Insurance Berhad",
     "LIBERTY": "Liberty General Insurance Berhad",
+    "MMIP": "Malaysian Motor Insurance Pool (MMIP)",
+    "MALAYSIAN_MOTOR_INSURANCE_POOL": "Malaysian Motor Insurance Pool (MMIP)",
+    "MALAYSIA_MOTOR_INSURANCE_POOL": "Malaysian Motor Insurance Pool (MMIP)",
 }
 
 
@@ -43,6 +46,9 @@ def get_official_insurer_name(raw_name: str | None) -> str:
     if not raw_name:
         return "QBE Insurance (Malaysia) Berhad"
     clean = re.sub(r"[^A-Za-z0-9]", "_", raw_name.upper())
+
+    if "MMIP" in clean or "MOTOR_INSURANCE_POOL" in clean:
+        return OFFICIAL_INSURER_NAMES["MMIP"]
 
     if clean in OFFICIAL_INSURER_NAMES:
         return OFFICIAL_INSURER_NAMES[clean]
@@ -59,6 +65,8 @@ def get_insurer_short_name(raw_name: str | None) -> str:
     if not raw_name:
         return "QBE"
     upper = raw_name.upper()
+    if "MMIP" in upper or "MOTOR INSURANCE POOL" in upper:
+        return "MMIP"
     if "QBE" in upper:
         return "QBE"
     if "ETIQA" in upper:

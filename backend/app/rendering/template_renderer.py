@@ -867,6 +867,8 @@ def render_quotation_html(
     is_design2 = bool(
         config.get("layout_engine") == "design2"
         or config.get("template_key") == "motor_modern_design_2"
+        or str(config.get("template_key") or "").startswith("motor_modern_design_2")
+        or str(config.get("v7_master_key") or "").startswith("motor_modern_design_2")
         or "design 2" in str(template_name or "").lower()
         or "design2" in str(config.get("template_name") or config.get("name") or "").lower()
     )

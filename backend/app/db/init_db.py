@@ -26,7 +26,8 @@ from app.services.auth_service import ensure_super_admin
 
 DEFAULT_COMPANIES = [
     ("QBE", "QBE", ["qbe"]),
-    ("Kurnia", "Other / Unknown", ["Kurnia", "Kurnia Insurans", "Kurnia Insurance", "Kurnia Insurans (Malaysia) Berhad"]),
+    ("Kurnia", "Amgen / AmAssurance / Kurnia-style", ["Kurnia", "Kurnia Insurans", "Kurnia Insurance", "Kurnia Insurans (Malaysia) Berhad", "www.kurnia.com", "kurnia.com"]),
+    ("MMIP", "Other / Unknown", ["MMIP", "Malaysian Motor Insurance Pool", "Malaysia Motor Insurance Pool", "Motor Insurance Pool"]),
 ]
 
 DEFAULT_FIELD_ALIASES = {

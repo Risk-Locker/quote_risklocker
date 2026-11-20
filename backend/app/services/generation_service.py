@@ -350,6 +350,8 @@ def get_company_catalog_key(company: Any) -> str:
     if slug:
         return slug
     name = (getattr(company, "name", "") or "").strip().lower()
+    if "mmip" in name or "motor insurance pool" in name:
+        return "mmip"
     if "etiqa" in name:
         return "etiqa"
     if "lonpac" in name:

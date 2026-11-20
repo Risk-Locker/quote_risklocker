@@ -33,6 +33,7 @@ const COMMON_INSURERS: Array<{ name: string; defaultTowing: string }> = [
   { name: "Tune Protect", defaultTowing: "RM 300" },
   { name: "QBE", defaultTowing: "RM 500" },
   { name: "Allianz", defaultTowing: "150 km" },
+  { name: "MMIP", defaultTowing: "No towing" },
 ];
 
 export function FastQuoteModal({

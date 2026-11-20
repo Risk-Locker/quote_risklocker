@@ -153,10 +153,21 @@ def _apply_scalar_decision(db, draft: QuotationDraft, user, operation: dict) -> 
     if decision == "edit":
         if "value" not in operation:
             raise AppError("Edited fields require a value.", 422)
-        field["value"] = _normalize_edited_value(field_name, operation.get("value"))
+        next_val = _normalize_edited_value(field_name, operation.get("value"))
+        if field_name == "coverage_type":
+            curr_comp = _draft_field_text(draft, "insurance_company").lower()
+            if "mmip" in curr_comp or "motor insurance pool" in curr_comp:
+                next_val = "Third Party"
+        field["value"] = next_val
         field["status"] = "ready"
         field["message"] = ""
         field["source"] = "manual"
+        if field_name == "insurance_company" and next_val:
+            low_comp = str(next_val).lower()
+            if "mmip" in low_comp or "motor insurance pool" in low_comp:
+                fields["coverage_type"] = {"value": "Third Party", "status": "ready", "message": "", "source": "mmip_rule"}
+                if "fields.coverage_type" not in (draft.scalar_decisions or {}):
+                    pass
     elif decision == "clear":
         field["value"] = None
         field["status"] = "ready"

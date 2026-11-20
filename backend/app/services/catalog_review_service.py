@@ -26,6 +26,7 @@ from app.models.tables import (
     DraftSourceLineDecision,
     ExtractionBenefitLine,
     ExtractionRecord,
+    InsuranceCompany,
     InsuranceProduct,
     InsuranceProductTier,
     QuotationDraft,
@@ -224,10 +225,21 @@ def pin_catalog_context(db, draft: QuotationDraft) -> BenefitCatalogRevision | N
     if not draft.company_id:
         return None
 
+    pinned_company = next(
+        (c for c in _rows(db, InsuranceCompany) if str(getattr(c, "id", "") or "") == str(draft.company_id)),
+        None,
+    )
+    is_mmip_company = bool(
+        pinned_company
+        and ("mmip" in str(pinned_company.slug or pinned_company.name or "").lower() or "motor insurance pool" in str(pinned_company.name or "").lower())
+    )
+
     # 1. Resolve vehicle & coverage dimensions
     raw_vehicle = _field_value(draft.fields or {}, "vehicle_type", "vehicle_category", "car_model", "vehicle_description", "vehicle_model", "make_model")
     resolved_vehicle_cat_id = _resolve_vehicle_category(db, raw_vehicle, draft.fields or {})
-    raw_coverage = _field_value(draft.fields or {}, "coverage_type", "coverage", "policy_type")
+    raw_coverage = "Third Party" if is_mmip_company else _field_value(draft.fields or {}, "coverage_type", "coverage", "policy_type")
+    if is_mmip_company and isinstance(draft.fields, dict):
+        draft.fields["coverage_type"] = {"value": "Third Party", "status": "ready", "message": ""}
     resolved_coverage_id = _resolve_coverage_type(db, raw_coverage)
     resolved_segment_id = _resolve_segment(db, draft.fields or {})
 

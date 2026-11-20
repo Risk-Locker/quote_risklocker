@@ -131,6 +131,20 @@ def render_design2_html(
     sum_insured = _get_val(draft_fields, "coverage_amount", "RM 198,000.00")
 
     disp_opts = render_context.get("display_options") or {}
+    lang_mode = str(
+        template_config.get("language_mode")
+        or disp_opts.get("language_mode")
+        or _get_val(draft_fields, "language_mode", "")
+        or "bilingual"
+    ).strip().lower()
+    is_english_only = lang_mode in {"en", "english", "english_only"}
+    hide_addon_upgrades = bool(
+        template_config.get("hide_addon_upgrades")
+        or disp_opts.get("hide_addon_upgrades")
+    )
+    raw_page_h = (template_config.get("page_profile") or {}).get("height") or (template_config.get("canvas") or {}).get("height")
+    page_height = int(float(raw_page_h)) if raw_page_h else (580 if hide_addon_upgrades else 1123)
+
     inc_rt = disp_opts.get("include_road_tax") is not False and _get_val(draft_fields, "include_road_tax", "true").lower() not in {"false", "0", "no"}
     inc_rf = disp_opts.get("include_runner_fee") is not False and _get_val(draft_fields, "include_runner_fee", "true").lower() not in {"false", "0", "no"}
 
@@ -149,7 +163,7 @@ def render_design2_html(
     if disc_bd.effective_discount > 0:
         pct_num = float(disc_bd.motor_discount_pct)
         pct_str = f" ({int(pct_num) if pct_num.is_integer() else pct_num:g}%)" if pct_num > 0 else ""
-        discount_label = f"Motor Discount{pct_str} / 保费折扣"
+        discount_label = f"Motor Discount{pct_str}" if is_english_only else f"Motor Discount{pct_str} / 保费折扣"
         discount_row_html = (
             f'<div class="spec-row"><div class="spec-label">{escape(discount_label)}</div>'
             f'<div class="spec-colon">:</div>'
@@ -239,12 +253,12 @@ def render_design2_html(
         icon_media_html = render_design2_icon_svg(card.get("icon_hint", "generic"), size=38)
 
         indicator_html = (
-            '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">'
-            '<rect x="1.5" y="3.5" width="14" height="14" rx="3" fill="#ECFDF5" stroke="#16A34A" stroke-width="1.8"/>'
-            '<path d="M4.8 10.6 L8.6 14.3 L18.4 2.4" stroke="#15803D" stroke-width="2.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+            '<svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true" style="transform: skewX(-6deg); filter: drop-shadow(0 1px 1px rgba(21,128,61,0.18));">'
+            '<rect x="1.5" y="3" width="15.5" height="15.5" rx="3.5" fill="#DCFCE7" stroke="#16A34A" stroke-width="2.0"/>'
+            '<path d="M4.8 11.2 L9.2 15.4 L20.2 2.2" stroke="#15803D" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
             '</svg>'
             if is_sel
-            else '<div style="width: 11.5px; height: 11.5px; border: 1.7px solid #64748B; border-radius: 2.5px; background: #FFFFFF;"></div>'
+            else '<div style="width: 13.5px; height: 13.5px; border: 1.8px solid #64748B; border-radius: 3px; background: #FFFFFF;"></div>'
         )
 
         addon_grid_html += f"""
@@ -252,14 +266,14 @@ def render_design2_html(
             <div style="flex: 0 0 36px; display: flex; align-items: center; justify-content: center; padding-left: 2px;">
                 {icon_media_html}
             </div>
-            <div style="flex: 1; min-width: 0; padding: 3.5px 5px 3px 2px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div style="flex: 1; min-width: 0; padding: 3.5px 4px 3px 1.5px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div style="min-height: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2px;">
-                        <div style="font-size: 11.0px; font-weight: 700; color: #0F172A; line-height: 1.15; word-break: break-word;">{title}</div>
-                        <div style="font-size: 8.8px; font-weight: 700; color: #475569; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
+                        <div style="font-size: 11.8px; font-weight: 700; color: #0F172A; line-height: 1.15; word-break: break-word;">{title}</div>
+                        <div style="font-size: 9.4px; font-weight: 700; color: #475569; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
                     </div>
-                    {f'<div style="font-size: 10.2px; font-weight: 700; color: #15803D; margin-top: 1px; line-height: 1.14; word-break: break-word;">{val}</div>' if val else ''}
-                    {f'<div style="font-size: 9.5px; font-weight: 400; color: #334155; line-height: 1.16; margin-top: 1.5px; word-break: break-word; white-space: normal;">{desc}</div>' if desc else ''}
+                    {f'<div style="font-size: 11.0px; font-weight: 700; color: #15803D; margin-top: 1px; line-height: 1.15; word-break: break-word;">{val}</div>' if val else ''}
+                    {f'<div style="font-size: 10.0px; font-weight: 500; color: #1E293B; line-height: 1.17; margin-top: 1.5px; letter-spacing: -0.25px; word-break: break-word; white-space: normal;">{desc}</div>' if desc else ''}
                 </div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: auto; padding-top: 1px; flex-shrink: 0;">
                     {indicator_html}
@@ -295,7 +309,7 @@ def render_design2_html(
     )
 
     display_opts = render_context.get("display_options") or {}
-    include_schedule = bool(
+    include_schedule = False if hide_addon_upgrades else bool(
         display_opts.get("include_benefit_schedule")
         or render_context.get("include_benefit_schedule")
         or len(addon_cards) > 24
@@ -316,6 +330,43 @@ def render_design2_html(
         )
         schedule_pages_html = "\n".join(sched_pages)
 
+    lbl_veh_title = 'Vehicle Information' if is_english_only else 'Vehicle Information <span style="font-size: 14.0px; font-weight: 600; color: #544F4E;">车辆资料</span>'
+    lbl_customer = "Customer" if is_english_only else "Customer / 客户姓名"
+    lbl_period = "Period Of Insurance" if is_english_only else "Period Of Insurance / 保障期限"
+    lbl_cov_type = "Coverage Type" if is_english_only else "Coverage Type / 保障种类"
+    lbl_car_model = "Car Model" if is_english_only else "Car Model / 车型"
+    lbl_ncd = "NCD" if is_english_only else "NCD / 无索偿折扣"
+    lbl_val_type = "Valuation Type" if is_english_only else "Valuation Type / 估价方式"
+    lbl_excess = "Policy Excess" if is_english_only else "Policy Excess / 自负额"
+    lbl_sum_insured = "Vehicle Sum Insured" if is_english_only else "Vehicle Sum Insured / 车辆保额"
+    lbl_prem_title = 'Premium Summary' if is_english_only else 'Premium Summary <span style="font-size: 14.0px; font-weight: 600; color: #544F4E;">保费</span>'
+    lbl_ins_prem = "Insurance Premium" if is_english_only else "Insurance Premium / 保费"
+    lbl_roadtax_runner = "Roadtax and Runner Fee" if is_english_only else "Roadtax and Runner Fee / 路税及服务费"
+    lbl_total_payable = "TOTAL PAYABLE :" if is_english_only else "TOTAL PAYABLE 应付总额 :"
+    lbl_bank_title = 'Company Bank Details' if is_english_only else 'Company Bank Details <span style="font-size: 10.2px; font-weight: 700; color: #544F4E;">公司银行戶口</span>'
+
+    lower_addon_section_html = "" if hide_addon_upgrades else f"""
+        <!-- Structural Hairline 3: Mid-Page Horizontal Divider -->
+        <div style="height: 1px; background: #64748B; margin: 12px 0 9px 0; flex-shrink: 0;"></div>
+
+        <!-- Lower Section: Add-On Upgrades ++ -->
+        <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+                <div style="font-size: 24.5px; font-weight: 900; letter-spacing: -0.4px; line-height: 1;">
+                    <span style="color: #E52320;">Add-On</span> <span style="color: #1D1D1B;">Upgrades</span> <span style="color: #E52320;">++</span>
+                </div>
+                <div style="font-size: 11.2px; font-weight: 700; font-style: italic; font-family: var(--d2-font-notes); color: #353331; letter-spacing: 0.2px; text-transform: uppercase;">
+                    ADDITIONAL PROTECTION FOR GREATER PEACE OF MIND
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: minmax(68px, auto); gap: 5px 6.5px;">
+                {addon_grid_html}
+            </div>
+            {overflow_banner}
+        </div>
+    """
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -330,7 +381,7 @@ def render_design2_html(
     --d2-font-heading: 'Helvetica Bold', 'Helvetica', Arial, 'Source Han Sans SC', 'Source Han Sans CN', 'Noto Sans SC', sans-serif;
     --d2-font-notes: 'Calibri Italic', 'Calibri', 'Helvetica', Arial, 'Source Han Sans CN', sans-serif;
 }}
-@page {{ size: 794px 1123px; margin: 0; }}
+@page {{ size: 794px {page_height}px; margin: 0; }}
 * {{ box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
 body {{
     margin: 0;
@@ -342,7 +393,7 @@ body {{
 }}
 .d2-page {{
     width: 794px;
-    height: 1123px;
+    height: {page_height}px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -455,27 +506,27 @@ body {{
             <div style="flex: 1.02; padding-right: 18px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div style="font-size: 15.0px; font-weight: 700; color: #E52320; margin-bottom: 5px; line-height: 1.2;">
-                        Vehicle Information <span style="font-size: 14.0px; font-weight: 600; color: #544F4E;">车辆资料</span>
+                        {lbl_veh_title}
                     </div>
-                    <div class="spec-row"><div class="spec-label">Customer / 客户姓名</div><div class="spec-colon">:</div><div class="spec-value">{escape(cust_name)}</div></div>
-                    <div class="spec-row"><div class="spec-label">Period Of Insurance / 保障期限</div><div class="spec-colon">:</div><div class="spec-value">{escape(period)}</div></div>
-                    <div class="spec-row"><div class="spec-label">Coverage Type / 保障种类</div><div class="spec-colon">:</div><div class="spec-value">{escape(cov_type)}</div></div>
-                    <div class="spec-row"><div class="spec-label">Car Model / 车型</div><div class="spec-colon">:</div><div class="spec-value">{escape(car_model)}</div></div>
-                    <div class="spec-row"><div class="spec-label">NCD / 无索偿折扣</div><div class="spec-colon">:</div><div class="spec-value">{escape(ncd)}</div></div>
-                    <div class="spec-row"><div class="spec-label">Valuation Type / 估价方式</div><div class="spec-colon">:</div><div class="spec-value">{escape(val_type)}</div></div>
-                    <div class="spec-row"><div class="spec-label">Policy Excess / 自负额</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(excess))}</div></div>
-                    <div class="spec-row"><div class="spec-label">Vehicle Sum Insured / 车辆保额</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(sum_insured))}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_customer}</div><div class="spec-colon">:</div><div class="spec-value">{escape(cust_name)}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_period}</div><div class="spec-colon">:</div><div class="spec-value">{escape(period)}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_cov_type}</div><div class="spec-colon">:</div><div class="spec-value">{escape(cov_type)}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_car_model}</div><div class="spec-colon">:</div><div class="spec-value">{escape(car_model)}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_ncd}</div><div class="spec-colon">:</div><div class="spec-value">{escape(ncd)}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_val_type}</div><div class="spec-colon">:</div><div class="spec-value">{escape(val_type)}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_excess}</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(excess))}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_sum_insured}</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(sum_insured))}</div></div>
                 </div>
 
                 <div style="margin-top: 10px;">
                     <div style="font-size: 15.0px; font-weight: 700; color: #E52320; margin-bottom: 4px; line-height: 1.2;">
-                        Premium Summary <span style="font-size: 14.0px; font-weight: 600; color: #544F4E;">保费</span>
+                        {lbl_prem_title}
                     </div>
-                    <div class="spec-row"><div class="spec-label">Insurance Premium / 保费</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(premium))}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_ins_prem}</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(premium))}</div></div>
                     {discount_row_html}
-                    <div class="spec-row"><div class="spec-label">Roadtax and Runner Fee / 路税及服务费</div><div class="spec-colon">:</div><div class="spec-value">{escape(rt_combined)}</div></div>
+                    <div class="spec-row"><div class="spec-label">{lbl_roadtax_runner}</div><div class="spec-colon">:</div><div class="spec-value">{escape(rt_combined)}</div></div>
                     <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 12px;">
-                        <div style="font-size: 13.8px; font-weight: 700; color: #E52320; white-space: nowrap;">TOTAL PAYABLE 应付总额 :</div>
+                        <div style="font-size: 13.8px; font-weight: 700; color: #E52320; white-space: nowrap;">{lbl_total_payable}</div>
                         <div style="font-size: 22px; font-weight: 800; color: #E52320; letter-spacing: -0.4px; line-height: 1; white-space: nowrap;">{escape(_format_money(total_payable))}</div>
                     </div>
                 </div>
@@ -500,7 +551,7 @@ body {{
                     <div style="padding: 8px 14px 12px 14px; display: flex; justify-content: space-between; align-items: flex-end; gap: 6px;">
                         <div style="min-width: 0; flex: 1;">
                             <div style="font-size: 11.4px; font-weight: 800; color: #E52320; margin-bottom: 4px; line-height: 1.2; white-space: nowrap;">
-                                Company Bank Details <span style="font-size: 10.2px; font-weight: 700; color: #544F4E;">公司银行戶口</span>
+                                {lbl_bank_title}
                             </div>
                             <div style="font-size: 11.8px; font-weight: 800; color: #0F172A; line-height: 1.28;">{agency_acc_name}</div>
                             <div style="font-size: 11.5px; font-weight: 400; color: #1E293B; line-height: 1.28;">{bank_name}</div>
@@ -515,25 +566,7 @@ body {{
             </div>
         </div>
 
-        <!-- Structural Hairline 3: Mid-Page Horizontal Divider -->
-        <div style="height: 1px; background: #64748B; margin: 12px 0 9px 0; flex-shrink: 0;"></div>
-
-        <!-- Lower Section: Add-On Upgrades ++ -->
-        <div style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;">
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-                <div style="font-size: 24.5px; font-weight: 900; letter-spacing: -0.4px; line-height: 1;">
-                    <span style="color: #E52320;">Add-On</span> <span style="color: #1D1D1B;">Upgrades</span> <span style="color: #E52320;">++</span>
-                </div>
-                <div style="font-size: 11.2px; font-weight: 700; font-style: italic; font-family: var(--d2-font-notes); color: #353331; letter-spacing: 0.2px; text-transform: uppercase;">
-                    ADDITIONAL PROTECTION FOR GREATER PEACE OF MIND
-                </div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: minmax(68px, auto); gap: 5px 6.5px;">
-                {addon_grid_html}
-            </div>
-            {overflow_banner}
-        </div>
+        {lower_addon_section_html}
     </div>
 
     {footer_html}

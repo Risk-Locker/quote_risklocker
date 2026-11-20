@@ -77,6 +77,8 @@ function formatMoney(val: any): string {
 
 function getLocalCompanyLogoPath(insurer: string): string {
   const n = (insurer || "").toLowerCase();
+  if (n.includes("mmip") || n.includes("motor insurance pool")) return "/assets/companies/mmip.png";
+  if (n.includes("kurnia")) return "/assets/companies/kurnia.png";
   if (n.includes("etiqa")) return "/assets/companies/etiqa.png";
   if (n.includes("amassurance") || n.includes("amgen")) return "/assets/companies/amassurance.webp";
   if (n.includes("sompo")) return "/assets/companies/sompo.jpeg";
@@ -189,9 +191,15 @@ function GreenTickSvg({ size = 14 }: { size?: number }) {
 
 function Box2CheckedStampSvg() {
   return (
-    <svg width={16} height={16} viewBox="0 0 20 20" aria-hidden="true">
-      <rect x="1.5" y="3.5" width="14" height="14" rx="3" fill="#ECFDF5" stroke="#16A34A" strokeWidth="1.8" />
-      <path d="M4.8 10.6 L8.6 14.3 L18.4 2.4" stroke="#15803D" strokeWidth="2.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width={20}
+      height={20}
+      viewBox="0 0 22 22"
+      aria-hidden="true"
+      style={{ transform: "skewX(-6deg)", filter: "drop-shadow(0 1px 1px rgba(21,128,61,0.18))" }}
+    >
+      <rect x="1.5" y="3" width="15.5" height="15.5" rx="3.5" fill="#DCFCE7" stroke="#16A34A" strokeWidth="2.0" />
+      <path d="M4.8 11.2 L9.2 15.4 L20.2 2.2" stroke="#15803D" strokeWidth="3.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -362,6 +370,12 @@ export function Design2CanvasView({
     return extractFreeCoverageItems(currentBenefits, insurer, 6, vehicleType, carModel, fields);
   }, [currentBenefits, insurer, vehicleType, carModel, fields]);
 
+  const langMode = String(config?.language_mode || fields?.language_mode?.value || fields?.language_mode || "bilingual").trim().toLowerCase();
+  const isEnglishOnly = langMode === "en" || langMode === "english" || langMode === "english_only";
+  const hideAddonUpgrades = Boolean(config?.hide_addon_upgrades);
+  const rawPageH = config?.page_profile?.height ?? config?.canvas?.height;
+  const effectiveHeight = hideAddonUpgrades ? Number(rawPageH || 580) : height;
+
   const ncdDisplay = ncd.includes("%") ? ncd : `${ncd}%`;
   const page1Cards = addonCards.slice(0, 24);
   const overflowCards = addonCards.slice(24);
@@ -395,7 +409,7 @@ export function Design2CanvasView({
         className="d2-page-preview"
         style={{
           width: `${width}px`,
-          height: `${height}px`,
+          height: `${effectiveHeight}px`,
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
@@ -475,17 +489,17 @@ export function Design2CanvasView({
             <div style={{ flex: 1.02, paddingRight: "18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
               <div>
                 <div style={{ fontSize: "15.0px", fontWeight: 700, color: "#E52320", marginBottom: "5px", lineHeight: 1.2 }}>
-                  Vehicle Information <span style={{ fontSize: "14.0px", fontWeight: 600, color: "#544F4E" }}>车辆资料</span>
+                  Vehicle Information{!isEnglishOnly && <>{" "}<span style={{ fontSize: "14.0px", fontWeight: 600, color: "#544F4E" }}>车辆资料</span></>}
                 </div>
                 {[
-                  { label: "Customer / 客户姓名", val: custName },
-                  { label: "Period Of Insurance / 保障期限", val: period },
-                  { label: "Coverage Type / 保障种类", val: covType },
-                  { label: "Car Model / 车型", val: carModel },
-                  { label: "NCD / 无索偿折扣", val: ncdDisplay },
-                  { label: "Valuation Type / 估价方式", val: valType },
-                  { label: "Policy Excess / 自负额", val: formatMoney(excess) },
-                  { label: "Vehicle Sum Insured / 车辆保额", val: formatMoney(sumInsured) },
+                  { label: isEnglishOnly ? "Customer" : "Customer / 客户姓名", val: custName },
+                  { label: isEnglishOnly ? "Period Of Insurance" : "Period Of Insurance / 保障期限", val: period },
+                  { label: isEnglishOnly ? "Coverage Type" : "Coverage Type / 保障种类", val: covType },
+                  { label: isEnglishOnly ? "Car Model" : "Car Model / 车型", val: carModel },
+                  { label: isEnglishOnly ? "NCD" : "NCD / 无索偿折扣", val: ncdDisplay },
+                  { label: isEnglishOnly ? "Valuation Type" : "Valuation Type / 估价方式", val: valType },
+                  { label: isEnglishOnly ? "Policy Excess" : "Policy Excess / 自负额", val: formatMoney(excess) },
+                  { label: isEnglishOnly ? "Vehicle Sum Insured" : "Vehicle Sum Insured / 车辆保额", val: formatMoney(sumInsured) },
                 ].map((row, idx) => (
                   <div
                     key={idx}
@@ -522,11 +536,11 @@ export function Design2CanvasView({
 
               <div style={{ marginTop: "10px" }}>
                 <div style={{ fontSize: "15.0px", fontWeight: 700, color: "#E52320", marginBottom: "4px", lineHeight: 1.2 }}>
-                  Premium Summary <span style={{ fontSize: "14.0px", fontWeight: 600, color: "#544F4E" }}>保费</span>
+                  Premium Summary{!isEnglishOnly && <>{" "}<span style={{ fontSize: "14.0px", fontWeight: 600, color: "#544F4E" }}>保费</span></>}
                 </div>
                 <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
                   <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
-                    Insurance Premium / 保费
+                    {isEnglishOnly ? "Insurance Premium" : "Insurance Premium / 保费"}
                   </div>
                   <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
                   <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
@@ -536,7 +550,9 @@ export function Design2CanvasView({
                 {totalDiscountAmt > 0 && (
                   <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
                     <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
-                      {motorDiscountPct > 0 ? `Motor Discount (${motorDiscountPct % 1 === 0 ? motorDiscountPct.toFixed(0) : motorDiscountPct}%) / 保费折扣` : "Motor Discount / 保费折扣"}
+                      {motorDiscountPct > 0
+                        ? `Motor Discount (${motorDiscountPct % 1 === 0 ? motorDiscountPct.toFixed(0) : motorDiscountPct}%)${isEnglishOnly ? "" : " / 保费折扣"}`
+                        : isEnglishOnly ? "Motor Discount" : "Motor Discount / 保费折扣"}
                     </div>
                     <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
                     <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#059669", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
@@ -546,7 +562,7 @@ export function Design2CanvasView({
                 )}
                 <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
                   <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
-                    Roadtax and Runner Fee / 路税及服务费
+                    {isEnglishOnly ? "Roadtax and Runner Fee" : "Roadtax and Runner Fee / 路税及服务费"}
                   </div>
                   <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
                   <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
@@ -554,7 +570,9 @@ export function Design2CanvasView({
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "12px" }}>
-                  <div style={{ fontSize: "13.8px", fontWeight: 700, color: "#E52320", whiteSpace: "nowrap" }}>TOTAL PAYABLE 应付总额 :</div>
+                  <div style={{ fontSize: "13.8px", fontWeight: 700, color: "#E52320", whiteSpace: "nowrap" }}>
+                    {isEnglishOnly ? "TOTAL PAYABLE :" : "TOTAL PAYABLE 应付总额 :"}
+                  </div>
                   <div style={{ fontSize: "22px", fontWeight: 800, color: "#E52320", letterSpacing: "-0.4px", lineHeight: 1, whiteSpace: "nowrap" }}>
                     {formatMoney(totalPayable)}
                   </div>
@@ -635,7 +653,7 @@ export function Design2CanvasView({
                 <div style={{ padding: "8px 14px 12px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "6px" }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: "11.4px", fontWeight: 800, color: "#E52320", marginBottom: "4px", lineHeight: 1.2, whiteSpace: "nowrap" }}>
-                      Company Bank Details <span style={{ fontSize: "10.2px", fontWeight: 700, color: "#544F4E" }}>公司银行戶口</span>
+                      Company Bank Details{!isEnglishOnly && <>{" "}<span style={{ fontSize: "10.2px", fontWeight: 700, color: "#544F4E" }}>公司银行戶口</span></>}
                     </div>
                     <div style={{ fontSize: "11.8px", fontWeight: 800, color: "#0F172A", lineHeight: 1.28 }}>
                       {getVal(fields, "agency_account_name", String(config?.agency_account_name || "RISKLOCKER SDN. BHD."))}
@@ -683,96 +701,101 @@ export function Design2CanvasView({
             </div>
           </div>
 
-          {/* Structural Hairline 3: Mid-Page Horizontal Divider */}
-          <div style={{ height: "1px", background: "#64748B", margin: "12px 0 9px 0", flexShrink: 0 }} />
+          {!hideAddonUpgrades && (
+            <>
+              {/* Structural Hairline 3: Mid-Page Horizontal Divider */}
+              <div style={{ height: "1px", background: "#64748B", margin: "12px 0 9px 0", flexShrink: 0 }} />
 
-          {/* Lower Section: Add-On Upgrades ++ */}
-          <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
-              <div style={{ fontSize: "24.5px", fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1 }}>
-                <span style={{ color: "#E52320" }}>Add-On</span>{" "}
-                <span style={{ color: "#1D1D1B" }}>Upgrades</span>{" "}
-                <span style={{ color: "#E52320" }}>++</span>
-              </div>
-              <div style={{ fontSize: "11.2px", fontWeight: 700, fontStyle: "italic", fontFamily: D2_CANVAS_NOTES_FONT_FAMILY, color: "#353331", letterSpacing: "0.2px", textTransform: "uppercase" }}>
-                ADDITIONAL PROTECTION FOR GREATER PEACE OF MIND
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gridAutoRows: "minmax(68px, auto)", gap: "5px 6.5px" }}>
-              {page1Cards.map((card: UnifiedAddonCard) => (
-                <div
-                  key={card.id}
-                  style={{
-                    borderRadius: "6px",
-                    background: "#F8F9FC",
-                    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.045)",
-                    display: "flex",
-                    alignItems: "stretch",
-                    minHeight: "68px",
-                    height: "auto",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  <div style={{ flex: "0 0 36px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "2px" }}>
-                    <Design2CardIconMedia assetId={card.asset_id} iconHint={card.icon_hint} size={38} />
+              {/* Lower Section: Add-On Upgrades ++ */}
+              <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+                  <div style={{ fontSize: "24.5px", fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1 }}>
+                    <span style={{ color: "#E52320" }}>Add-On</span>{" "}
+                    <span style={{ color: "#1D1D1B" }}>Upgrades</span>{" "}
+                    <span style={{ color: "#E52320" }}>++</span>
                   </div>
-                  <div style={{ flex: 1, minWidth: 0, padding: "3.5px 5px 3px 2px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                    <div style={{ minHeight: 0 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "2px" }}>
-                        <div
-                          style={{
-                            fontSize: "11.0px",
-                            fontWeight: 700,
-                            color: "#0F172A",
-                            lineHeight: 1.15,
-                            wordBreak: "break-word",
-                          }}
-                        >
-                          {card.title}
-                        </div>
-                        <div style={{ fontSize: "8.8px", fontWeight: 700, color: "#475569", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
-                          {card.serial_number}
-                        </div>
-                      </div>
-                      {card.value && (
-                        <div style={{ fontSize: "10.2px", fontWeight: 700, color: "#15803D", marginTop: "1px", lineHeight: 1.14, wordBreak: "break-word" }}>
-                          {card.value}
-                        </div>
-                      )}
-                      {card.description && (
-                        <div
-                          style={{
-                            fontSize: "9.5px",
-                            fontWeight: 400,
-                            color: "#334155",
-                            lineHeight: 1.16,
-                            marginTop: "1.5px",
-                            wordBreak: "break-word",
-                            whiteSpace: "normal",
-                          }}
-                        >
-                          {card.description}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: "auto", paddingTop: "1px", flexShrink: 0 }}>
-                      {card.is_selected ? (
-                        <Box2CheckedStampSvg />
-                      ) : (
-                        <div style={{ width: "11.5px", height: "11.5px", border: "1.7px solid #64748B", borderRadius: "2.5px", background: "#FFFFFF" }} />
-                      )}
-                    </div>
+                  <div style={{ fontSize: "11.2px", fontWeight: 700, fontStyle: "italic", fontFamily: D2_CANVAS_NOTES_FONT_FAMILY, color: "#353331", letterSpacing: "0.2px", textTransform: "uppercase" }}>
+                    ADDITIONAL PROTECTION FOR GREATER PEACE OF MIND
                   </div>
                 </div>
-              ))}
-            </div>
-            {overflowCards.length > 0 && showPage2 && (
-              <div style={{ fontSize: "6.8px", fontWeight: 700, color: "#E52320", marginTop: "4px", textAlign: "right" }}>
-                + {overflowCards.length} additional add-ons &amp; full terms continued on Sheet 2 &rarr;
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gridAutoRows: "minmax(68px, auto)", gap: "5px 6.5px" }}>
+                  {page1Cards.map((card: UnifiedAddonCard) => (
+                    <div
+                      key={card.id}
+                      style={{
+                        borderRadius: "6px",
+                        background: "#F8F9FC",
+                        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.045)",
+                        display: "flex",
+                        alignItems: "stretch",
+                        minHeight: "68px",
+                        height: "auto",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <div style={{ flex: "0 0 36px", display: "flex", alignItems: "center", justifyContent: "center", paddingLeft: "2px" }}>
+                        <Design2CardIconMedia assetId={card.asset_id} iconHint={card.icon_hint} size={38} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0, padding: "3.5px 4px 3px 1.5px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                        <div style={{ minHeight: 0 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "2px" }}>
+                            <div
+                              style={{
+                                fontSize: "11.8px",
+                                fontWeight: 700,
+                                color: "#0F172A",
+                                lineHeight: 1.15,
+                                wordBreak: "break-word",
+                              }}
+                            >
+                              {card.title}
+                            </div>
+                            <div style={{ fontSize: "9.4px", fontWeight: 700, color: "#475569", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
+                              {card.serial_number}
+                            </div>
+                          </div>
+                          {card.value && (
+                            <div style={{ fontSize: "11.0px", fontWeight: 700, color: "#15803D", marginTop: "1px", lineHeight: 1.15, wordBreak: "break-word" }}>
+                              {card.value}
+                            </div>
+                          )}
+                          {card.description && (
+                            <div
+                              style={{
+                                fontSize: "10.0px",
+                                fontWeight: 500,
+                                color: "#1E293B",
+                                lineHeight: 1.17,
+                                marginTop: "1.5px",
+                                letterSpacing: "-0.25px",
+                                wordBreak: "break-word",
+                                whiteSpace: "normal",
+                              }}
+                            >
+                              {card.description}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: "auto", paddingTop: "1px", flexShrink: 0 }}>
+                          {card.is_selected ? (
+                            <Box2CheckedStampSvg />
+                          ) : (
+                            <div style={{ width: "13.5px", height: "13.5px", border: "1.8px solid #64748B", borderRadius: "3px", background: "#FFFFFF" }} />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {overflowCards.length > 0 && showPage2 && (
+                  <div style={{ fontSize: "6.8px", fontWeight: 700, color: "#E52320", marginTop: "4px", textAlign: "right" }}>
+                    + {overflowCards.length} additional add-ons &amp; full terms continued on Sheet 2 &rarr;
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         <Design2Footer

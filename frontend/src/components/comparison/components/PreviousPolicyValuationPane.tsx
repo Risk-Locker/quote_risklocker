@@ -38,6 +38,8 @@ export interface PreviousPolicyValuationPaneProps {
   activeDynamicAddons?: DynamicAddonDefinition[];
   dynamicAddonCatalog?: DynamicAddonDefinition[];
   onOpenNcdModal: () => void;
+  onUploadPreviousPolicy?: (file: File) => Promise<void>;
+  isUploadingPrevPolicy?: boolean;
   onUnlinkCovernote: () => void;
   onOpenEditCovernote?: () => void;
   onPatchCovernoteField?: (patch: Record<string, any>) => Promise<void>;
@@ -55,10 +57,13 @@ export function PreviousPolicyValuationPane({
   activeDynamicAddons = [],
   dynamicAddonCatalog,
   onOpenNcdModal,
+  onUploadPreviousPolicy,
+  isUploadingPrevPolicy = false,
   onUnlinkCovernote,
   onOpenEditCovernote,
   onPatchCovernoteField,
 }: PreviousPolicyValuationPaneProps) {
+  const prevFileInputRef = React.useRef<HTMLInputElement>(null);
   const priorYear = tenure.coverage_start_date
     ? new Date(tenure.coverage_start_date).getFullYear() - 1
     : new Date().getFullYear() - 1;
@@ -114,20 +119,28 @@ export function PreviousPolicyValuationPane({
               <span className="text-neutral-500">Sum Insured:</span>
               <span className="font-mono font-bold text-neutral-900">
                 {previous_policy.sum_insured
-                  ? `RM ${previous_policy.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                  ? `RM ${previous_policy.sum_insured.toLocaleString("en-MY", { minimumFractionDigits: 2 })}${previous_policy.agreed_value ? " [A]" : ""}`
                   : "—"}
               </span>
             </div>
 
-            {/* Premium Paid */}
+            {/* Motor Premium & Total Payable */}
             <div className="flex justify-between">
-              <span className="text-neutral-500">Premium Paid:</span>
+              <span className="text-neutral-500">Motor Premium:</span>
               <span className="font-mono font-bold text-neutral-900">
                 {previous_policy.insurance_premium
-                  ? `RM ${Math.round(previous_policy.insurance_premium).toFixed(2)}`
+                  ? `RM ${Number(previous_policy.insurance_premium).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   : "—"}
               </span>
             </div>
+            {previous_policy.total_payable ? (
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Total Payable:</span>
+                <span className="font-mono font-bold text-neutral-900">
+                  RM {Number(previous_policy.total_payable).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            ) : null}
 
             {/* Included Perils */}
             <div className="flex justify-between items-start gap-2">
@@ -140,38 +153,66 @@ export function PreviousPolicyValuationPane({
               </span>
             </div>
 
-            {/* Riders */}
+            {/* Riders & Valuation Terms */}
             <div className="mt-1 space-y-1">
               <div className="flex justify-between text-[11px]">
                 <span className="text-neutral-500">Windscreen:</span>
                 <span className="font-mono font-medium text-neutral-800">
                   {previous_policy.windscreen
-                    ? `RM ${previous_policy.windscreen.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
-                    : "—"}
+                    ? `RM ${Number(previous_policy.windscreen).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
+                    : "Not Included"}
                 </span>
               </div>
               <div className="flex justify-between text-[11px]">
                 <span className="text-neutral-500">Towing:</span>
                 <span className="font-mono font-medium text-neutral-800">
-                  {formatBenefitCoverage(previous_policy.towing || "Unlimited", undefined, previous_policy.company_name)}
+                  {formatBenefitCoverage(previous_policy.towing || "Unlimited", undefined, previous_policy.insurer)}
                 </span>
               </div>
+              {previous_policy.betterment_display ? (
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-neutral-500">Betterment:</span>
+                  <span className="font-mono font-medium text-neutral-800">{previous_policy.betterment_display}</span>
+                </div>
+              ) : null}
+              {previous_policy.excess != null ? (
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-neutral-500">Excess:</span>
+                  <span className="font-mono font-medium text-neutral-800">
+                    RM {Number(previous_policy.excess).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              ) : null}
             </div>
 
-            {/* Bottom action: 1-click edit NCD / upload previous policy */}
-            <div className="pt-2.5 border-t border-neutral-100 flex items-center justify-between text-[10px]">
-              <span className="text-neutral-400 font-mono">
+            {/* Bottom action: 1-click upload previous policy OR edit NCD */}
+            <div className="pt-2.5 border-t border-neutral-100 flex items-center justify-between gap-2 text-[10px]">
+              <span className="text-neutral-400 font-mono truncate">
                 {previous_policy.policy_number ? `Ref: ${previous_policy.policy_number}` : "Prior Policy Term"}
               </span>
-              <button
-                type="button"
-                onClick={onOpenNcdModal}
-                className="text-neutral-700 hover:text-black font-bold flex items-center gap-1 cursor-pointer"
-                title="Edit Current NCD or upload previous policy document"
-              >
-                <PencilSimple size={11} weight="bold" />
-                <span>Edit / Upload</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {onUploadPreviousPolicy && (
+                  <button
+                    type="button"
+                    disabled={isUploadingPrevPolicy}
+                    onClick={() => prevFileInputRef.current?.click()}
+                    className="text-neutral-700 hover:text-black font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title="Upload Cover Note or Quotation PDF for last year's policy"
+                  >
+                    <UploadSimple size={11} weight="bold" />
+                    <span>{isUploadingPrevPolicy ? "Uploading..." : "Upload PDF"}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onOpenNcdModal}
+                  className="text-neutral-700 hover:text-black font-bold flex items-center gap-1 cursor-pointer"
+                  title="Edit Current NCD or upload previous policy document"
+                >
+                  <PencilSimple size={11} weight="bold" />
+                  <span>Edit NCD</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -186,21 +227,49 @@ export function PreviousPolicyValuationPane({
             </span>
           </div>
           <p className="text-[11px] text-neutral-500 leading-relaxed py-1.5 text-center">
-            No prior policy term recorded for this vehicle.
+            Upload last year&apos;s Cover Note or Quotation PDF to auto-extract baseline &amp; create a ledger record.
           </p>
-          <div className="pt-1 text-center">
+          <div className="pt-1 flex flex-col gap-1.5 items-center">
+            {onUploadPreviousPolicy && (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                loading={isUploadingPrevPolicy}
+                onClick={() => prevFileInputRef.current?.click()}
+                icon={<UploadSimple size={12} weight="bold" />}
+                className="text-xs w-full bg-[#1b1717] hover:bg-black text-white"
+              >
+                <span>{isUploadingPrevPolicy ? "Extracting Previous Policy..." : "Upload Cover Note / Quotation PDF"}</span>
+              </Button>
+            )}
             <Button
               type="button"
               variant="secondary"
               size="sm"
               onClick={onOpenNcdModal}
-              icon={<UploadSimple size={12} weight="bold" />}
-              className="text-xs"
+              icon={<PencilSimple size={12} weight="bold" />}
+              className="text-xs w-full"
             >
-              <span>Upload Last Year Policy / Edit NCD</span>
+              <span>Edit NCD / Paste Snippet</span>
             </Button>
           </div>
         </div>
+      )}
+      {onUploadPreviousPolicy && (
+        <input
+          ref={prevFileInputRef}
+          type="file"
+          accept="application/pdf,image/*"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) {
+              await onUploadPreviousPolicy(file);
+            }
+          }}
+        />
       )}
 
       {/* Card 2: Current Policy Card (Official Cover Note OR Leading Option) */}

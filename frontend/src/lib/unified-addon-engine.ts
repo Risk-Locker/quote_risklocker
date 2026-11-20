@@ -852,6 +852,20 @@ export function extractFreeCoverageItems(
   const insNameStr = typeof insurerName === "string" ? insurerName : "";
   const finalLimit = typeof insurerName === "number" ? insurerName : limit;
 
+  const insLow = insNameStr.trim().toLowerCase();
+  if (insLow.includes("mmip") || insLow.includes("motor insurance pool")) {
+    return [
+      {
+        title: "Third Party Bodily Injury",
+        description: "Covers legal liability for death or bodily injury to any third party caused by your vehicle.",
+      },
+      {
+        title: "Third Party Property Damage",
+        description: "Covers legal liability for accidental loss or damage to third-party property up to RM 3,000,000.",
+      },
+    ].slice(0, finalLimit);
+  }
+
   const seen = new Set<string>();
   const items: FreeCoverageItem[] = [];
   const isComm = isCommercialVehicle(vehicleType, carModel, fields);
@@ -1024,6 +1038,10 @@ export function buildUnifiedMatrixCards(
   carModel: string = "",
   fields?: Record<string, any>
 ): UnifiedAddonCard[] {
+  const insLow = (insurerName || "").trim().toLowerCase();
+  if (insLow.includes("mmip") || insLow.includes("motor insurance pool")) {
+    return [];
+  }
   const isComm = isCommercialVehicle(vehicleType, carModel, fields);
   const isEv = isEVVehicle(vehicleType, carModel, fields);
   const excludedIds = new Set(

@@ -130,6 +130,7 @@ CANONICAL_COVERAGE_TYPES = [
     "THIRD PARTY ONLY",
     "MMIP",
     "MALAYSIAN MOTOR INSURANCE POOL",
+    "MALAYSIA MOTOR INSURANCE POOL",
     "THIRD PARTY",
 ]
 DATE_RE = r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b"
@@ -295,7 +296,7 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
             cleaned = "Third Party Fire & Theft"
         elif any(k in upper_c for k in ["COMPREHENSIVE", "KOMPREHENSIF"]):
             cleaned = "Comprehensive"
-        elif any(k in upper_c for k in ["MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE", "THIRD PARTY ONLY", "THIRD PARTY"]):
+        elif any(k in upper_c for k in ["MMIP", "MALAYSIAN MOTOR INSURANCE POOL", "MALAYSIA MOTOR INSURANCE POOL", "COVER NOTE", "COVERNOTE", "THIRD PARTY ONLY", "THIRD PARTY"]):
             cleaned = "Third Party"
         else:
             cleaned = "Comprehensive" if not cleaned or "PERLINDUNGAN" in upper_c else cleaned
@@ -924,6 +925,7 @@ def _add_messy_compact_text(
         ("THIRD PARTY ONLY", "Third Party"),
         ("MMIP", "Third Party"),
         ("MALAYSIAN MOTOR INSURANCE POOL", "Third Party"),
+        ("MALAYSIA MOTOR INSURANCE POOL", "Third Party"),
         ("THIRD PARTY", "Third Party"),
     )
     for coverage, cov_val in compact_coverage_priority:
@@ -1093,6 +1095,25 @@ def _add_company_detection(
     """Resolve companies exclusively from active database records and aliases."""
 
     from app.extraction.company_resolution import company_alias_matches
+
+    norm_fn = _normalized_detection_text(source_filename)
+    norm_txt = _normalized_detection_text(text)
+    if any(
+        cue in f" {norm_fn} {norm_txt} "
+        for cue in (
+            " mmip ",
+            " malaysian motor insurance pool ",
+            " malaysia motor insurance pool ",
+            " motor insurance pool ",
+        )
+    ):
+        _add_static(results, "coverage_type", "Third Party", "mmip_priority", 0.995, "MMIP", text, page_text)
+        has_mmip_company = any(
+            "mmip" in _normalized_detection_text(str(c.get("name") or ""))
+            for c in companies
+        )
+        if not has_mmip_company:
+            _add_static(results, "insurance_company", "MMIP", "mmip_priority", 0.995, "MMIP", text, page_text)
 
     matches: list[tuple[int, str, dict, str]] = []
     for source, method in ((source_filename, "database_company_filename"), (text, "database_company_text")):

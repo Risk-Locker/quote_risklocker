@@ -36,6 +36,39 @@ def company_alias_matches(selected: str, company_rows: list[dict]) -> list[dict]
     padded = f" {spaced} "
     compact_text = spaced.replace(" ", "")
     out: list[dict] = []
+
+    # Priority 1: MMIP (Malaysian Motor Insurance Pool) overrides servicing insurer names on pool cases
+    has_mmip_cue = any(
+        cue in padded
+        for cue in (
+            " mmip ",
+            " malaysian motor insurance pool ",
+            " malaysia motor insurance pool ",
+            " motor insurance pool ",
+        )
+    )
+    if has_mmip_cue:
+        for company in company_rows:
+            c_name = str(company.get("name") or "").strip()
+            c_aliases = [c_name, *(company.get("aliases") or [])]
+            if any("mmip" in normalize_detection(str(a)) or "motor insurance pool" in normalize_detection(str(a)) for a in c_aliases):
+                out.append({"company": company, "alias": "MMIP", "length": 10000, "compact": False})
+
+    # Priority 2: Disambiguate Kurnia / AmAssurance under Liberty General Insurance Berhad
+    has_liberty_parent = " liberty general insurance " in padded or " liberty " in padded
+    has_kurnia_cue = any(cue in padded for cue in (" www kurnia com ", " kurnia com ", " kurnia "))
+    has_am_cue = any(cue in padded for cue in (" www amassurance com ", " amassurance com ", " amassurance ", " amgeneral "))
+    if has_liberty_parent and has_kurnia_cue:
+        for company in company_rows:
+            c_name = normalize_detection(str(company.get("name") or ""))
+            if "kurnia" in c_name:
+                out.append({"company": company, "alias": "www.kurnia.com", "length": 9000, "compact": False})
+    elif has_liberty_parent and has_am_cue:
+        for company in company_rows:
+            c_name = normalize_detection(str(company.get("name") or ""))
+            if "amassurance" in c_name or "amgen" in c_name:
+                out.append({"company": company, "alias": "AmAssurance", "length": 9000, "compact": False})
+
     for company in company_rows:
         name = str(company.get("name") or "").strip()
         if not name:

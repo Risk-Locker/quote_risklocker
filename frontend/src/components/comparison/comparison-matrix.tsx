@@ -2424,6 +2424,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             activeDynamicAddons={data.active_dynamic_addons}
             dynamicAddonCatalog={data.dynamic_addon_catalog}
             onOpenNcdModal={handleOpenNcdModal}
+            onUploadPreviousPolicy={handleUploadPreviousPolicy}
+            isUploadingPrevPolicy={isUploadingPrevPolicy}
             onUnlinkCovernote={handleUnlinkCovernote}
             onOpenEditCovernote={() => setShowEditCovernoteModal(true)}
             onPatchCovernoteField={handlePatchCovernote}
@@ -2607,6 +2609,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         setPastingPolicyText={setPastingPolicyText}
         onSave={handleSaveNcd}
         isSaving={savingNcd}
+        onUploadPreviousPolicy={handleUploadPreviousPolicy}
+        isUploadingPrevPolicy={isUploadingPrevPolicy}
       />
 
       {/* Adjust Fees & Road Tax Fast Modal */}

@@ -141,9 +141,11 @@ export function useReviewCatalogAndTemplate({
   );
 
   const isDesign2 = useMemo(() => {
+    const tKey = String((previewTemplate?.config as any)?.template_key || (previewTemplate?.config as any)?.v7_master_key || "");
     return Boolean(
       previewTemplate?.config?.layout_engine === "design2" ||
-      previewTemplate?.config?.template_key === "motor_modern_design_2" ||
+      tKey === "motor_modern_design_2" ||
+      tKey.startsWith("motor_modern_design_2") ||
       previewTemplate?.config?.template_name?.toLowerCase().includes("design 2") ||
       previewTemplate?.config?.template_name?.toLowerCase().includes("design2")
     );
@@ -151,8 +153,9 @@ export function useReviewCatalogAndTemplate({
 
   const design2CardCount = useMemo(() => {
     if (!isDesign2) return 0;
-    return buildUnifiedMatrixCards(currentCards, addonCards, undefined, 24).length;
-  }, [isDesign2, currentCards, addonCards]);
+    const compName = String((workspace?.fields?.insurance_company as any)?.value || workspace?.pinned_names?.company_name || workspace?.hierarchy?.company_name || "");
+    return buildUnifiedMatrixCards(currentCards, addonCards, undefined, 24, 24, compName).length;
+  }, [isDesign2, currentCards, addonCards, workspace?.fields, workspace?.pinned_names?.company_name, workspace?.hierarchy?.company_name]);
 
   const balancedElements = useMemo(() => {
     if (!previewTemplate?.config?.canvas) return [];
@@ -175,7 +178,13 @@ export function useReviewCatalogAndTemplate({
 
   const canvasH = useMemo(() => {
     if (isDesign2) {
-      return showDesign2Schedule ? 1123 * 2 + 16 : 1123;
+      const hideAddons = Boolean((previewTemplate?.config as any)?.hide_addon_upgrades);
+      const baseD2H = Number(
+        (previewTemplate?.config as any)?.page_profile?.height ||
+          previewTemplate?.config?.canvas?.height ||
+          (hideAddons ? 580 : 1123)
+      );
+      return showDesign2Schedule && !hideAddons ? baseD2H * 2 + 16 : baseD2H;
     }
     const baseH = previewTemplate?.config?.canvas?.height || 1123;
     if (!balancedElements.length) return baseH;

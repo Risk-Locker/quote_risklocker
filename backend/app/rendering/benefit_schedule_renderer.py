@@ -39,6 +39,10 @@ DEFAULT_AGENCY_NAME = "RISKLOCKER SDN. BHD."
 DEFAULT_AGENCY_REG_NO = "202301041962(1535879-U)"
 
 _COMPANY_ASSET_CANDIDATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("mmip", ("frontend/public/assets/companies/mmip.png",)),
+    ("malaysian motor insurance pool", ("frontend/public/assets/companies/mmip.png",)),
+    ("malaysia motor insurance pool", ("frontend/public/assets/companies/mmip.png",)),
+    ("kurnia", ("frontend/public/assets/companies/kurnia.png",)),
     ("etiqa", ("frontend/public/assets/companies/etiqa.png", "assets/Company logos/etiqa insurance logo.png")),
     ("amassurance", ("frontend/public/assets/companies/amassurance.webp", "assets/Company logos/AmAssurance logo.webp")),
     ("amgen", ("frontend/public/assets/companies/amassurance.webp", "assets/Company logos/AmAssurance logo.webp")),
@@ -165,6 +169,8 @@ def get_design2_asset_uris(
     if not insurer_logo_uri and insurer:
         norm_ins = insurer.lower()
         hint = (
+            "mmip" if ("mmip" in norm_ins or "motor insurance pool" in norm_ins) else
+            "kurnia" if "kurnia" in norm_ins else
             "etiqa" if "etiqa" in norm_ins else
             "amgen" if ("amassurance" in norm_ins or "amgen" in norm_ins) else
             "sompo" if "sompo" in norm_ins else

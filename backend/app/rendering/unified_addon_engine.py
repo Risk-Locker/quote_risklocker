@@ -872,6 +872,19 @@ def extract_free_coverage_items(
     seen_titles: set[str] = set()
     items: list[dict[str, str]] = []
 
+    ins_low = (insurer_name or "").strip().lower()
+    if "mmip" in ins_low or "motor insurance pool" in ins_low:
+        return [
+            {
+                "title": "Third Party Bodily Injury",
+                "description": "Covers legal liability for death or bodily injury to any third party caused by your vehicle.",
+            },
+            {
+                "title": "Third Party Property Damage",
+                "description": "Covers legal liability for accidental loss or damage to third-party property up to RM 3,000,000.",
+            },
+        ][:limit]
+
     is_comm = is_commercial_vehicle(vehicle_type, car_model, fields)
     cov_raw = fields.get("coverage_type") if isinstance(fields, dict) else None
     cov_val = str(cov_raw.get("value") if isinstance(cov_raw, dict) else cov_raw or "").strip().lower()
@@ -1058,6 +1071,9 @@ def build_unified_matrix_cards(
        - For Private Cars: heavy equipment crane/boom working risks are excluded.
     4. Floats selected cards to the front while preserving canonical ordering.
     """
+    ins_low = (insurer_name or "").strip().lower()
+    if "mmip" in ins_low or "motor insurance pool" in ins_low:
+        return []
     is_comm = is_commercial_vehicle(vehicle_type, car_model, fields)
     is_ev = is_ev_vehicle(vehicle_type, car_model, fields)
     if is_comm:

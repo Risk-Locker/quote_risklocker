@@ -467,12 +467,26 @@ def process_extraction_job(
             "message": "",
         }
 
-    # Configurable Third Party Only (TPO) Extra Premium Surcharge
+    # Configurable Third Party Only (TPO) Extra Premium Surcharge & MMIP Priority Lock
     cov_val = str((fields.get("coverage_type") or {}).get("value") or "").strip().lower()
     fn_val = str(uploaded.original_filename or "").lower()
+    _has_mmip = bool(
+        re.search(r"\b(?:mmip|malaysian?\s+motor\s+insurance\s+pool)\b", f"{fn_val} {_raw_w}".lower())
+        or "mmip" in str((fields.get("insurance_company") or {}).get("value") or "").lower()
+    )
+    if _has_mmip:
+        fields["insurance_company"] = {"value": "MMIP", "status": "ready", "message": ""}
+        fields["coverage_type"] = {"value": "Third Party", "status": "ready", "message": ""}
+        fields["coverage_amount"] = {"value": "0.00", "status": "ready", "message": ""}
+        cov_val = "third party"
+        mmip_res = resolve_company("MMIP", context.get("db_companies") or [])
+        if mmip_res.get("status") == "matched":
+            values["company_resolution"] = mmip_res
+            record.company_resolution = mmip_res
     is_tpo = (
         cov_val in ("third party", "third party only", "third_party")
         or "mmip" in fn_val
+        or _has_mmip
     )
     if is_tpo:
         if not cov_val or "third" not in cov_val:

@@ -16,6 +16,11 @@ DEFAULT_BETTERMENT_RULE: dict[str, Any] = {
 }
 
 DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
+    "mmip": {
+        "allowed_coverage_types": ["third_party"],
+        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 0, "default_display": "N/A (Third Party)"},
+        "towing": {"metric": "none", "base_limit": "No towing"},
+    },
     "qbe": {
         "betterment": {"auto_waive_without_peril": True, "max_waiver_years": 10, "default_display": "Up to 10 Years"},
         "towing": {
@@ -167,6 +172,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
 }
 
 _NAME_TO_RULE_KEY: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("mmip", "motor insurance pool"), "mmip"),
     (("qbe",), "qbe"),
     (("etiqa", "maybank"), "etiqa"),
     (("takaful malaysia", "syarikat takaful", "stmb"), "takaful-malaysia"),

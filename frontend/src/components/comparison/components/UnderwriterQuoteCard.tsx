@@ -229,7 +229,7 @@ export function UnderwriterQuoteCard({
             )}
           </div>
 
-          {/* Row 2.5: Logical Underwriter Ranking Explanation Callout */}
+          {/* Row 2.5: Logical Underwriter Ranking & YoY Comparative Callout */}
           {(entry.ranking_explanation || entry.notes) ? (
             <div
               className={`mt-2 rounded-md px-2 py-1.5 text-[10px] leading-snug border ${(visibleRanksMap[entry.id] ?? entry.rank ?? 1) === 1
@@ -238,20 +238,20 @@ export function UnderwriterQuoteCard({
                 }`}
               title={entry.ranking_explanation || entry.notes || undefined}
             >
-              <span className="line-clamp-2">{entry.ranking_explanation || entry.notes}</span>
+              <div className="line-clamp-5 whitespace-pre-line">{entry.ranking_explanation || entry.notes}</div>
             </div>
           ) : null}
 
-          {/* Row 3: Dedicated Version Row with Clean Inline Switcher */}
+          {/* Row 3: Constant Quotation Version Row */}
           <div className="mt-2 min-h-[28px] flex items-center justify-between gap-1.5">
             {group.entries.length > 1 ? (
               <div className="flex items-center gap-1 p-0.5 bg-neutral-100 rounded-lg border border-neutral-200">
                 {[...group.entries]
                   .sort((a, b) => (a.version || 0) - (b.version || 0))
-                  .map((q) => {
+                  .map((q, qIdx) => {
                     const isThisSelected = q.id === entry.id;
-                    const maxVer = Math.max(...group.entries.map((x) => x.version || 1));
-                    const isLatest = (q.version || 1) === maxVer;
+                    const displayVer = qIdx + 1;
+                    const isLatest = qIdx === group.entries.length - 1;
                     return (
                       <button
                         key={q.id}
@@ -261,7 +261,7 @@ export function UnderwriterQuoteCard({
                             ? "bg-[#1b1717] text-white shadow-xs"
                             : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/60"
                           }`}
-                        title={`v${q.version || 1} • RM ${formatMoneyWithRounding(
+                        title={`v${displayVer} • RM ${formatMoneyWithRounding(
                           roundingMode === "whole"
                             ? (q.whole_total_payable ?? q.total_payable)
                             : (roundingMode === "5cent" || roundingMode === "bnm5")
@@ -270,7 +270,7 @@ export function UnderwriterQuoteCard({
                           roundingMode
                         )}${isLatest ? " (Latest)" : ""}`}
                       >
-                        <span>v{q.version || 1}</span>
+                        <span>v{displayVer}</span>
                         {isLatest && <span className="text-[9px] opacity-75 font-normal">Latest</span>}
                         {q.is_recommended && (
                           <Star
@@ -285,11 +285,11 @@ export function UnderwriterQuoteCard({
               </div>
             ) : (
               <span className="text-[10px] font-semibold text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded border border-neutral-200">
-                v{entry.version || 1} (Latest)
+                v1 (Latest)
               </span>
             )}
             <span className="text-[10px] text-neutral-400 font-mono">
-              {entry.is_manual ? "Portal" : "PDF"}
+              {entry.is_manual && !entry.session_id ? "Portal" : "PDF"}
             </span>
           </div>
 

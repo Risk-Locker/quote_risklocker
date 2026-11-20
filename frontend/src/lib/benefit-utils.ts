@@ -130,6 +130,7 @@ export function formatShortInsurerName(name?: string | null): string {
   const clean = name.trim();
   const lower = clean.toLowerCase();
 
+  if (lower.includes("mmip") || lower.includes("motor insurance pool")) return "MMIP";
   if (lower.includes("allianz")) return "ALLIANZ";
   if (lower.includes("etiqa") && lower.includes("takaful")) return "ETIQA TAKAFUL";
   if (lower.includes("etiqa")) return "ETIQA";

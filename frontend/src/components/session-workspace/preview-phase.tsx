@@ -275,14 +275,22 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
   const isDesign2 = Boolean(
     template?.config?.layout_engine === "design2" ||
     template?.config?.template_key === "motor_modern_design_2" ||
+    String(template?.config?.template_key || "").startsWith("motor_modern_design_2") ||
+    String((template?.config as any)?.v7_master_key || "").startsWith("motor_modern_design_2") ||
     String((template?.config as any)?.template_name || "").toLowerCase().includes("design 2") ||
     String((template?.config as any)?.template_name || "").toLowerCase().includes("design2")
   );
-  const design2IncludeSchedule = Boolean(dispOpts?.include_benefit_schedule);
-  const design2CardCount = isDesign2
-    ? buildUnifiedMatrixCards(currentBenefits, addonBenefits, undefined, 24).length
+  const design2HideAddons = Boolean((template?.config as any)?.hide_addon_upgrades);
+  const design2BaseH = Number(
+    (template?.config as any)?.page_profile?.height ||
+      template?.config?.canvas?.height ||
+      (design2HideAddons ? 580 : 1123)
+  );
+  const design2IncludeSchedule = !design2HideAddons && Boolean(dispOpts?.include_benefit_schedule);
+  const design2CardCount = isDesign2 && !design2HideAddons
+    ? buildUnifiedMatrixCards(currentBenefits, addonBenefits, undefined, 24, 24, insuranceCompany).length
     : 0;
-  const design2CanvasH = design2IncludeSchedule ? 1123 * 2 + 16 : 1123;
+  const design2CanvasH = design2IncludeSchedule ? design2BaseH * 2 + 16 : design2BaseH;
   
   const dynamicCanvasHeight = Math.max(baseCanvasHeight, 350 + allBenefits.length * 56 + 100);
   const canvasHeight = dynamicCanvasHeight;
@@ -580,6 +588,8 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
               <div style={{ width: "794px", transform: `scale(${640 / 794})`, transformOrigin: "top left" }}>
                 <Design2CanvasView
                   fields={design2Fields}
+                  config={template?.config}
+                  height={design2CanvasH}
                   currentBenefits={currentBenefits}
                   availableAddons={addonBenefits}
                   companyName={insuranceCompany}

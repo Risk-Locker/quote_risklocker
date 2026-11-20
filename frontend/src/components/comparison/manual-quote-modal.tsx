@@ -44,6 +44,7 @@ const COMMON_INSURERS = [
   "Tune Protect",
   "Liberty Insurance",
   "Allianz General",
+  "MMIP",
 ];
 
 export function ManualQuoteModal({

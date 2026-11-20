@@ -91,6 +91,8 @@ def resolve_insurer_towing_limit(
 ) -> str:
     """Resolve exact towing limit string (RM, km, Unlimited, or No towing) from DB policy_rules."""
     comp = (company_name or getattr(company_obj, "name", None) or "").lower().strip()
+    if "mmip" in comp or "motor insurance pool" in comp:
+        return "No towing"
     text = (combined_text or "").lower()
     raw_ext = str(extracted_towing or "").strip()
 

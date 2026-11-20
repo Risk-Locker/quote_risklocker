@@ -30,6 +30,9 @@ export const OFFICIAL_INSURER_NAMES: Record<string, string> = {
   TOKIO_MARINE: "Tokio Marine Insurans (Malaysia) Berhad",
   RHB: "RHB Insurance Berhad",
   LIBERTY: "Liberty General Insurance Berhad",
+  MMIP: "Malaysian Motor Insurance Pool (MMIP)",
+  MALAYSIAN_MOTOR_INSURANCE_POOL: "Malaysian Motor Insurance Pool (MMIP)",
+  MALAYSIA_MOTOR_INSURANCE_POOL: "Malaysian Motor Insurance Pool (MMIP)",
 };
 
 /**
@@ -38,7 +41,11 @@ export const OFFICIAL_INSURER_NAMES: Record<string, string> = {
 export function getOfficialInsurerName(rawName?: string | null): string {
   if (!rawName) return "QBE Insurance (Malaysia) Berhad";
   const upper = rawName.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  
+
+  if (upper.includes("MMIP") || upper.includes("MOTOR_INSURANCE_POOL")) {
+    return OFFICIAL_INSURER_NAMES.MMIP;
+  }
+
   // Direct match
   if (OFFICIAL_INSURER_NAMES[upper]) {
     return OFFICIAL_INSURER_NAMES[upper];
@@ -60,6 +67,7 @@ export function getOfficialInsurerName(rawName?: string | null): string {
 export function getInsurerShortName(rawName?: string | null): string {
   if (!rawName) return "QBE";
   const upper = rawName.toUpperCase();
+  if (upper.includes("MMIP") || upper.includes("MOTOR INSURANCE POOL")) return "MMIP";
   if (upper.includes("QBE")) return "QBE";
   if (upper.includes("ETIQA")) return "Etiqa";
   if (upper.includes("TAKAFUL") || upper.includes("STMB")) return "Takaful Malaysia";

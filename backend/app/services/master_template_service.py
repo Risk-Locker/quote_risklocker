@@ -827,20 +827,35 @@ def ensure_master_templates(db, user, *, apply: bool = False, force: bool = Fals
 
 DESIGN2_TEMPLATE_ID = "b78e2024-0002-4000-8000-000000000002"
 DESIGN2_MASTER_KEY = "motor_modern_design_2"
+DESIGN2_EN_TEMPLATE_ID = "b78e2024-0002-4000-8000-000000000003"
+DESIGN2_EN_MASTER_KEY = "motor_modern_design_2_en"
+DESIGN2_TPO_BILINGUAL_TEMPLATE_ID = "b78e2024-0002-4000-8000-000000000004"
+DESIGN2_TPO_BILINGUAL_MASTER_KEY = "motor_modern_design_2_tpo_compact"
+DESIGN2_TPO_EN_TEMPLATE_ID = "b78e2024-0002-4000-8000-000000000005"
+DESIGN2_TPO_EN_MASTER_KEY = "motor_modern_design_2_tpo_compact_en"
 
 
-def motor_modern_design_2_config() -> dict:
-    """Canonical configuration for Risklocker Motor Quotation Design 2 (Modern 4-Column Grid)."""
-    name = "Design 2 (Modern 4-Column Grid)"
-    height = 1123
+def _build_design2_variant_config(
+    *,
+    name: str,
+    key: str,
+    height: int = 1123,
+    profile_key: str = "a4",
+    profile_name: str = "A4",
+    language_mode: str = "bilingual",
+    hide_addon_upgrades: bool = False,
+    is_default: bool = False,
+) -> dict:
     config = new_v7_template_config(name)
     config.update({
         "version": 7,
         "template_name": name,
-        "v7_master_key": DESIGN2_MASTER_KEY,
-        "template_key": DESIGN2_MASTER_KEY,
+        "v7_master_key": key,
+        "template_key": key,
         "layout_engine": "design2",
-        "is_default": True,
+        "language_mode": language_mode,
+        "hide_addon_upgrades": hide_addon_upgrades,
+        "is_default": is_default,
         "agency_account_name": "RISKLOCKER SDN. BHD.",
         "bank_name": "Hong Leong Bank",
         "bank_account_no": "12300318500",
@@ -851,12 +866,12 @@ def motor_modern_design_2_config() -> dict:
             "bank_qr": "c4003185-0000-4000-8000-000000000001",
         },
         "page_profile": {
-            "profile_key": "a4",
-            "name": "A4",
+            "profile_key": profile_key,
+            "name": profile_name,
             "width": 794,
             "height": height,
             "unit": "px",
-            "safe_margins": {"top": 24, "right": 24, "bottom": 24, "left": 24},
+            "safe_margins": {"top": 16 if hide_addon_upgrades else 24, "right": 24, "bottom": 16 if hide_addon_upgrades else 24, "left": 24},
             "bleed": {},
             "background_behavior": "clip",
         },
@@ -864,32 +879,103 @@ def motor_modern_design_2_config() -> dict:
     elements = [
         _rectangle("page_bg", 0, 0, 794, height, 1, background="#FFFFFF", border=""),
         _image("risklocker_logo", "risklocker_logo", 32, 24, 140, 40, 5),
-        _text("title_motor", "Motor Insurance | Quotation (Design 2)", 32, 80, 420, 28, 5, size=18, weight="800", color="#0F172A"),
+        _text("title_motor", f"Motor Insurance | Quotation ({name})", 32, 80, 460, 28, 5, size=18, weight="800", color="#0F172A"),
     ]
     config["canvas"] = {**config["canvas"], "width": 794, "height": height, "elements": elements}
     return validate_template_config(config)
 
 
-def ensure_design2_master_template(db, user, *, apply: bool = False, force: bool = False) -> dict:
-    """Create and publish the Design 2 (Modern 4-Column Grid) master template idempotently."""
-    templates = list(db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))).all())
+def motor_modern_design_2_config() -> dict:
+    """Canonical configuration for Risklocker Motor Quotation Design 2 (Modern 4-Column Grid)."""
+    return _build_design2_variant_config(
+        name="Design 2 (Modern 4-Column Grid)",
+        key=DESIGN2_MASTER_KEY,
+        height=1123,
+        profile_key="a4",
+        profile_name="A4",
+        language_mode="bilingual",
+        hide_addon_upgrades=False,
+        is_default=True,
+    )
+
+
+def motor_modern_design_2_en_config() -> dict:
+    """English-only carbon copy of Design 2 (Modern 4-Column Grid)."""
+    return _build_design2_variant_config(
+        name="Design 2 (English Only)",
+        key=DESIGN2_EN_MASTER_KEY,
+        height=1123,
+        profile_key="a4",
+        profile_name="A4",
+        language_mode="en",
+        hide_addon_upgrades=False,
+        is_default=False,
+    )
+
+
+def motor_modern_design_2_tpo_compact_config() -> dict:
+    """Half-page TPO Design 2 without Add-On Upgrades ++ (Bilingual)."""
+    return _build_design2_variant_config(
+        name="Design 2 (TPO Half-Page - Bilingual)",
+        key=DESIGN2_TPO_BILINGUAL_MASTER_KEY,
+        height=580,
+        profile_key="half_a4",
+        profile_name="Half A4 (Compact TPO)",
+        language_mode="bilingual",
+        hide_addon_upgrades=True,
+        is_default=False,
+    )
+
+
+def motor_modern_design_2_tpo_compact_en_config() -> dict:
+    """Half-page TPO Design 2 without Add-On Upgrades ++ (English Only)."""
+    return _build_design2_variant_config(
+        name="Design 2 (TPO Half-Page - English Only)",
+        key=DESIGN2_TPO_EN_MASTER_KEY,
+        height=580,
+        profile_key="half_a4",
+        profile_name="Half A4 (Compact TPO)",
+        language_mode="en",
+        hide_addon_upgrades=True,
+        is_default=False,
+    )
+
+
+def _ensure_one_design2_variant(
+    db,
+    user,
+    *,
+    template_id: str,
+    master_key: str,
+    spec_config: dict,
+    make_default: bool,
+    templates: list[OutputTemplateConfig],
+    apply: bool,
+    force: bool,
+) -> dict:
     current = next(
         (
             item for item in templates
-            if item.id == DESIGN2_TEMPLATE_ID or str((item.fixed_fields or {}).get("v7_master_key") or "") == DESIGN2_MASTER_KEY
+            if item.id == template_id or str((item.fixed_fields or {}).get("v7_master_key") or "") == master_key
         ),
         None,
     )
-    spec_config = motor_modern_design_2_config()
     spec_name = spec_config["template_name"]
-    report: dict = {"key": DESIGN2_MASTER_KEY, "created": False, "published": False, "template_id": None, "template_revision_id": None, "revision_number": None, "apply": apply}
-
+    report: dict = {
+        "key": master_key,
+        "created": False,
+        "published": False,
+        "template_id": None,
+        "template_revision_id": None,
+        "revision_number": None,
+        "apply": apply,
+    }
     if current is None:
         report["created"] = True
         if not apply:
             return report
         current = OutputTemplateConfig(
-            id=DESIGN2_TEMPLATE_ID,
+            id=template_id,
             name=spec_name,
             insurance_type="Motor",
             status="active",
@@ -898,6 +984,7 @@ def ensure_design2_master_template(db, user, *, apply: bool = False, force: bool
         db.add(current)
         db.commit()
         db.refresh(current)
+        templates.append(current)
     else:
         existing_revs = list(db.scalars(select(TemplateRevision).where(TemplateRevision.template_id == current.id, TemplateRevision.state == "published")).all())
         if existing_revs and not force:
@@ -914,19 +1001,56 @@ def ensure_design2_master_template(db, user, *, apply: bool = False, force: bool
 
     report["template_id"] = current.id
     if apply:
-        # Clear is_default from all other templates so Design 2 is the primary default template
-        for item in templates:
-            if item.id == current.id:
-                continue
-            cfg = deepcopy(item.fixed_fields or {})
-            if cfg.get("is_default"):
-                cfg["is_default"] = False
-                item.fixed_fields = cfg
-                flag_modified(item, "fixed_fields")
-        db.commit()
+        if make_default:
+            for item in templates:
+                if item.id == current.id:
+                    continue
+                cfg = deepcopy(item.fixed_fields or {})
+                if cfg.get("is_default"):
+                    cfg["is_default"] = False
+                    item.fixed_fields = cfg
+                    flag_modified(item, "fixed_fields")
+            db.commit()
 
         rev = publish_template_revision(db, user, current.id, base_revision=current.revision)
         report["published"] = True
         report["template_revision_id"] = rev.id
         report["revision_number"] = rev.revision_number
     return report
+
+
+def ensure_design2_master_template(db, user, *, apply: bool = False, force: bool = False) -> dict:
+    """Create and publish all Design 2 master templates (Bilingual A4, English-Only A4, and Half-Page TPO variants) idempotently."""
+    templates = list(db.scalars(select(OutputTemplateConfig).where(OutputTemplateConfig.deleted_at.is_(None))).all())
+    primary_report = _ensure_one_design2_variant(
+        db,
+        user,
+        template_id=DESIGN2_TEMPLATE_ID,
+        master_key=DESIGN2_MASTER_KEY,
+        spec_config=motor_modern_design_2_config(),
+        make_default=True,
+        templates=templates,
+        apply=apply,
+        force=force,
+    )
+    variants = []
+    for tid, mkey, cfg in (
+        (DESIGN2_EN_TEMPLATE_ID, DESIGN2_EN_MASTER_KEY, motor_modern_design_2_en_config()),
+        (DESIGN2_TPO_BILINGUAL_TEMPLATE_ID, DESIGN2_TPO_BILINGUAL_MASTER_KEY, motor_modern_design_2_tpo_compact_config()),
+        (DESIGN2_TPO_EN_TEMPLATE_ID, DESIGN2_TPO_EN_MASTER_KEY, motor_modern_design_2_tpo_compact_en_config()),
+    ):
+        variants.append(
+            _ensure_one_design2_variant(
+                db,
+                user,
+                template_id=tid,
+                master_key=mkey,
+                spec_config=cfg,
+                make_default=False,
+                templates=templates,
+                apply=apply,
+                force=force,
+            )
+        )
+    primary_report["variants"] = variants
+    return primary_report

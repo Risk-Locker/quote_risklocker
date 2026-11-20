@@ -270,6 +270,8 @@ export function LivePreviewCard({
                   {isDesign2 ? (
                     <Design2CanvasView
                       fields={previewFields}
+                      config={previewTemplate.config}
+                      height={canvasH}
                       currentBenefits={currentCards}
                       availableAddons={addonCards}
                       companyName={companyName || undefined}

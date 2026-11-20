@@ -22,6 +22,8 @@ interface NcdEntitlementModalProps {
   setPastingPolicyText: (val: string) => void;
   onSave: () => void;
   isSaving: boolean;
+  onUploadPreviousPolicy?: (file: File) => Promise<void>;
+  isUploadingPrevPolicy?: boolean;
 }
 
 export function NcdEntitlementModal({
@@ -37,6 +39,8 @@ export function NcdEntitlementModal({
   setPastingPolicyText,
   onSave,
   isSaving,
+  onUploadPreviousPolicy,
+  isUploadingPrevPolicy = false,
 }: NcdEntitlementModalProps) {
   if (!isOpen) return null;
 
@@ -153,12 +157,13 @@ export function NcdEntitlementModal({
               </span>
               <label className="inline-flex items-center gap-1 text-[10px] font-semibold text-neutral-700 bg-white border border-neutral-300 hover:bg-neutral-100 px-2 py-0.5 rounded cursor-pointer transition-colors shadow-2xs">
                 <CloudArrowUp size={12} weight="bold" />
-                <span>Choose File</span>
+                <span>{isUploadingPrevPolicy ? "Extracting..." : "Choose File"}</span>
                 <input
                   type="file"
                   accept="image/*,application/pdf"
+                  disabled={isUploadingPrevPolicy}
                   className="hidden"
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (file) {
                       const name = file.name;
@@ -166,6 +171,10 @@ export function NcdEntitlementModal({
                       const match = name.match(/(\d+(?:\.\d+)?)\s*%/);
                       if (match) {
                         setEditCurrentNcd(match[1]);
+                      }
+                      if (onUploadPreviousPolicy) {
+                        await onUploadPreviousPolicy(file);
+                        onClose();
                       }
                     }
                   }}

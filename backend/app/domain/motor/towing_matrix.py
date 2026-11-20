@@ -54,6 +54,8 @@ def resolve_towing_entitlement(
 ) -> TowingEntitlement:
     """Deterministically resolves towing limit into RM <amount>, <num> km, or Unlimited."""
     comp = (company_name or "").upper().strip()
+    if "MMIP" in comp or "MOTOR INSURANCE POOL" in comp:
+        return TowingEntitlement(limit_type="RM", formatted="No towing", sort_weight=0.0)
     combined = " ".join([
         product_name or "",
         package_or_rider or "",

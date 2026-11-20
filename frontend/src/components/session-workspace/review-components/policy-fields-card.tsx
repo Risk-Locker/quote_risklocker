@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import type { WorkspaceField, WorkspaceSnapshot } from "../types";
 
-export type FieldKind = "text" | "date" | "percent" | "money" | "total" | "vehicle_type" | "valuation_type";
+export type FieldKind = "text" | "date" | "percent" | "money" | "total" | "vehicle_type" | "valuation_type" | "coverage_type";
 
 export type FormField = { name: string; label: string; kind: FieldKind };
 
@@ -30,7 +30,7 @@ export const HEADER_IDENTITY_FIELDS: FormField[] = [
 export const VEHICLE_INFO_FIELDS: FormField[] = [
   { name: "customer_name", label: "Customer / 客户姓名", kind: "text" },
   { name: "cover_period", label: "Period Of Insurance / 保障期限", kind: "text" },
-  { name: "coverage_type", label: "Coverage Type / 保障种类", kind: "text" },
+  { name: "coverage_type", label: "Coverage Type / 保障种类", kind: "coverage_type" },
   { name: "car_model", label: "Car Model / 车型", kind: "text" },
   { name: "ncd_percent", label: "NCD / 无索偿折扣", kind: "percent" },
   { name: "valuation_type", label: "Valuation Type / 估价方式", kind: "valuation_type" },
@@ -629,6 +629,37 @@ export function PolicyFieldsCard({
             <option value="Agreed Value">Agreed Value (Nilai Dipersetujui)</option>
             <option value="Market Value">Market Value (Nilai Pasaran)</option>
           </Select>
+        ) : field.kind === "coverage_type" ? (
+          (() => {
+            const isMmipInsurer = /mmip|motor insurance pool/i.test(String(formValues["insurance_company"] || ""));
+            const curCov = isMmipInsurer ? "Third Party" : (formValues[field.name] || "Comprehensive");
+            const covNorm = /third\s*party\s*fire|tpft/i.test(curCov)
+              ? "Third Party Fire & Theft"
+              : /third\s*party|tpo/i.test(curCov)
+              ? "Third Party"
+              : "Comprehensive";
+            return (
+              <Select
+                value={covNorm}
+                onChange={(event) => {
+                  const val = isMmipInsurer ? "Third Party" : event.target.value;
+                  setFormValues((values) => ({ ...values, [field.name]: val }));
+                  commitFieldDirectly(field.name, val);
+                }}
+                className="text-xs font-medium"
+              >
+                <option value="Comprehensive" disabled={isMmipInsurer}>
+                  Comprehensive
+                </option>
+                <option value="Third Party Fire & Theft" disabled={isMmipInsurer}>
+                  Third Party Fire &amp; Theft (TPFT)
+                </option>
+                <option value="Third Party">
+                  Third Party Only (TPO){isMmipInsurer ? " — MMIP Locked" : ""}
+                </option>
+              </Select>
+            );
+          })()
         ) : (
           <span className="relative">
             {field.kind === "money" || field.kind === "total" ? (
