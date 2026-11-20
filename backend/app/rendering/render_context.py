@@ -291,7 +291,14 @@ def adjusted_total_text(
             pass
 
     if base_prem is not None and base_prem > 0:
-        total = base_prem + extras_total + rt_num + sf_num
+        from app.domain.motor.discount_calculator import calculate_motor_discount
+
+        pct_raw = (fields or {}).get("motor_discount_pct")
+        pct_val = pct_raw.get("value") if isinstance(pct_raw, dict) else pct_raw
+        flat_raw = (fields or {}).get("quotation_discount")
+        flat_val = flat_raw.get("value") if isinstance(flat_raw, dict) else flat_raw
+        disc_bd = calculate_motor_discount(base_prem + extras_total, pct_val or 0, flat_val or 0)
+        total = disc_bd.net_total_payable(rt_num, sf_num)
     else:
         tot_raw = (fields or {}).get("total_amount")
         tot_val = tot_raw.get("value") if isinstance(tot_raw, dict) else tot_raw
@@ -408,6 +415,8 @@ def _card(
     active_conditional_descriptions: dict[str, str] | None = None,
     active_conditional_titles: dict[str, str] | None = None,
     active_conditional_values: dict[str, str] | None = None,
+    active_conditional_empty_values: set[str] | None = None,
+    promoted_addon_concept_ids: set[str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
@@ -545,14 +554,24 @@ def _card(
         else:
             card_val = ""
 
-    if is_limit_cleared:
+    concept_id_key = str(getattr(concept, "id", None) or "")
+    is_promoted_addon = concept_id_key in (promoted_addon_concept_ids or set())
+    is_addon_ctx = bool(
+        is_promoted_addon
+        or getattr(selection, "state", None) == "available_addon"
+        or getattr(offering, "role", None) in {"addon_option", "bundle_component"}
+        or getattr(offering, "offering_kind", None) in {"optional", "upgrade"}
+    )
+
+    if is_limit_cleared or (not has_selection_value_override and concept_id_key in (active_conditional_empty_values or set())):
         card_val = ""
+        if not has_selection_value_override:
+            typed_value = None
     else:
         # Tiered Display Value Resolution:
         # 1. Manual Workspace Selection override (`selection.typed_value_override`)
         # 2. Dynamic CompanyBenefitCondition (`replacement_value`)
         # 3. CatalogOffering (`display_value`) fallback
-        concept_id_key = str(getattr(concept, "id", None) or "")
         cond_val = (active_conditional_values or {}).get(concept_id_key)
         if not has_selection_value_override and cond_val and str(cond_val).strip():
             card_val = str(cond_val).strip()
@@ -563,31 +582,44 @@ def _card(
         if card_val and not has_selection_value_override:
             has_digits = any(c.isdigit() for c in card_val)
             is_unlimited = "unlimited" in card_val.strip().lower()
-            # Plan / Tier suppression: if card_val looks like a plan designation ("Plan 2", "Tier 1", "Pakej 3", or pure standalone 1-2 digit number), suppress it
-            is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", card_val.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", card_val.strip()))
+            # Plan / Tier suppression for non-addon cards: keep plan numbers on add-ons / promoted cards
+            is_plan_indicator = (
+                False
+                if is_addon_ctx
+                else bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", card_val.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", card_val.strip()))
+            )
             if is_plan_indicator:
                 card_val = ""
             elif not has_digits and not is_unlimited:
                 card_val = ""
             elif card_val.strip().lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
                 card_val = ""
-            elif len(card_val.split()) > 4 and not re.match(r"^(?:rm|myr)\s*[\d,]+", card_val.strip(), re.IGNORECASE):
+            elif len(card_val.split()) > 5 and not re.match(r"^(?:rm|myr)\s*[\d,]+", card_val.strip(), re.IGNORECASE):
                 # Never leak multi-word catalog prose sentences into the crisp coverage metric badge
                 card_val = ""
 
         # If card_val is empty, but evidence_snapshot has an extracted coverage limit (e.g. RM 4,000):
         ev_lim = (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit")
-        if not has_selection_value_override and ev_lim and (not card_val or card_val.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "optional"}):
+        if (
+            not has_selection_value_override
+            and concept_id_key not in (active_conditional_empty_values or set())
+            and ev_lim
+            and (not card_val or card_val.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "optional"})
+        ):
             ev_str = str(ev_lim).strip()
             if ev_str.lower() in {"included standard cover", "included", "foc", "as quoted", "selected", "yes", "true", "standard", "optional"}:
                 card_val = ""
             else:
                 has_digits = any(c.isdigit() for c in ev_str)
                 is_unlimited = ev_str.lower() == "unlimited"
-                is_plan_indicator = bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", ev_str.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", ev_str.strip()))
+                is_plan_indicator = (
+                    False
+                    if is_addon_ctx
+                    else bool(re.match(r"^(?:plan|tier|pakej|pkg)\s*[a-z0-9]+$", ev_str.strip(), re.IGNORECASE) or re.match(r"^\d{1,2}$", ev_str.strip()))
+                )
                 if is_plan_indicator:
                     card_val = ""
-                elif has_digits and not ev_str.startswith("RM"):
+                elif has_digits and not ev_str.startswith("RM") and not is_addon_ctx:
                     card_val = f"RM {ev_str}"
                 elif has_digits or is_unlimited:
                     card_val = ev_str
@@ -690,7 +722,8 @@ def _card(
         "is_detected": is_detected,
         "is_pure_default": is_pure_default,
         "is_addon": is_addon,
-        "is_extra": bool(cost_status == "paid" or getattr(selection, "item_kind", None) == "extra" or (isinstance(price, dict) and float(price.get("amount") or price.get("value") or 0) > 0)),
+        "promoted_to_addon": is_promoted_addon,
+        "is_extra": bool(is_promoted_addon or cost_status == "paid" or getattr(selection, "item_kind", None) == "extra" or (isinstance(price, dict) and float(price.get("amount") or price.get("value") or 0) > 0)),
         "group_id": getattr(selection, "package_plan_id", None),
         "display_overrides": getattr(concept, "display_overrides", {}) or {},
     }
@@ -707,6 +740,8 @@ def _expanded_cards(
     active_conditional_descriptions: dict[str, str] | None = None,
     active_conditional_titles: dict[str, str] | None = None,
     active_conditional_values: dict[str, str] | None = None,
+    active_conditional_empty_values: set[str] | None = None,
+    promoted_addon_concept_ids: set[str] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
@@ -735,6 +770,8 @@ def _expanded_cards(
             active_conditional_descriptions=active_conditional_descriptions,
             active_conditional_titles=active_conditional_titles,
             active_conditional_values=active_conditional_values,
+            active_conditional_empty_values=active_conditional_empty_values,
+            promoted_addon_concept_ids=promoted_addon_concept_ids,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -757,6 +794,8 @@ def _expanded_cards(
             active_conditional_descriptions=active_conditional_descriptions,
             active_conditional_titles=active_conditional_titles,
             active_conditional_values=active_conditional_values,
+            active_conditional_empty_values=active_conditional_empty_values,
+            promoted_addon_concept_ids=promoted_addon_concept_ids,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -804,7 +843,38 @@ def resolve_benefit_cards(
     active_conditional_descriptions: dict[str, str] = {}
     active_conditional_titles: dict[str, str] = {}
     active_conditional_values: dict[str, str] = {}
+    active_conditional_empty_values: set[str] = set()
+    promoted_addon_concept_ids: set[str] = set()
     hidden_concept_ids: set[str] = set()
+
+    def _plan_filter_matches(plan_filter_raw: str, trig_sels: list[Any]) -> bool:
+        filter_term = str(plan_filter_raw).strip().lower()
+        norm_filter = re.sub(r"[-_]+", " ", filter_term).strip()
+        m_plan = re.fullmatch(r"(?:plan|tier|pakej|p)?\s*([0-9]+|[a-z])\b", norm_filter)
+        for s in trig_sels:
+            off_obj = offerings_by_id.get(str(getattr(s, "catalog_offering_id", "") or ""))
+            plan_obj = plans_by_id.get(str(getattr(s, "package_plan_id", "") or ""))
+            ev_snap = getattr(s, "evidence_snapshot", None) if isinstance(getattr(s, "evidence_snapshot", None), dict) else {}
+            cov = str(getattr(s, "coverage_limit", "") or ev_snap.get("coverage_limit") or "").lower()
+            lbl = str(getattr(s, "label_override", "") or getattr(off_obj, "label_override", "") or "").lower()
+            off_k = str(getattr(off_obj, "offering_key", "") or getattr(s, "selection_key", "") or "").lower()
+            plan = str(getattr(s, "package_plan_id", "") or getattr(plan_obj, "name", "") or getattr(plan_obj, "plan_key", "") or "").lower()
+            tv = getattr(s, "typed_value_override", None) or getattr(off_obj, "typed_value", None) or {}
+            plan_k = str(tv.get("plan_key", "") if isinstance(tv, dict) else "").lower()
+            disp = str((tv.get("display_text") or tv.get("value") or "") if isinstance(tv, dict) else "").lower()
+            raw_combined = f"{cov} {lbl} {off_k} {plan} {plan_k} {disp}"
+            # Strip range strings like "1-4" or "1 - 4" so unpicked ranges never false-match a specific plan
+            range_free = re.sub(r"\b\d+\s*[-–/]\s*\d+\b", " ", raw_combined)
+            combined_haystack = re.sub(r"\s+", " ", range_free.replace("_", " ").replace("-", " ")).strip()
+            if m_plan:
+                tok = re.escape(m_plan.group(1))
+                if re.search(rf"\b(?:(?:plan|tier|pakej)\s*)?{tok}\b|\bp{tok}\b", combined_haystack):
+                    return True
+            else:
+                if re.search(rf"\b{re.escape(filter_term)}\b", range_free) or re.search(rf"\b{re.escape(norm_filter)}\b", combined_haystack):
+                    return True
+        return False
+
     sorted_conditions = sorted(
         company_conditions or [],
         key=lambda c: (1 if (getattr(c, "trigger_plan_filter", None) and str(getattr(c, "trigger_plan_filter", "")).strip()) else 0),
@@ -816,27 +886,11 @@ def resolve_benefit_cards(
         trig_id = concept_id_by_key.get(raw_trig, raw_trig)
         if trig_id in active_concept_ids or raw_trig in active_concept_keys:
             plan_filter = getattr(cond, "trigger_plan_filter", None)
-            matched = False
             if not plan_filter or not str(plan_filter).strip():
                 matched = True
             else:
-                filter_term = str(plan_filter).strip().lower()
                 trig_sels = [s for s in current if str(s.concept_id) == trig_id]
-                for s in trig_sels:
-                    off_obj = offerings_by_id.get(str(getattr(s, "catalog_offering_id", "") or ""))
-                    plan_obj = plans_by_id.get(str(getattr(s, "package_plan_id", "") or ""))
-                    cov = str(getattr(s, "coverage_limit", "") or "").lower()
-                    lbl = str(getattr(s, "label_override", "") or getattr(off_obj, "label_override", "") or "").lower()
-                    off_k = str(getattr(off_obj, "offering_key", "") or getattr(s, "selection_key", "") or "").lower()
-                    plan = str(getattr(s, "package_plan_id", "") or getattr(plan_obj, "name", "") or getattr(plan_obj, "plan_key", "") or "").lower()
-                    tv = getattr(s, "typed_value_override", None) or getattr(off_obj, "typed_value", None) or {}
-                    plan_k = str(tv.get("plan_key", "") if isinstance(tv, dict) else "").lower()
-                    disp = str((tv.get("display_text") or tv.get("value") or "") if isinstance(tv, dict) else "").lower()
-                    combined_haystack = f"{cov} {lbl} {off_k} {plan} {plan_k} {disp}".replace("_", " ").replace("-", " ")
-                    norm_filter = filter_term.replace("_", " ").replace("-", " ")
-                    if filter_term in combined_haystack or norm_filter in combined_haystack:
-                        matched = True
-                        break
+                matched = _plan_filter_matches(str(plan_filter), trig_sels)
             if matched:
                 raw_target = str(getattr(cond, "target_concept_id", "") or "")
                 target_id = concept_id_by_key.get(raw_target, raw_target)
@@ -844,14 +898,20 @@ def resolve_benefit_cards(
                 if action == "hide_target" or getattr(cond, "replacement_description", "") == "__HIDE__":
                     hidden_concept_ids.add(target_id)
                 else:
+                    if action == "promote_to_addon":
+                        promoted_addon_concept_ids.add(target_id)
                     if cond.replacement_description is not None:
                         active_conditional_descriptions[target_id] = cond.replacement_description
                     rep_title = getattr(cond, "replacement_title", None)
                     if rep_title and str(rep_title).strip():
                         active_conditional_titles[target_id] = str(rep_title).strip()
                     rep_val = getattr(cond, "replacement_value", None)
-                    if rep_val and str(rep_val).strip():
+                    if rep_val is not None and str(rep_val).strip():
                         active_conditional_values[target_id] = str(rep_val).strip()
+                        active_conditional_empty_values.discard(target_id)
+                    elif action == "promote_to_addon":
+                        active_conditional_values.pop(target_id, None)
+                        active_conditional_empty_values.add(target_id)
 
     company_baseline_descriptions: dict[str, str] = {
         str(cfg.concept_id): cfg.baseline_description
@@ -877,6 +937,8 @@ def resolve_benefit_cards(
         kwargs["active_conditional_descriptions"] = active_conditional_descriptions
         kwargs["active_conditional_titles"] = active_conditional_titles
         kwargs["active_conditional_values"] = active_conditional_values
+        kwargs["active_conditional_empty_values"] = active_conditional_empty_values
+        kwargs["promoted_addon_concept_ids"] = promoted_addon_concept_ids
         kwargs["company_baseline_descriptions"] = company_baseline_descriptions
         kwargs["company_baseline_costs"] = company_baseline_costs
         if "visual_profile_assets" not in kwargs:
@@ -896,6 +958,8 @@ def resolve_benefit_cards(
             active_conditional_descriptions=active_conditional_descriptions,
             active_conditional_titles=active_conditional_titles,
             active_conditional_values=active_conditional_values,
+            active_conditional_empty_values=active_conditional_empty_values,
+            promoted_addon_concept_ids=promoted_addon_concept_ids,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,

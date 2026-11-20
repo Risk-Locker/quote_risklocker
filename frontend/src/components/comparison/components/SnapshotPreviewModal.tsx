@@ -152,6 +152,14 @@ export function SnapshotPreviewModal({
                       RM {(tenure.road_tax + tenure.runner_fee).toFixed(2)}
                     </span>
                   </p>
+                  {(tenure.motor_discount_pct ?? 0) > 0 && (
+                    <p className="text-[11px] font-semibold text-emerald-700">
+                      Motor Insurance Discount :{" "}
+                      <span className="font-mono font-bold">
+                        -{(tenure.motor_discount_pct ?? 0) % 1 === 0 ? (tenure.motor_discount_pct ?? 0).toFixed(0) : tenure.motor_discount_pct}%
+                      </span>
+                    </p>
+                  )}
                   {(tenure.quotation_discount ?? 0) > 0 && (
                     <p className="text-[11px] font-semibold text-emerald-700">
                       Quotation Discount :{" "}
@@ -242,7 +250,11 @@ export function SnapshotPreviewModal({
                               </span>
                             </div>
                             <div className="flex justify-between items-baseline text-xs text-emerald-700">
-                              <span className="font-medium">Discount:</span>
+                              <span className="font-medium">
+                                {(card.motor_discount_pct ?? tenure.motor_discount_pct ?? 0) > 0
+                                  ? `Motor Disc (${Number(card.motor_discount_pct ?? tenure.motor_discount_pct)}%):`
+                                  : "Discount:"}
+                              </span>
                               <span className="font-mono font-bold">
                                 - RM {(card.effective_discount ?? tenure.quotation_discount ?? 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}
                               </span>

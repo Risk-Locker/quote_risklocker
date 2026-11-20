@@ -69,6 +69,8 @@ interface CustomerVehicleLedgerPaneProps {
   onPopulateEditInputs: () => void;
   quotationDiscountInput: string;
   setQuotationDiscountInput: (v: string) => void;
+  motorDiscountPctInput: string;
+  setMotorDiscountPctInput: (v: string) => void;
 }
 
 export function CustomerVehicleLedgerPane({
@@ -120,6 +122,8 @@ export function CustomerVehicleLedgerPane({
   onPopulateEditInputs,
   quotationDiscountInput,
   setQuotationDiscountInput,
+  motorDiscountPctInput,
+  setMotorDiscountPctInput,
 }: CustomerVehicleLedgerPaneProps) {
   // Engine Capacity & Unit reactive parser
   const parseCapacity = (raw: string) => {
@@ -659,6 +663,21 @@ export function CustomerVehicleLedgerPane({
                     className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-emerald-300 bg-emerald-50/40 text-emerald-900 font-bold focus:outline-none focus:ring-1 focus:ring-emerald-600"
                   />
                 </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-emerald-900 block mb-1">
+                    Motor Discount (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="100"
+                    value={motorDiscountPctInput}
+                    onChange={(e) => setMotorDiscountPctInput(e.target.value)}
+                    placeholder="e.g. 10"
+                    className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-emerald-300 bg-emerald-50/40 text-emerald-900 font-bold focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                  />
+                </div>
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2">
@@ -761,6 +780,16 @@ export function CustomerVehicleLedgerPane({
                     ? `RM ${tenure.windscreen_target.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`
                     : "None (RM 0.00)"}
                 </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[#6e6e73]">Motor Discount (%):</span>
+                {tenure.motor_discount_pct && tenure.motor_discount_pct > 0 ? (
+                  <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 text-[11px]">
+                    -{tenure.motor_discount_pct % 1 === 0 ? tenure.motor_discount_pct.toFixed(0) : tenure.motor_discount_pct}% (Motor Only)
+                  </span>
+                ) : (
+                  <span className="font-mono text-[#6e6e73]">0%</span>
+                )}
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-[#6e6e73]">Quotation Discount:</span>

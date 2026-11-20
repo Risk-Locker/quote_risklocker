@@ -538,12 +538,20 @@ def sync_session_draft_from_comparison(
         else Decimal("0.00")
     )
     if explicit_motor_premium and field_values.get("motor_premium") is not None:
+        from app.domain.motor.discount_calculator import calculate_motor_discount
+
         mp_dec = parse_money_decimal(field_values.get("motor_premium")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        pct_val = getattr(tenure, "motor_discount_pct", Decimal("0.00")) if tenure else Decimal("0.00")
+        flat_val = getattr(tenure, "quotation_discount", Decimal("0.00")) if tenure else Decimal("0.00")
+        disc_bd = calculate_motor_discount(mp_dec, pct_val, flat_val)
         _set_manual_field("motor_premium", f"{mp_dec:.2f}")
         _set_manual_field("premium", f"{mp_dec:.2f}")
         _set_manual_field("premium_due", f"{mp_dec:.2f}")
         _set_decision("premium", f"{mp_dec:.2f}")
-        tot_dec = (mp_dec + eff_rt + eff_rf).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        d_fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready"}
+        d_fields["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready"}
+        d_fields["quotation_discount"] = {"value": f"{disc_bd.flat_discount_amount:.2f}", "status": "ready"}
+        tot_dec = disc_bd.net_total_payable(eff_rt, eff_rf)
         d_fields["include_road_tax"] = {"value": bool(tenure.include_road_tax is not False) if tenure else True, "status": "ready"}
         d_fields["include_runner_fee"] = {"value": bool(tenure.include_runner_fee is not False) if tenure else True, "status": "ready"}
         d_fields["roadtax"] = {"value": f"{eff_rt:.2f}", "status": "ready"}
@@ -551,14 +559,22 @@ def sync_session_draft_from_comparison(
         d_fields["total_amount"] = {"value": f"{tot_dec:.2f}", "status": "ready"}
         d_decisions["total_amount"] = {"decision": "confirm", "decided_by": user_id, "decided_at": now_iso}
     elif removed_applied_total > Decimal("0.00"):
+        from app.domain.motor.discount_calculator import calculate_motor_discount
+
         cur_prem = parse_money_decimal(d_fields.get("premium"))
         new_prem = max(Decimal("0.00"), (cur_prem - removed_applied_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
         prem_delta_out = -removed_applied_total
+        pct_val = getattr(tenure, "motor_discount_pct", Decimal("0.00")) if tenure else Decimal("0.00")
+        flat_val = getattr(tenure, "quotation_discount", Decimal("0.00")) if tenure else Decimal("0.00")
+        disc_bd = calculate_motor_discount(new_prem, pct_val, flat_val)
         _set_manual_field("motor_premium", f"{new_prem:.2f}")
         _set_manual_field("premium", f"{new_prem:.2f}")
         _set_manual_field("premium_due", f"{new_prem:.2f}")
         _set_decision("premium", f"{new_prem:.2f}")
-        tot_dec = (new_prem + eff_rt + eff_rf).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        d_fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready"}
+        d_fields["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready"}
+        d_fields["quotation_discount"] = {"value": f"{disc_bd.flat_discount_amount:.2f}", "status": "ready"}
+        tot_dec = disc_bd.net_total_payable(eff_rt, eff_rf)
         d_fields["include_road_tax"] = {"value": bool(tenure.include_road_tax is not False) if tenure else True, "status": "ready"}
         d_fields["include_runner_fee"] = {"value": bool(tenure.include_runner_fee is not False) if tenure else True, "status": "ready"}
         d_fields["roadtax"] = {"value": f"{eff_rt:.2f}", "status": "ready"}

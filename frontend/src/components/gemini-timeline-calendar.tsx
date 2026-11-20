@@ -41,6 +41,7 @@ export interface TimelineLogItem {
 export interface MinuteBucket {
   minute: string;
   calls: number;
+  errors?: number;
   total_tokens: number;
   prompt_tokens: number;
   candidate_tokens: number;
@@ -64,15 +65,21 @@ export interface FleetTimelineResponse {
   };
   timeline: TimelineLogItem[];
   minute_buckets: MinuteBucket[];
+  minute_summary?: {
+    calls: number;
+    errors: number;
+    tokens: number;
+  };
   daily_history: DailyCycleHistory[];
 }
 
-export function GeminiTimelineCalendar() {
+export function GeminiTimelineCalendar({ refreshNonce = 0 }: { refreshNonce?: number }) {
   const [data, setData] = useState<FleetTimelineResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterModel, setFilterModel] = useState<string>("all");
+  const [filterErrorsOnly, setFilterErrorsOnly] = useState<boolean>(false);
   const [secondsRemaining, setSecondsRemaining] = useState<number>(0);
 
   async function fetchTimeline() {
@@ -95,7 +102,7 @@ export function GeminiTimelineCalendar() {
     fetchTimeline();
     const interval = setInterval(fetchTimeline, 30_000); // refresh every 30s
     return () => clearInterval(interval);
-  }, []);
+  }, [refreshNonce]);
 
   // Live countdown timer ticking every second
   useEffect(() => {
@@ -115,17 +122,21 @@ export function GeminiTimelineCalendar() {
 
   const filteredLogs = useMemo(() => {
     if (!data?.timeline) return [];
+    const q = searchTerm.toLowerCase();
     return data.timeline.filter((item) => {
       const matchesSearch =
-        searchTerm === "" ||
-        item.account_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.purpose.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (item.endpoint_slot && item.endpoint_slot.toLowerCase().includes(searchTerm.toLowerCase()));
+        q === "" ||
+        item.account_id.toLowerCase().includes(q) ||
+        item.purpose.toLowerCase().includes(q) ||
+        item.model.toLowerCase().includes(q) ||
+        String(item.status_code).includes(q) ||
+        (item.error_message && item.error_message.toLowerCase().includes(q)) ||
+        (item.endpoint_slot && item.endpoint_slot.toLowerCase().includes(q));
       const matchesModel = filterModel === "all" || item.model === filterModel;
-      return matchesSearch && matchesModel;
+      const matchesError = !filterErrorsOnly || !item.is_success;
+      return matchesSearch && matchesModel && matchesError;
     });
-  }, [data?.timeline, searchTerm, filterModel]);
+  }, [data?.timeline, searchTerm, filterModel, filterErrorsOnly]);
 
   const maxTokensInMinutes = useMemo(() => {
     if (!data?.minute_buckets || data.minute_buckets.length === 0) return 1;
@@ -216,30 +227,48 @@ export function GeminiTimelineCalendar() {
       <div className="p-5 space-y-6">
         {/* Minute-Level Token Activity Graph (Last 60 Minutes) */}
         <div>
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <span className="text-xs font-semibold text-gray-900 flex items-center gap-1.5">
               <Sparkle size={14} className="text-blue-600" />
               Minute-by-Minute Token Intensity & Request Rate (Past 60 Minutes)
             </span>
-            <span className="text-[11px] text-[var(--rl-text-muted)]">
-              Max TPM ceiling: 200,000 tokens/min
-            </span>
+            <div className="flex items-center gap-2 text-[11px] text-[var(--rl-text-muted)]">
+              {data?.minute_summary && (
+                <span className="font-mono bg-gray-100 text-gray-700 px-2 py-0.5 rounded border border-gray-200">
+                  Last 60m: {data.minute_summary.calls} call(s) &middot;{" "}
+                  {(data.minute_summary.tokens / 1000).toFixed(1)}k tokens
+                  {data.minute_summary.errors > 0 && (
+                    <span className="text-rose-600 font-semibold">
+                      {" "}&middot; {data.minute_summary.errors} error(s)
+                    </span>
+                  )}
+                </span>
+              )}
+              <span>Max TPM ceiling: 200,000 tokens/min</span>
+            </div>
           </div>
 
           <div className="h-28 w-full bg-gray-50/70 border border-gray-100 rounded-lg p-2.5 flex items-end gap-1 overflow-x-auto">
             {data?.minute_buckets.map((b, idx) => {
-              const heightPct = Math.min(100, Math.max(8, (b.total_tokens / maxTokensInMinutes) * 100));
               const hasCalls = b.calls > 0;
+              const errCount = b.errors ?? 0;
+              const heightPct = hasCalls
+                ? Math.min(100, Math.max(errCount > 0 && b.total_tokens === 0 ? 22 : 10, (b.total_tokens / maxTokensInMinutes) * 100))
+                : 4;
               return (
                 <div
                   key={idx}
                   className="flex-1 min-w-[10px] flex flex-col items-center justify-end h-full group relative cursor-pointer"
                 >
                   <div
-                    style={{ height: hasCalls ? `${heightPct}%` : "4%" }}
+                    style={{ height: `${heightPct}%` }}
                     className={`w-full rounded-t-sm transition-all duration-300 ${
                       hasCalls
-                        ? b.total_tokens > 150_000
+                        ? errCount > 0 && b.total_tokens === 0
+                          ? "bg-rose-500 hover:bg-rose-600"
+                          : errCount > 0
+                          ? "bg-amber-500 hover:bg-amber-600"
+                          : b.total_tokens > 150_000
                           ? "bg-amber-500 hover:bg-amber-600"
                           : "bg-blue-500 hover:bg-blue-600"
                         : "bg-gray-200 hover:bg-gray-300"
@@ -249,7 +278,7 @@ export function GeminiTimelineCalendar() {
                   <div className="absolute bottom-full mb-1 hidden group-hover:flex flex-col items-center z-30 pointer-events-none">
                     <div className="bg-gray-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap shadow-lg">
                       <div className="font-bold">{b.minute} MYT</div>
-                      <div>{b.calls} call(s)</div>
+                      <div>{b.calls} call(s){errCount > 0 ? ` (${errCount} err)` : ""}</div>
                       <div>{b.total_tokens.toLocaleString()} tokens</div>
                     </div>
                   </div>
@@ -257,10 +286,10 @@ export function GeminiTimelineCalendar() {
               );
             })}
           </div>
-          <div className="flex justify-between text-[10px] text-gray-400 mt-1 px-1">
-            <span>60 mins ago</span>
-            <span>30 mins ago</span>
-            <span>Current Minute</span>
+          <div className="flex justify-between text-[10px] font-mono text-gray-500 mt-1 px-1">
+            <span>{data?.minute_buckets?.[0]?.minute ? `${data.minute_buckets[0].minute} MYT (60m ago)` : "60 mins ago"}</span>
+            <span>{data?.minute_buckets?.[29]?.minute ? `${data.minute_buckets[29].minute} MYT (30m ago)` : "30 mins ago"}</span>
+            <span>{data?.minute_buckets?.[59]?.minute ? `${data.minute_buckets[59].minute} MYT (Now)` : "Current Minute"}</span>
           </div>
         </div>
 
@@ -297,12 +326,24 @@ export function GeminiTimelineCalendar() {
               Live Call Inspection Ledger ({filteredLogs.length} recent calls)
             </span>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFilterErrorsOnly((v) => !v)}
+                className={`text-xs border rounded px-2.5 h-7.5 font-medium transition-colors cursor-pointer ${
+                  filterErrorsOnly
+                    ? "bg-rose-600 border-rose-600 text-white"
+                    : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                {filterErrorsOnly ? "Showing Errors Only" : "Errors Only"}
+              </button>
+
               <div className="relative w-48">
                 <MagnifyingGlass size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <Input
                   type="text"
-                  placeholder="Search calls..."
+                  placeholder="Search calls or errors..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="text-xs pl-7 h-7.5"
@@ -326,7 +367,7 @@ export function GeminiTimelineCalendar() {
               <thead className="bg-gray-50 text-[11px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider border-b border-[var(--rl-border)]">
                 <tr>
                   <th className="py-2 px-3">Time (MYT)</th>
-                  <th className="py-2 px-3">Purpose / Action</th>
+                  <th className="py-2 px-3">Purpose / Action &amp; Error Detail</th>
                   <th className="py-2 px-3">Model</th>
                   <th className="py-2 px-3">Slot / Key</th>
                   <th className="py-2 px-3 text-right">Tokens</th>
@@ -338,23 +379,35 @@ export function GeminiTimelineCalendar() {
                 {filteredLogs.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-gray-400 font-sans text-xs">
-                      No calls recorded yet in this cycle. Upload a quotation to see live metrics.
+                      No calls recorded matching the current filter.
                     </td>
                   </tr>
                 ) : (
-                  filteredLogs.slice(0, 25).map((log) => (
-                    <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="py-2 px-3 text-gray-600 whitespace-nowrap">{log.timestamp}</td>
-                      <td className="py-2 px-3 font-sans font-medium text-gray-900">{log.purpose}</td>
-                      <td className="py-2 px-3 text-blue-600 whitespace-nowrap">{log.model}</td>
-                      <td className="py-2 px-3 text-gray-500 whitespace-nowrap">
+                  filteredLogs.slice(0, 50).map((log) => (
+                    <tr
+                      key={log.id}
+                      className={`transition-colors ${
+                        !log.is_success ? "bg-rose-50/40 hover:bg-rose-50/70" : "hover:bg-gray-50/50"
+                      }`}
+                    >
+                      <td className="py-2 px-3 text-gray-600 whitespace-nowrap align-top">{log.timestamp}</td>
+                      <td className="py-2 px-3 font-sans font-medium text-gray-900 align-top">
+                        <div>{log.purpose}</div>
+                        {!log.is_success && (
+                          <div className="mt-1 font-mono text-[10px] text-rose-700 bg-rose-100/70 border border-rose-200 rounded px-1.5 py-0.5 break-words max-w-md">
+                            {log.error_message || `HTTP ${log.status_code || "ERR"} (no upstream error body recorded)`}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2 px-3 text-blue-600 whitespace-nowrap align-top">{log.model}</td>
+                      <td className="py-2 px-3 text-gray-500 whitespace-nowrap align-top">
                         {log.endpoint_slot || log.account_id}
                       </td>
-                      <td className="py-2 px-3 text-right font-bold text-gray-900">
+                      <td className="py-2 px-3 text-right font-bold text-gray-900 align-top">
                         {log.total_tokens.toLocaleString()}
                       </td>
-                      <td className="py-2 px-3 text-right text-gray-500">{log.latency_ms}ms</td>
-                      <td className="py-2 px-3 text-center">
+                      <td className="py-2 px-3 text-right text-gray-500 align-top">{log.latency_ms}ms</td>
+                      <td className="py-2 px-3 text-center align-top">
                         {log.is_success ? (
                           <Badge variant="success" className="text-[10px] py-0">
                             {log.status_code} OK

@@ -393,12 +393,14 @@ def format_addon_value(raw_val: Any, val_override: Any = None) -> str:
         except Exception:
             return s
 
-    # 2. Pure numeric coverage limit (e.g. "1000.0", "350000.0") -> "RM 1,000.00"
+    # 2. Pure numeric coverage limit (e.g. "1000.0", "350000.0") -> "RM 1,000.00"; preserve single-digit plan numbers ("1"-"9")
     if re.fullmatch(r"[0-9][0-9,]*(?:\.[0-9]+)?", s):
         try:
             num = float(s.replace(",", ""))
             if num <= 0:
                 return ""
+            if num < 10 and "." not in s:
+                return s
             return f"RM {num:,.2f}"
         except Exception:
             return s
@@ -443,8 +445,10 @@ def format_addon_value(raw_val: Any, val_override: Any = None) -> str:
         if "sum insured" in low or "full" in low:
             return "Full Sum Insured"
 
-    # 8. Distance / Towing: e.g. "Unlimited Distance" -> "Unlimited"
+    # 8. Distance / Towing: e.g. "Unlimited Distance" -> "Unlimited", preserve "Unlimited - Plan 1"
     if "unlimited" in low:
+        if ("-" in s or "plan" in low) and len(s.split()) <= 5 and len(s) <= 32:
+            return s
         return "Unlimited"
     m_km = re.search(r"(\d+)\s*km", s, re.IGNORECASE)
     if m_km:
@@ -462,7 +466,7 @@ def format_addon_value(raw_val: Any, val_override: Any = None) -> str:
             pass
 
     # 10. Reject unparsed multi-word prose sentences instead of slicing mid-sentence fragments
-    if len(s.split()) > 3 or len(s) > 28:
+    if len(s.split()) > 5 or len(s) > 32:
         return ""
 
     return s
@@ -480,9 +484,10 @@ def _match_catalog_item(item: dict[str, Any]) -> dict[str, Any] | None:
     target_title_l = target_title.lower()
     target_desc_l = str(item.get("description") or "").lower()
     target_val_l = str(item.get("value") or "").lower()
+    is_promoted_or_extra = bool(item.get("promoted_to_addon") or item.get("is_extra"))
 
-    # Keep insurer basic RM200 emergency towing strictly in Free Added Coverage, not Unlimited Towing slot.
-    if _is_basic_emergency_towing(target_title_l, target_desc_l, target_val_l):
+    # Keep unpromoted basic RM200 emergency towing strictly in Free Added Coverage, not Box 2.
+    if not is_promoted_or_extra and _is_basic_emergency_towing(target_title_l, target_desc_l, target_val_l):
         return None
 
     candidate_codes = [
@@ -500,7 +505,7 @@ def _match_catalog_item(item: dict[str, Any]) -> dict[str, Any] | None:
             continue
         if code in _EXACT_ID_ALIASES:
             mapped_id = _EXACT_ID_ALIASES[code]
-            if mapped_id == "towing" and _is_basic_emergency_towing(target_title_l, target_desc_l, target_val_l):
+            if mapped_id == "towing" and not is_promoted_or_extra and _is_basic_emergency_towing(target_title_l, target_desc_l, target_val_l):
                 return None
             return CANONICAL_BY_ID.get(mapped_id)
         if code in CANONICAL_BY_ID:
@@ -510,7 +515,7 @@ def _match_catalog_item(item: dict[str, Any]) -> dict[str, Any] | None:
 
     if "windscreen" in target_title_l:
         return CANONICAL_BY_ID["windscreen"]
-    if "towing" in target_title_l and ("unlimited" in target_title_l or "unlimited" in target_val_l or "unlimited" in target_desc_l):
+    if "towing" in target_title_l and (is_promoted_or_extra or "unlimited" in target_title_l or "unlimited" in target_val_l or "unlimited" in target_desc_l):
         return CANONICAL_BY_ID["towing"]
     if "towing" in target_title_l and "international" in target_title_l:
         return CANONICAL_BY_ID["international_towing"]
@@ -948,7 +953,7 @@ def extract_free_coverage_items(
         return False
 
     for raw in active_benefits or []:
-        if raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
+        if raw.get("promoted_to_addon") or raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
             continue
 
         is_hide_cov = _is_coverage_hidden_or_cleared(raw)
@@ -960,30 +965,8 @@ def extract_free_coverage_items(
             if is_hide_cov or has_manual_val_ovr:
                 c_title = _strip_trailing_metric_parens(c_title)
             c_desc = str(raw.get("description") or raw.get("short_description") or "").strip()
-            has_manual_override = bool(
-                raw.get("has_manual_override")
-                or has_manual_val_ovr
-                or is_hide_cov
-                or raw.get("is_manual")
-                or str(raw.get("source") or "").lower() == "manual"
-                or raw.get("label_override")
-            )
-            towing_upgrade = None
-            if not is_comm and not is_non_comp and not has_manual_override:
-                card_already_upgraded = (
-                    "unlimited" in c_val.lower()
-                    or "unlimited" in c_title.lower()
-                    or "extended" in c_title.lower()
-                )
-                if not card_already_upgraded:
-                    towing_upgrade = detect_towing_upgrade(active_benefits, insurer_name)
-
-            if towing_upgrade:
-                out_title = towing_upgrade["title"]
-                out_desc = towing_upgrade["description"]
-            else:
-                out_title = _format_towing_title(c_title, c_val, is_manual_val=has_manual_val_ovr)
-                out_desc = c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer."
+            out_title = _format_towing_title(c_title, c_val, is_manual_val=has_manual_val_ovr)
+            out_desc = c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer."
 
             norm_out = _normalize_benefit_code(out_title)
             if norm_out not in seen_titles and "emergency_towing_assistance" not in seen_titles:
@@ -1090,13 +1073,16 @@ def build_unified_matrix_cards(
     ordered_active_ids: list[str] = []
 
     def _build_card_dict(item: dict[str, Any], cat_id: str, sel: bool, matched_cat: dict[str, Any] | None) -> dict[str, Any]:
-        raw_val = item.get("value")
-        if raw_val in (None, ""):
-            raw_val = item.get("coverage_limit")
-        if raw_val in (None, "") and isinstance(item.get("typed_value"), dict):
-            raw_val = item["typed_value"].get("display_text")
-        if raw_val in (None, "") and isinstance(item.get("typed_value_override"), dict):
-            raw_val = item["typed_value_override"].get("display_text")
+        if item.get("promoted_to_addon") and "value" in item:
+            raw_val = item.get("value")
+        else:
+            raw_val = item.get("value")
+            if raw_val in (None, ""):
+                raw_val = item.get("coverage_limit")
+            if raw_val in (None, "") and isinstance(item.get("typed_value"), dict):
+                raw_val = item["typed_value"].get("display_text")
+            if raw_val in (None, "") and isinstance(item.get("typed_value_override"), dict):
+                raw_val = item["typed_value_override"].get("display_text")
 
         # Betterment protection: Never display an RM monetary amount for Waiver of Betterment
         is_betterment = cat_id == "betterment" or (matched_cat and matched_cat.get("id") == "betterment")
@@ -1120,7 +1106,7 @@ def build_unified_matrix_cards(
                 formatted_val = format_addon_value("betterment", raw_val) or default_years
         else:
             formatted_val = format_addon_value(raw_val)
-            if not formatted_val and matched_cat:
+            if not formatted_val and matched_cat and not item.get("promoted_to_addon"):
                 formatted_val = format_addon_value(matched_cat.get("default_value"))
 
         title_str = str(item.get("title") or item.get("label") or (matched_cat["title"] if matched_cat else cat_id.replace("_", " ").title()))
@@ -1207,7 +1193,6 @@ def build_unified_matrix_cards(
     for item in available_addons or []:
         _push_item(item, "available")
 
-    towing_upgraded = bool(detect_towing_upgrade(active_benefits))
     processed_cards: list[dict[str, Any]] = []
     seen_in_output: set[str] = set()
 
@@ -1218,7 +1203,7 @@ def build_unified_matrix_cards(
             continue
         if (
             cat_id == "towing"
-            and (is_comm or towing_upgraded)
+            and is_comm
             and not (cat_id in canonical_overrides and canonical_overrides[cat_id].get("is_selected"))
         ):
             continue
@@ -1251,10 +1236,7 @@ def build_unified_matrix_cards(
             cat_id = cat["id"]
             if cat_id in excluded_ids:
                 continue
-            if (
-                cat_id == "towing"
-                and (is_comm or (towing_upgraded and not (cat_id in canonical_overrides and canonical_overrides[cat_id].get("is_selected"))))
-            ):
+            if cat_id == "towing" and cat_id not in canonical_overrides:
                 continue
             if cat_id not in seen_in_output:
                 seen_in_output.add(cat_id)

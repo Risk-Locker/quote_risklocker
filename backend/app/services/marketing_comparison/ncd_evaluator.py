@@ -214,7 +214,7 @@ def normalize_towing_km(raw_towing: Any, combined_text: str = "", company_name: 
     """Normalize towing benefit into authoritative Malaysian towing entitlement (RM, km, or Unlimited)."""
     val_str = str(raw_towing or "").strip()
     if re.search(
-        r"(?i)(?<!\d)0\s*km\b|\b(?:no towing|without towing|not included|tiada|nil)\b|^(?:none|no)$",
+        r"(?i)(?<!\d)0(?:\.0+)?\s*km\b|\b(?:no towing|without towing|not included|tiada|nil)\b|^(?:none|no|0(?:\.0+)?|(?:rm|myr)\s*0(?:\.0+)?)$",
         val_str,
     ):
         return "No towing"

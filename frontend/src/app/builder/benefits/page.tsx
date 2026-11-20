@@ -418,9 +418,16 @@ function BenefitsPageContent() {
   const [condTriggerId, setCondTriggerId] = useState("");
   const [condPlanFilter, setCondPlanFilter] = useState("");
   const [condTargetId, setCondTargetId] = useState("");
-  const [condActionType, setCondActionType] = useState<"replace_description" | "hide_target">("replace_description");
+  const [condActionType, setCondActionType] = useState<"promote_to_addon" | "replace_description" | "hide_target">("promote_to_addon");
   const [condReplacement, setCondReplacement] = useState("");
   const [condReplacementTitle, setCondReplacementTitle] = useState("");
+  const [condReplacementValue, setCondReplacementValue] = useState("");
+  const [condPlanTiers, setCondPlanTiers] = useState<Array<{
+    plan_filter: string;
+    replacement_title: string;
+    replacement_value: string;
+    replacement_description: string;
+  }>>([]);
 
   // Tab 4: Matrix and AI sync states
   const [matrixData, setMatrixData] = useState<CompanyMatrixData | null>(null);
@@ -612,7 +619,17 @@ function BenefitsPageContent() {
   }, [selectedCompanyId, selectedProfileId, companyConfigs]);
 
   const saveCompanyCondition = useCallback(async () => {
-    if (!selectedCompanyId || !condFormName.trim() || !condTriggerId || !condTargetId || !condReplacement.trim()) {
+    const isMultiTier = !editingConditionId && condActionType !== "hide_target" && condPlanTiers.length > 0;
+    if (!selectedCompanyId || !condFormName.trim() || !condTriggerId || !condTargetId) {
+      setError("Please fill all required fields for the conditional rule.");
+      return;
+    }
+    if (isMultiTier) {
+      if (condPlanTiers.some((t) => !t.plan_filter.trim() || !t.replacement_description.trim())) {
+        setError("Each plan tier requires a plan filter and replacement description.");
+        return;
+      }
+    } else if (condActionType !== "hide_target" && !condReplacement.trim()) {
       setError("Please fill all required fields for the conditional rule.");
       return;
     }
@@ -622,29 +639,51 @@ function BenefitsPageContent() {
       const url = selectedProfileId
         ? `/business/companies/${selectedCompanyId}/conditions?profile_id=${encodeURIComponent(selectedProfileId)}`
         : `/business/companies/${selectedCompanyId}/conditions`;
-      await api(url, {
-        method: "POST",
-        body: JSON.stringify({
-          id: editingConditionId || undefined,
-          name: condFormName.trim(),
-          trigger_concept_id: condTriggerId,
-          trigger_plan_filter: condPlanFilter.trim() || null,
-          target_concept_id: condTargetId,
-          action_type: condActionType,
-          replacement_description: condActionType === "hide_target" ? (condReplacement.trim() || "[Hidden by condition rule]") : condReplacement.trim(),
-          replacement_title: condActionType === "hide_target" ? null : (condReplacementTitle.trim() || null),
-          is_active: true,
-        }),
-      });
+      if (isMultiTier) {
+        for (const tier of condPlanTiers) {
+          await api(url, {
+            method: "POST",
+            body: JSON.stringify({
+              name: `${condFormName.trim()} (${tier.plan_filter.trim()})`,
+              trigger_concept_id: condTriggerId,
+              trigger_plan_filter: tier.plan_filter.trim(),
+              target_concept_id: condTargetId,
+              action_type: condActionType,
+              replacement_description: tier.replacement_description.trim(),
+              replacement_title: tier.replacement_title.trim() || null,
+              replacement_value: tier.replacement_value.trim(),
+              is_active: true,
+            }),
+          });
+        }
+      } else {
+        await api(url, {
+          method: "POST",
+          body: JSON.stringify({
+            id: editingConditionId || undefined,
+            name: condFormName.trim(),
+            trigger_concept_id: condTriggerId,
+            trigger_plan_filter: condPlanFilter.trim() || null,
+            target_concept_id: condTargetId,
+            action_type: condActionType,
+            replacement_description: condActionType === "hide_target" ? (condReplacement.trim() || "[Hidden by condition rule]") : condReplacement.trim(),
+            replacement_title: condActionType === "hide_target" ? null : (condReplacementTitle.trim() || null),
+            replacement_value: condActionType === "hide_target" ? null : condReplacementValue.trim(),
+            is_active: true,
+          }),
+        });
+      }
       setConditionDialog(false);
       setEditingConditionId(null);
       setCondFormName("");
       setCondTriggerId("");
       setCondPlanFilter("");
       setCondTargetId("");
-      setCondActionType("replace_description");
+      setCondActionType("promote_to_addon");
       setCondReplacement("");
       setCondReplacementTitle("");
+      setCondReplacementValue("");
+      setCondPlanTiers([]);
       await loadCompanyConditions(selectedCompanyId, selectedProfileId);
       const profRes = await api<{ profiles: BenefitProfile[] }>("/business/benefit-profiles");
       if (mountedRef.current) setProfiles(profRes.profiles || []);
@@ -653,7 +692,7 @@ function BenefitsPageContent() {
     } finally {
       if (mountedRef.current) setConditionSaving(false);
     }
-  }, [selectedCompanyId, selectedProfileId, editingConditionId, condFormName, condTriggerId, condPlanFilter, condTargetId, condActionType, condReplacement, condReplacementTitle, loadCompanyConditions]);
+  }, [selectedCompanyId, selectedProfileId, editingConditionId, condFormName, condTriggerId, condPlanFilter, condTargetId, condActionType, condReplacement, condReplacementTitle, condReplacementValue, condPlanTiers, loadCompanyConditions]);
 
   const openAddConditionDialog = useCallback(() => {
     setEditingConditionId(null);
@@ -661,9 +700,11 @@ function BenefitsPageContent() {
     setCondTriggerId("");
     setCondPlanFilter("");
     setCondTargetId("");
-    setCondActionType("replace_description");
+    setCondActionType("promote_to_addon");
     setCondReplacement("");
     setCondReplacementTitle("");
+    setCondReplacementValue("");
+    setCondPlanTiers([]);
     setConditionDialog(true);
   }, []);
 
@@ -673,9 +714,11 @@ function BenefitsPageContent() {
     setCondTriggerId(cond.trigger_concept_id || "");
     setCondPlanFilter(cond.trigger_plan_filter || "");
     setCondTargetId(cond.target_concept_id || "");
-    setCondActionType((cond.action_type as "replace_description" | "hide_target") || "replace_description");
+    setCondActionType((cond.action_type as "promote_to_addon" | "replace_description" | "hide_target") || "promote_to_addon");
     setCondReplacement(cond.replacement_description || "");
     setCondReplacementTitle(cond.replacement_title || "");
+    setCondReplacementValue(cond.replacement_value || "");
+    setCondPlanTiers([]);
     setConditionDialog(true);
   }, []);
 
@@ -2649,9 +2692,11 @@ ${aiMarkdownTable}`;
               const towing = concepts.find((c) => c.concept_key === "towing_assistance" || c.concept_key === "breakdown_assist");
               if (dpp) setCondTriggerId(dpp.id);
               if (towing) setCondTargetId(towing.id);
-              setCondActionType("replace_description");
+              setCondActionType("promote_to_addon");
               setCondReplacement("Unlimited towing distance within Malaysia");
-              setCondReplacementTitle("");
+              setCondReplacementTitle("Unlimited Towing");
+              setCondReplacementValue("Unlimited");
+              setCondPlanTiers([]);
               setConditionDialog(true);
             }}
             onDeleteCondition={deleteCompanyCondition}
@@ -3882,6 +3927,10 @@ ${aiMarkdownTable}`;
         setCondReplacement={setCondReplacement}
         condReplacementTitle={condReplacementTitle}
         setCondReplacementTitle={setCondReplacementTitle}
+        condReplacementValue={condReplacementValue}
+        setCondReplacementValue={setCondReplacementValue}
+        condPlanTiers={condPlanTiers}
+        setCondPlanTiers={setCondPlanTiers}
         saveCompanyCondition={saveCompanyCondition}
         conditionSaving={conditionSaving}
         cloneModalOpen={cloneModalOpen}

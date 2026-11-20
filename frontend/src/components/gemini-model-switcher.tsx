@@ -68,7 +68,32 @@ const FALLBACK_MODELS: EligibleModelItem[] = [
   },
 ];
 
-export function GeminiModelSwitcher({ onConfigChanged }: { onConfigChanged?: (stats?: GeminiQuotaStats) => void }) {
+interface ModelProbeAccountResult {
+  account_id: string;
+  label: string;
+  masked_key: string;
+  model: string;
+  ok: boolean;
+  status_code: number;
+  latency_ms: number;
+  error?: string | null;
+}
+
+interface ModelProbeResult {
+  model: string;
+  overall_ok: boolean;
+  all_ok: boolean;
+  tested_count: number;
+  results: ModelProbeAccountResult[];
+}
+
+export function GeminiModelSwitcher({
+  onConfigChanged,
+  onModelTested,
+}: {
+  onConfigChanged?: (stats?: GeminiQuotaStats) => void;
+  onModelTested?: () => void;
+}) {
   const [primaryModel, setPrimaryModel] = useState<string>("gemini-3.1-flash-lite");
   const [parallelModels, setParallelModels] = useState<string[]>(["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]);
   const [eligibleModels, setEligibleModels] = useState<EligibleModelItem[]>(FALLBACK_MODELS);
@@ -82,6 +107,8 @@ export function GeminiModelSwitcher({ onConfigChanged }: { onConfigChanged?: (st
   const [catalogSource, setCatalogSource] = useState<string>("canonical_registry");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [testingModel, setTestingModel] = useState<string | null>(null);
+  const [probeResults, setProbeResults] = useState<Record<string, ModelProbeResult>>({});
   const { toast } = useToast();
 
   async function loadConfig() {
@@ -159,6 +186,40 @@ export function GeminiModelSwitcher({ onConfigChanged }: { onConfigChanged?: (st
       updateConfig(modelName, [...parallelModels, modelName]);
     } else {
       updateConfig(modelName, parallelModels);
+    }
+  }
+
+  async function handleTestModel(modelName: string) {
+    setTestingModel(modelName);
+    try {
+      const res = await api<{ gemini?: GeminiQuotaStats; probe_result?: ModelProbeResult }>("/settings/gemini/probe", {
+        method: "POST",
+        body: JSON.stringify({ model: modelName }),
+      });
+      if (res?.probe_result) {
+        const pr = res.probe_result;
+        setProbeResults((prev) => ({ ...prev, [modelName]: pr }));
+        const okCount = pr.results.filter((r) => r.ok).length;
+        if (pr.all_ok) {
+          toast(`${modelName} verified on ${okCount}/${pr.tested_count} active key(s): HTTP 200 OK`, "success");
+        } else if (pr.overall_ok) {
+          toast(`${modelName}: ${okCount}/${pr.tested_count} active key(s) passed; see card for details.`, "warning");
+        } else {
+          const firstErr = pr.results.find((r) => !r.ok);
+          toast(
+            `${modelName} failed (${firstErr?.status_code || "ERR"}): ${firstErr?.error || "Probe failed"}`,
+            "error"
+          );
+        }
+      }
+      if (res?.gemini && onConfigChanged) {
+        onConfigChanged(res.gemini);
+      }
+      onModelTested?.();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : `Failed to probe ${modelName}.`, "error");
+    } finally {
+      setTestingModel(null);
     }
   }
 
@@ -249,7 +310,7 @@ export function GeminiModelSwitcher({ onConfigChanged }: { onConfigChanged?: (st
               </div>
 
               {/* Controls */}
-              <div className="mt-4 pt-3 border-t border-[var(--rl-border)] flex items-center justify-between gap-2">
+              <div className="mt-4 pt-3 border-t border-[var(--rl-border)] flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Toggle
                     checked={isParallel}
@@ -259,18 +320,63 @@ export function GeminiModelSwitcher({ onConfigChanged }: { onConfigChanged?: (st
                   />
                 </div>
 
-                {!isPrimary && isParallel && (
+                <div className="flex items-center gap-1.5">
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     size="sm"
-                    loading={saving}
-                    onClick={() => handleSetPrimary(m.id)}
-                    className="text-xs text-gray-700 hover:text-emerald-700"
+                    loading={testingModel === m.id}
+                    disabled={testingModel !== null}
+                    onClick={() => handleTestModel(m.id)}
+                    className="text-xs h-7 px-2.5"
                   >
-                    Set as Primary
+                    <Lightning size={13} weight="fill" className="text-amber-500 mr-1" />
+                    {testingModel === m.id ? "Testing..." : "Test Model"}
                   </Button>
-                )}
+
+                  {!isPrimary && isParallel && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      loading={saving}
+                      onClick={() => handleSetPrimary(m.id)}
+                      className="text-xs text-gray-700 hover:text-emerald-700 h-7 px-2.5"
+                    >
+                      Set as Primary
+                    </Button>
+                  )}
+                </div>
               </div>
+
+              {probeResults[m.id] && (
+                <div className="mt-3 rounded border border-[var(--rl-border)] bg-white p-2.5 space-y-1.5 text-[11px]">
+                  <div className="flex items-center justify-between font-semibold text-gray-700">
+                    <span>Live Model Probe Result</span>
+                    <span className="font-mono text-[10px] text-gray-500">
+                      {probeResults[m.id].results.filter((r) => r.ok).length}/{probeResults[m.id].tested_count} OK
+                    </span>
+                  </div>
+                  {probeResults[m.id].results.map((r) => (
+                    <div
+                      key={r.account_id}
+                      className={`rounded px-2 py-1 font-mono text-[10px] flex flex-col gap-0.5 ${
+                        r.ok
+                          ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          : "bg-rose-50 text-rose-800 border border-rose-200"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold">
+                          {r.label} ({r.masked_key})
+                        </span>
+                        <span>
+                          {r.ok ? `200 OK · ${r.latency_ms}ms` : `HTTP ${r.status_code} · ${r.latency_ms}ms`}
+                        </span>
+                      </div>
+                      {!r.ok && r.error && <div className="break-words text-rose-700">{r.error}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

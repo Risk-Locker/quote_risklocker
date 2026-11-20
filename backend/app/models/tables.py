@@ -319,6 +319,7 @@ class InsuranceTenure(Base, TimestampMixin, SoftDeleteMixin):
     include_runner_fee: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     windscreen_target: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     quotation_discount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0.00, server_default=text("0.00"))
+    motor_discount_pct: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0.00, server_default=text("0.00"))
     ncd_percentage: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     recommended_sum_insured_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     previous_tenure_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="SET NULL"), nullable=True, index=True)

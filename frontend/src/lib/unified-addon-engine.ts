@@ -407,11 +407,12 @@ export function formatAddonValue(rawVal: unknown): string {
     return s;
   }
 
-  // 2. Pure numeric coverage limit (e.g. "1000.0", "350000.0") -> "RM 1,000.00"
+  // 2. Pure numeric coverage limit (e.g. "1000.0", "350000.0") -> "RM 1,000.00"; preserve single-digit plan numbers ("1"-"9")
   if (/^[0-9][0-9,]*(?:\.[0-9]+)?$/.test(s)) {
     const num = parseFloat(s.replace(/,/g, ""));
     if (!isNaN(num)) {
       if (num <= 0) return "";
+      if (num < 10 && !s.includes(".")) return s;
       return `RM ${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
     return s;
@@ -466,8 +467,11 @@ export function formatAddonValue(rawVal: unknown): string {
     }
   }
 
-  // 8. Distance / Towing: e.g. "Unlimited Distance" -> "Unlimited"
+  // 8. Distance / Towing: e.g. "Unlimited Distance" -> "Unlimited", preserve "Unlimited - Plan 1"
   if (low.includes("unlimited")) {
+    if ((s.includes("-") || low.includes("plan")) && s.split(/\s+/).length <= 5 && s.length <= 32) {
+      return s;
+    }
     return "Unlimited";
   }
   const mKm = s.match(/(\d+)\s*km/i);
@@ -485,9 +489,9 @@ export function formatAddonValue(rawVal: unknown): string {
     }
   }
 
-  // 10. General Word Clamping: Never turn prose descriptions (>3 words or >28 chars) into coverage limits
+  // 10. General Word Clamping: Never turn prose descriptions (>5 words or >32 chars) into coverage limits
   const words = s.split(/\s+/);
-  if (words.length > 3 || s.length > 28) {
+  if (words.length > 5 || s.length > 32) {
     return "";
   }
 
@@ -507,8 +511,9 @@ function matchCatalogItem(item: any) {
   const targetTitleL = targetTitle.toLowerCase();
   const targetDescL = String(item?.description || item?.short_description || "").toLowerCase();
   const targetValL = String(item?.value || "").toLowerCase();
+  const isPromotedOrExtra = Boolean(item?.promoted_to_addon || item?.is_extra);
 
-  if (isBasicEmergencyTowing(targetTitleL, targetDescL, targetValL)) {
+  if (!isPromotedOrExtra && isBasicEmergencyTowing(targetTitleL, targetDescL, targetValL)) {
     return null;
   }
 
@@ -527,7 +532,7 @@ function matchCatalogItem(item: any) {
     if (!code) continue;
     const mappedId = EXACT_ID_ALIASES[code];
     if (mappedId) {
-      if (mappedId === "towing" && isBasicEmergencyTowing(targetTitleL, targetDescL, targetValL)) {
+      if (mappedId === "towing" && !isPromotedOrExtra && isBasicEmergencyTowing(targetTitleL, targetDescL, targetValL)) {
         return null;
       }
       if (CANONICAL_BY_ID[mappedId]) return CANONICAL_BY_ID[mappedId];
@@ -538,7 +543,7 @@ function matchCatalogItem(item: any) {
   const words = new Set(normalizeCode(targetTitleL).split("_"));
 
   if (targetTitleL.includes("windscreen")) return CANONICAL_BY_ID.windscreen;
-  if (targetTitleL.includes("towing") && (targetTitleL.includes("unlimited") || targetValL.includes("unlimited") || targetDescL.includes("unlimited"))) {
+  if (targetTitleL.includes("towing") && (isPromotedOrExtra || targetTitleL.includes("unlimited") || targetValL.includes("unlimited") || targetDescL.includes("unlimited"))) {
     return CANONICAL_BY_ID.towing;
   }
   if (targetTitleL.includes("towing") && targetTitleL.includes("international")) return CANONICAL_BY_ID.international_towing;
@@ -919,7 +924,7 @@ export function extractFreeCoverageItems(
   };
 
   for (const raw of activeBenefits || []) {
-    if (raw?.is_extra || raw?.cost_status === "paid" || hasPositivePrice(raw)) continue;
+    if (raw?.promoted_to_addon || raw?.is_extra || raw?.cost_status === "paid" || hasPositivePrice(raw)) continue;
 
     const isHideCov = isCoverageHiddenOrCleared(raw);
     const hasManualValOvr = hasManualValueOverride(raw);
@@ -931,28 +936,8 @@ export function extractFreeCoverageItems(
         cTitle = stripTrailingMetricParens(cTitle);
       }
       const cDesc = String(raw.description || raw.short_description || "").trim();
-      const hasManualOverride = Boolean(
-        raw.has_manual_override ||
-        hasManualValOvr ||
-        isHideCov ||
-        raw.is_manual ||
-        String(raw.source || "").toLowerCase() === "manual" ||
-        raw.label_override
-      );
-      let towingUpgrade: { title: string; description: string } | null = null;
-      if (!isComm && !isNonComp && !hasManualOverride) {
-        const cardAlreadyUpgraded =
-          cVal.toLowerCase().includes("unlimited") ||
-          cTitle.toLowerCase().includes("unlimited") ||
-          cTitle.toLowerCase().includes("extended");
-        if (!cardAlreadyUpgraded) {
-          towingUpgrade = detectTowingUpgrade(activeBenefits, insNameStr);
-        }
-      }
-      const outTitle = towingUpgrade ? towingUpgrade.title : formatTowingTitle(cTitle, cVal, hasManualValOvr);
-      const outDesc = towingUpgrade
-        ? towingUpgrade.description
-        : cDesc || "24/7 accidental towing service to nearest panel workshop or approved repairer.";
+      const outTitle = formatTowingTitle(cTitle, cVal, hasManualValOvr);
+      const outDesc = cDesc || "24/7 accidental towing service to nearest panel workshop or approved repairer.";
       const normOut = normalizeCode(outTitle);
       if (!seen.has(normOut) && !seen.has("emergency_towing_assistance")) {
         seen.add(normOut);
@@ -1061,12 +1046,17 @@ export function buildUnifiedMatrixCards(
   const orderedActiveIds: string[] = [];
 
   const buildCardObj = (item: any, catId: string, sel: boolean, matched: any) => {
-    let rawVal = item.value !== undefined && item.value !== "" ? item.value : item.coverage_limit;
-    if ((rawVal === undefined || rawVal === "") && typeof item.typed_value === "object" && item.typed_value?.display_text) {
-      rawVal = item.typed_value.display_text;
-    }
-    if ((rawVal === undefined || rawVal === "") && typeof item.typed_value_override === "object" && item.typed_value_override?.display_text) {
-      rawVal = item.typed_value_override.display_text;
+    let rawVal = item.value;
+    if (!(item.promoted_to_addon && "value" in item)) {
+      if (rawVal === undefined || rawVal === "") {
+        rawVal = item.coverage_limit;
+      }
+      if ((rawVal === undefined || rawVal === "") && typeof item.typed_value === "object" && item.typed_value?.display_text) {
+        rawVal = item.typed_value.display_text;
+      }
+      if ((rawVal === undefined || rawVal === "") && typeof item.typed_value_override === "object" && item.typed_value_override?.display_text) {
+        rawVal = item.typed_value_override.display_text;
+      }
     }
 
     // Betterment protection: Never display an RM monetary amount for Waiver of Betterment
@@ -1087,7 +1077,7 @@ export function buildUnifiedMatrixCards(
       }
     } else {
       formattedVal = formatAddonValue(rawVal);
-      if (!formattedVal && matched?.default_value) {
+      if (!formattedVal && matched?.default_value && !item.promoted_to_addon) {
         formattedVal = formatAddonValue(matched.default_value);
       }
     }
@@ -1169,7 +1159,6 @@ export function buildUnifiedMatrixCards(
     pushItem(item, "available");
   }
 
-  const towingUpgraded = Boolean(detectTowingUpgrade(activeBenefits));
   const processed: any[] = [];
   const seenInOutput = new Set<string>();
 
@@ -1180,7 +1169,8 @@ export function buildUnifiedMatrixCards(
     }
     if (
       cat.id === "towing" &&
-      (isComm || (towingUpgraded && !canonicalOverrides[cat.id]?.is_selected))
+      isComm &&
+      !canonicalOverrides[cat.id]?.is_selected
     ) {
       continue;
     }
@@ -1222,10 +1212,7 @@ export function buildUnifiedMatrixCards(
       if (excludedIds.has(cat.id)) {
         continue;
       }
-      if (
-        cat.id === "towing" &&
-        (isComm || (towingUpgraded && !canonicalOverrides[cat.id]?.is_selected))
-      ) {
+      if (cat.id === "towing" && !canonicalOverrides[cat.id]) {
         continue;
       }
       if (!seenInOutput.has(cat.id)) {

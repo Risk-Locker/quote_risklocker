@@ -90,6 +90,7 @@ def _apply_tenure_fees_and_ncd(
     ncd_percentage: float | Decimal | None,
     current_ncd: float | Decimal | None,
     quotation_discount: float | Decimal | None,
+    motor_discount_pct: float | Decimal | None = None,
 ) -> None:
     """Apply fixed fee toggles, Decimal fee amounts, and NCD percentages onto InsuranceTenure."""
     if include_road_tax is not None:
@@ -112,6 +113,10 @@ def _apply_tenure_fees_and_ncd(
 
     if quotation_discount is not None:
         tenure.quotation_discount = max(Decimal("0.00"), _to_decimal(quotation_discount))
+    if motor_discount_pct is not None:
+        from app.domain.motor.discount_calculator import clamp_discount_pct
+
+        tenure.motor_discount_pct = clamp_discount_pct(motor_discount_pct)
     if windscreen_target is not None:
         tenure.windscreen_target = max(Decimal("0.00"), _to_decimal(windscreen_target))
     if ncd_percentage is not None:
@@ -297,10 +302,24 @@ def _update_single_draft_fields(
     _set_draft_field(f, "roadtax", f"{eff_rt:.2f}")
     _set_draft_field(f, "service_fee", f"{eff_rf:.2f}")
 
+    from app.domain.motor.discount_calculator import calculate_motor_discount
+
     raw_prem = f.get("premium") or f.get("premium_due") or f.get("basic_premium_vehicle")
     val_prem = raw_prem.get("value") if isinstance(raw_prem, dict) else raw_prem
     prem_dec = _to_decimal(val_prem)
-    tot_dec = prem_dec + eff_rt + eff_rf
+    pct_val = getattr(tenure, "motor_discount_pct", Decimal("0.00")) or Decimal("0.00")
+    flat_val = getattr(tenure, "quotation_discount", Decimal("0.00")) or Decimal("0.00")
+    disc_bd = calculate_motor_discount(prem_dec, pct_val, flat_val)
+    _set_draft_field(f, "motor_discount_pct", f"{disc_bd.motor_discount_pct:.2f}", status="ready")
+    if not isinstance(f.get("motor_discount_pct"), dict):
+        f["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready"}
+    _set_draft_field(f, "motor_discount_amount", f"{disc_bd.pct_discount_amount:.2f}", status="ready")
+    if not isinstance(f.get("motor_discount_amount"), dict):
+        f["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready"}
+    _set_draft_field(f, "quotation_discount", f"{disc_bd.flat_discount_amount:.2f}", status="ready")
+    if not isinstance(f.get("quotation_discount"), dict):
+        f["quotation_discount"] = {"value": f"{disc_bd.flat_discount_amount:.2f}", "status": "ready"}
+    tot_dec = disc_bd.net_total_payable(eff_rt, eff_rf)
     _set_draft_field(f, "total_amount", f"{tot_dec:.2f}")
     return f
 
@@ -456,6 +475,11 @@ def _propagate_to_comparison_entries(
         ce.total_payable = prem_dec + eff_rt + eff_rf
         ce.version = (ce.version or 1) + 1
 
+    from app.domain.motor.discount_calculator import calculate_motor_discount
+
+    pct_val = getattr(tenure, "motor_discount_pct", Decimal("0.00")) or Decimal("0.00")
+    flat_val = getattr(tenure, "quotation_discount", Decimal("0.00")) or Decimal("0.00")
+
     if getattr(tenure, "covernote_session_id", None):
         cn_sess = db.get(SessionModel, tenure.covernote_session_id)
         if cn_sess and cn_sess.draft and isinstance(cn_sess.draft.fields, dict):
@@ -464,7 +488,14 @@ def _propagate_to_comparison_entries(
             if val_prem is not None and str(val_prem).strip():
                 cn_prem_dec = _to_decimal(val_prem)
                 if cn_prem_dec > Decimal("0.00"):
-                    tenure.won_premium = float(cn_prem_dec + eff_rt + eff_rf)
+                    cn_bd = calculate_motor_discount(cn_prem_dec, pct_val, flat_val)
+                    tenure.won_premium = float(cn_bd.net_total_payable(eff_rt, eff_rf))
+    elif getattr(tenure, "winning_company_id", None) or any(getattr(ce, "is_recommended", False) for ce in all_entries):
+        rec_ce = next((ce for ce in all_entries if getattr(ce, "is_recommended", False)), None)
+        if rec_ce is not None:
+            ce_flat = rec_ce.discount if rec_ce.discount is not None else flat_val
+            ce_bd = calculate_motor_discount(rec_ce.motor_premium, pct_val, ce_flat)
+            tenure.won_premium = float(ce_bd.net_total_payable(eff_rt, eff_rf))
 
 
 def sync_tenure_identity_transaction(
@@ -492,6 +523,7 @@ def sync_tenure_identity_transaction(
     ncd_percentage: float | Decimal | None = None,
     current_ncd: float | Decimal | None = None,
     quotation_discount: float | Decimal | None = None,
+    motor_discount_pct: float | Decimal | None = None,
 ) -> InsuranceTenure:
     """Synchronize tenure identity, vehicle specs, customer record, and fees across all linked entities atomically."""
     tenure = db.scalars(
@@ -516,6 +548,7 @@ def sync_tenure_identity_transaction(
         ncd_percentage=ncd_percentage,
         current_ncd=current_ncd,
         quotation_discount=quotation_discount,
+        motor_discount_pct=motor_discount_pct,
     )
     cust = _sync_tenure_customer(db, tenure, customer_name, ic_or_brn)
     tv = _sync_tenure_vehicle(

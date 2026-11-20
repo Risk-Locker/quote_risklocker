@@ -60,6 +60,7 @@ export default function SettingsAiEnginePage() {
   const [testingIdx, setTestingIdx] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pausingId, setPausingId] = useState<string | null>(null);
+  const [timelineRefreshNonce, setTimelineRefreshNonce] = useState(0);
 
   async function handleTogglePause(keyId: string, currentPaused: boolean) {
     setPausingId(keyId);
@@ -210,6 +211,7 @@ export default function SettingsAiEnginePage() {
         } else {
           toast(`Account ${idx + 1} status: ${acc?.status_label || acc?.status}`, "warning");
         }
+        setTimelineRefreshNonce((n) => n + 1);
       }
     } catch (err) {
       toast(err instanceof Error ? err.message : "Test probe failed.", "error");
@@ -366,10 +368,13 @@ export default function SettingsAiEnginePage() {
 
         {/* Model Activation & Parallel Fleet Controls */}
         <div id="ai-model-switcher-section">
-          <GeminiModelSwitcher onConfigChanged={(updatedStats) => {
-            if (updatedStats) setStats(updatedStats);
-            else loadData();
-          }} />
+          <GeminiModelSwitcher
+            onConfigChanged={(updatedStats) => {
+              if (updatedStats) setStats(updatedStats);
+              else loadData();
+            }}
+            onModelTested={() => setTimelineRefreshNonce((n) => n + 1)}
+          />
         </div>
 
         {/* Card: Add New Gemini API Key with Mandatory Live Google Probe Gate */}
@@ -599,7 +604,7 @@ export default function SettingsAiEnginePage() {
                               className="text-[11px] font-medium text-gray-700 hover:text-gray-900 border border-gray-200 hover:bg-white px-2 py-1 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                             >
                               <ArrowsClockwise size={12} className={testingIdx === idx ? "animate-spin" : ""} />
-                              {testingIdx === idx ? "Testing..." : "Test"}
+                              {testingIdx === idx ? "Verifying..." : "Verify Key"}
                             </button>
 
                             {/* Independent On/Off (Turn Off / Turn On) button for ANY key */}
@@ -657,7 +662,7 @@ export default function SettingsAiEnginePage() {
         </Card>
 
         {/* Live Timeline, Pacific Time Cycle Countdown & Minute-Level Token Activity */}
-        <GeminiTimelineCalendar />
+        <GeminiTimelineCalendar refreshNonce={timelineRefreshNonce} />
 
         {/* Google AI Studio Rate Limit Parity & Sliding Metric History */}
         <GeminiAnalyticsChart />

@@ -1,4 +1,4 @@
-﻿---
+---
 name: lean-context
 description: Use before any code edit or investigation in a large file (>300 lines) or multi-file task, to keep reads and outputs small.
 ---

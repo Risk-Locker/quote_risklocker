@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Check, Copy, EyeSlash, Info, Lightning, PencilSimple } from "@phosphor-icons/react";
+import { Check, Copy, EyeSlash, Info, Lightning, PencilSimple, Plus, Trash } from "@phosphor-icons/react";
 import type { CompanyMatrixData } from "../types";
 import type {
   CompanySummary as Company,
@@ -13,6 +13,13 @@ import type {
   BenefitProfile,
 } from "@/types/benefits";
 import { BenefitCombobox } from "./benefit-combobox";
+
+export interface ConditionPlanTierDraft {
+  plan_filter: string;
+  replacement_title: string;
+  replacement_value: string;
+  replacement_description: string;
+}
 
 export interface BenefitsDialogsProps {
   dialog: "config" | "clone" | "bundle" | null;
@@ -53,12 +60,16 @@ export interface BenefitsDialogsProps {
   setCondPlanFilter: (val: string) => void;
   condTargetId: string;
   setCondTargetId: (val: string) => void;
-  condActionType: "replace_description" | "hide_target";
-  setCondActionType: (action: "replace_description" | "hide_target") => void;
+  condActionType: "promote_to_addon" | "replace_description" | "hide_target";
+  setCondActionType: (action: "promote_to_addon" | "replace_description" | "hide_target") => void;
   condReplacement: string;
   setCondReplacement: (val: string) => void;
   condReplacementTitle: string;
   setCondReplacementTitle: (val: string) => void;
+  condReplacementValue: string;
+  setCondReplacementValue: (val: string) => void;
+  condPlanTiers: ConditionPlanTierDraft[];
+  setCondPlanTiers: React.Dispatch<React.SetStateAction<ConditionPlanTierDraft[]>>;
   saveCompanyCondition: () => void;
   conditionSaving: boolean;
   cloneModalOpen: boolean;
@@ -117,6 +128,10 @@ export function BenefitsDialogs({
   setCondReplacement,
   condReplacementTitle,
   setCondReplacementTitle,
+  condReplacementValue,
+  setCondReplacementValue,
+  condPlanTiers,
+  setCondPlanTiers,
   saveCompanyCondition,
   conditionSaving,
   cloneModalOpen,
@@ -422,18 +437,35 @@ export function BenefitsDialogs({
                 />
               </div>
 
-              <div>
-                <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
-                  Trigger Plan Filter (Optional)
-                </label>
-                <Input
-                  maxLength={50}
-                  value={condPlanFilter}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondPlanFilter(e.target.value)}
-                  placeholder="e.g. Plan B, or leave blank for any plan / purchase"
-                  className="w-full"
-                />
-              </div>
+              {!editingConditionId && condActionType !== "hide_target" && condPlanTiers.length === 0 && (
+                <div>
+                  <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                    Trigger Plan Filter (Optional)
+                  </label>
+                  <Input
+                    maxLength={50}
+                    value={condPlanFilter}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondPlanFilter(e.target.value)}
+                    placeholder="e.g. Plan 1, or leave blank for any plan / purchase"
+                    className="w-full"
+                  />
+                </div>
+              )}
+
+              {editingConditionId && (
+                <div>
+                  <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
+                    Trigger Plan Filter (Optional)
+                  </label>
+                  <Input
+                    maxLength={50}
+                    value={condPlanFilter}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondPlanFilter(e.target.value)}
+                    placeholder="e.g. Plan 1, or leave blank for any plan / purchase"
+                    className="w-full"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
@@ -451,68 +483,224 @@ export function BenefitsDialogs({
                 <label className="block font-semibold text-[var(--rl-text-strong)] mb-1">
                   Rule Action Type *
                 </label>
-                <div className="inline-flex items-center gap-1 p-1 bg-[var(--rl-bg)] border border-[var(--rl-border)] rounded-[4px]">
+                <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-[var(--rl-bg)] border border-[var(--rl-border)] rounded-[4px]">
+                  <button
+                    type="button"
+                    onClick={() => setCondActionType("promote_to_addon")}
+                    className={`flex items-center gap-1.5 rounded-[3px] px-2.5 py-1.5 transition-all text-xs ${
+                      condActionType === "promote_to_addon"
+                        ? "bg-emerald-100 text-emerald-950 font-semibold shadow-xs border border-emerald-300"
+                        : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    <Lightning size={13} weight="fill" />
+                    Promote to Box 2
+                  </button>
                   <button
                     type="button"
                     onClick={() => setCondActionType("replace_description")}
-                    className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all text-xs ${
+                    className={`flex items-center gap-1.5 rounded-[3px] px-2.5 py-1.5 transition-all text-xs ${
                       condActionType === "replace_description"
                         ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] font-semibold shadow-xs"
                         : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                     }`}
                   >
                     <PencilSimple size={13} weight="bold" />
-                    Replace Description
+                    Replace in Box 1
                   </button>
                   <button
                     type="button"
                     onClick={() => setCondActionType("hide_target")}
-                    className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all text-xs ${
+                    className={`flex items-center gap-1.5 rounded-[3px] px-2.5 py-1.5 transition-all text-xs ${
                       condActionType === "hide_target"
                         ? "bg-amber-100 text-amber-950 font-semibold shadow-xs border border-amber-300 dark:bg-amber-950 dark:text-amber-300"
                         : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                     }`}
                   >
                     <EyeSlash size={13} weight="bold" />
-                    Hide / Disappear Benefit
+                    Hide Benefit
                   </button>
                 </div>
               </div>
 
-              {condActionType === "replace_description" ? (
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-semibold text-[var(--rl-text-strong)]">
-                      Upgraded / Replacement Title (Optional)
-                    </label>
-                    <span className="text-[10px] text-[var(--rl-text-muted)] font-mono">
-                      {condReplacementTitle.length}/50
-                    </span>
-                  </div>
-                  <input
-                    type="text"
-                    maxLength={50}
-                    value={condReplacementTitle}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondReplacementTitle(e.target.value)}
-                    placeholder="e.g. Towing Plan Extended"
-                    className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] px-3 py-2 text-xs text-[var(--rl-text-strong)] focus:outline-none mb-3"
-                  />
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-semibold text-[var(--rl-text-strong)]">
-                      Upgraded / Replacement Description *
-                    </label>
-                    <span className="text-[10px] text-[var(--rl-text-muted)] font-mono">
-                      {condReplacement.length}/120
-                    </span>
-                  </div>
-                  <textarea
-                    maxLength={120}
-                    value={condReplacement}
-                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCondReplacement(e.target.value)}
-                    placeholder="e.g. Unlimited towing distance within Malaysia"
-                    rows={3}
-                    className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2.5 text-xs text-[var(--rl-text-strong)] focus:outline-none resize-none font-medium"
-                  />
+              {condActionType !== "hide_target" ? (
+                <div className="space-y-3">
+                  {!editingConditionId && condPlanTiers.length === 0 && (
+                    <div className="flex items-center justify-between rounded-[var(--rl-radius-sm)] border border-dashed border-[var(--rl-border)] bg-[var(--rl-bg)] px-3 py-2">
+                      <span className="text-[11px] text-[var(--rl-text-muted)]">
+                        Multiple plans (e.g. Plan 1, 2, 3, 4)?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCondPlanTiers([
+                            {
+                              plan_filter: condPlanFilter || "Plan 1",
+                              replacement_title: condReplacementTitle,
+                              replacement_value: condReplacementValue,
+                              replacement_description: condReplacement,
+                            },
+                          ])
+                        }
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800"
+                      >
+                        <Plus size={12} weight="bold" />
+                        <span>Add Plan Tiers</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {!editingConditionId && condPlanTiers.length > 0 ? (
+                    <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-[var(--rl-text-strong)]">
+                          Plan Tiers ({condPlanTiers.length})
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCondPlanTiers((prev) => [
+                                ...prev,
+                                {
+                                  plan_filter: `Plan ${prev.length + 1}`,
+                                  replacement_title: "",
+                                  replacement_value: "",
+                                  replacement_description: "",
+                                },
+                              ])
+                            }
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800"
+                          >
+                            <Plus size={12} weight="bold" />
+                            <span>Add Plan</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCondPlanTiers([])}
+                            className="text-[11px] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                          >
+                            Single Rule Mode
+                          </button>
+                        </div>
+                      </div>
+                      {condPlanTiers.map((tier, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2.5 space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <Input
+                              maxLength={50}
+                              value={tier.plan_filter}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                setCondPlanTiers((prev) =>
+                                  prev.map((row, i) => (i === idx ? { ...row, plan_filter: e.target.value } : row))
+                                )
+                              }
+                              placeholder="Plan Filter (e.g. Plan 1)"
+                              className="h-7 text-xs flex-1"
+                            />
+                            <Input
+                              maxLength={50}
+                              value={tier.replacement_title}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                setCondPlanTiers((prev) =>
+                                  prev.map((row, i) => (i === idx ? { ...row, replacement_title: e.target.value } : row))
+                                )
+                              }
+                              placeholder="Title (e.g. Towing)"
+                              className="h-7 text-xs flex-1"
+                            />
+                            <Input
+                              maxLength={60}
+                              value={tier.replacement_value}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                setCondPlanTiers((prev) =>
+                                  prev.map((row, i) => (i === idx ? { ...row, replacement_value: e.target.value } : row))
+                                )
+                              }
+                              placeholder="Coverage (e.g. 100 km)"
+                              className="h-7 text-xs w-28"
+                            />
+                            {condPlanTiers.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => setCondPlanTiers((prev) => prev.filter((_, i) => i !== idx))}
+                                className="p-1 text-red-500 hover:text-red-700"
+                                title="Remove tier"
+                              >
+                                <Trash size={13} />
+                              </button>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            maxLength={120}
+                            value={tier.replacement_description}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setCondPlanTiers((prev) =>
+                                prev.map((row, i) => (i === idx ? { ...row, replacement_description: e.target.value } : row))
+                              )
+                            }
+                            placeholder="Replacement description (required) *"
+                            className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2.5 py-1.5 text-xs text-[var(--rl-text-strong)] focus:outline-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-semibold text-[var(--rl-text-strong)]">
+                          Upgraded / Replacement Title (Optional)
+                        </label>
+                        <span className="text-[10px] text-[var(--rl-text-muted)] font-mono">
+                          {condReplacementTitle.length}/50
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={50}
+                        value={condReplacementTitle}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondReplacementTitle(e.target.value)}
+                        placeholder="e.g. Towing or Unlimited Towing"
+                        className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] px-3 py-2 text-xs text-[var(--rl-text-strong)] focus:outline-none mb-2.5"
+                      />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-semibold text-[var(--rl-text-strong)]">
+                          Upgraded Coverage / Limit Value (Optional)
+                        </label>
+                        <span className="text-[10px] text-[var(--rl-text-muted)] font-mono">
+                          Leave blank for empty coverage
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={120}
+                        value={condReplacementValue}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCondReplacementValue(e.target.value)}
+                        placeholder="e.g. 100 km, RM 600, Unlimited - Plan 1 (or leave empty)"
+                        className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] px-3 py-2 text-xs text-[var(--rl-text-strong)] focus:outline-none mb-2.5"
+                      />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-semibold text-[var(--rl-text-strong)]">
+                          Upgraded / Replacement Description *
+                        </label>
+                        <span className="text-[10px] text-[var(--rl-text-muted)] font-mono">
+                          {condReplacement.length}/120
+                        </span>
+                      </div>
+                      <textarea
+                        maxLength={120}
+                        value={condReplacement}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCondReplacement(e.target.value)}
+                        placeholder="e.g. 24/7 emergency towing assistance up to 100 km"
+                        rows={3}
+                        className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2.5 text-xs text-[var(--rl-text-strong)] focus:outline-none resize-none font-medium"
+                      />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="rounded-[var(--rl-radius-sm)] border border-amber-200 bg-amber-50/80 p-3 text-amber-950 text-xs flex items-start gap-2.5">
@@ -541,7 +729,10 @@ export function BenefitsDialogs({
                   !condFormName.trim() ||
                   !condTriggerId ||
                   !condTargetId ||
-                  (condActionType === "replace_description" && !condReplacement.trim())
+                  (condActionType !== "hide_target" &&
+                    (condPlanTiers.length > 0 && !editingConditionId
+                      ? condPlanTiers.some((t) => !t.plan_filter.trim() || !t.replacement_description.trim())
+                      : !condReplacement.trim()))
                 }
                 className="bg-[var(--rl-black)] text-white shadow-sm font-semibold"
               >

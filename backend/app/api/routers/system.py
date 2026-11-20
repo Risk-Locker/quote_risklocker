@@ -934,7 +934,14 @@ def settings_gemini_probe(
     from app.extraction.gemini_extractor import get_key_pool
     pool = get_key_pool()
     pool.sync_accounts(db=db)
-    account_idx = payload.get("account_index") if payload and isinstance(payload, dict) else None
+    body = payload if payload and isinstance(payload, dict) else {}
+    account_idx = body.get("account_index")
+    requested_model = body.get("model")
+    if requested_model:
+        target_model = resolve_active_gemini_model(str(requested_model))
+        probe_res = pool.probe_model(model=target_model, account_index=account_idx)
+        return {"gemini": pool.get_quota_stats(), "probe_result": probe_res}
+
     target_model = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
     result = pool.probe(force=True, model=target_model, account_index=account_idx)
     return {"gemini": result}

@@ -67,9 +67,11 @@ export function FastQuoteModal({
 
   // Live estimated total
   const numPrem = parseFloat(motorPremium) || 0;
+  const pctDisc = Math.min(100, Math.max(0, tenure.motor_discount_pct || 0));
+  const pctDiscAmt = Math.round(numPrem * (pctDisc / 100) * 100) / 100;
   const numRt = tenure.include_road_tax !== false ? (tenure.road_tax || 0) : 0;
   const numRf = tenure.include_runner_fee !== false ? (tenure.runner_fee || 0) : 0;
-  const estimatedTotal = Math.max(0, numPrem + numRt + numRf - (tenure.quotation_discount || 0));
+  const estimatedTotal = Math.max(0, numPrem - pctDiscAmt + numRt + numRf - (tenure.quotation_discount || 0));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

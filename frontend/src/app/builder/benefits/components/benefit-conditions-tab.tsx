@@ -224,10 +224,15 @@ export function BenefitConditionsTab({
                             <EyeSlash size={12} weight="bold" />
                             Hide Target
                           </span>
+                        ) : cond.action_type === "promote_to_addon" ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 text-[10px] font-bold">
+                            <Lightning size={12} weight="fill" />
+                            Promote to Box 2
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded bg-blue-100 text-blue-900 border border-blue-300 px-2 py-0.5 text-[10px] font-bold">
                             <PencilSimple size={12} weight="bold" />
-                            Replace Desc
+                            Replace in Box 1
                           </span>
                         )}
                       </td>
@@ -238,13 +243,21 @@ export function BenefitConditionsTab({
                             Automatically hides target benefit from quotation cards
                           </div>
                         ) : (
-                          <div className="rounded border border-blue-200 bg-blue-50/70 p-2 text-blue-950 font-medium text-[11px] leading-snug space-y-1">
+                          <div className={`rounded border p-2 font-medium text-[11px] leading-snug space-y-1 ${
+                            cond.action_type === "promote_to_addon"
+                              ? "border-emerald-200 bg-emerald-50/70 text-emerald-950"
+                              : "border-blue-200 bg-blue-50/70 text-blue-950"
+                          }`}>
                             {cond.replacement_title && (
-                              <div className="font-bold text-blue-900 flex items-center gap-1">
-                                <span className="text-[10px] uppercase tracking-wider text-blue-600 font-semibold">Title:</span>
+                              <div className="font-bold flex items-center gap-1">
+                                <span className="text-[10px] uppercase tracking-wider opacity-75 font-semibold">Title:</span>
                                 <span>{cond.replacement_title}</span>
                               </div>
                             )}
+                            <div className="font-semibold flex items-center gap-1">
+                              <span className="text-[10px] uppercase tracking-wider opacity-75 font-semibold">Coverage:</span>
+                              <span>{cond.replacement_value ? cond.replacement_value : "(Empty)"}</span>
+                            </div>
                             <div className="text-[11px] leading-snug">
                               &quot;{cond.replacement_description}&quot;
                             </div>

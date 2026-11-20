@@ -270,7 +270,15 @@ def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft 
         else Decimal("0.00")
     )
 
-    total = base_prem + rt_val + sf_val
+    from app.domain.motor.discount_calculator import calculate_motor_discount
+
+    pct_val = _extract_decimal_field(fields, "motor_discount_pct") or Decimal("0.00")
+    flat_val = _extract_decimal_field(fields, "quotation_discount") or Decimal("0.00")
+    disc_bd = calculate_motor_discount(base_prem, pct_val, flat_val)
+    if disc_bd.effective_discount > Decimal("0.00"):
+        fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready", "message": ""}
+        fields["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready", "message": ""}
+    total = disc_bd.net_total_payable(rt_val, sf_val)
     fields["total_amount"] = {"value": f"{total:.2f}", "status": "ready", "message": ""}
     decisions["total_amount"] = {
         "decision": "confirm",
@@ -642,6 +650,33 @@ def _resolve_selection(db, draft: QuotationDraft, selection_id: str) -> DraftBen
 
 
 
+def _reset_conditional_targets_for_trigger(db, draft: QuotationDraft, trigger_concept_id: str | None) -> None:
+    """Clear temporary overrides on target benefits when a trigger add-on is toggled or changes plan."""
+    if not trigger_concept_id or not getattr(draft, "company_id", None):
+        return
+    try:
+        conds = list(
+            db.scalars(
+                select(CompanyBenefitCondition).where(
+                    CompanyBenefitCondition.company_id == draft.company_id,
+                    CompanyBenefitCondition.trigger_concept_id == trigger_concept_id,
+                    CompanyBenefitCondition.is_active.is_(True),
+                )
+            ).all()
+        )
+    except Exception:
+        conds = []
+    target_ids = {str(c.target_concept_id) for c in conds if getattr(c, "target_concept_id", None)}
+    if not target_ids:
+        return
+    for sel in _draft_selections_with_pending(db, draft.id):
+        if sel.concept_id and str(sel.concept_id) in target_ids:
+            sel.label_override = None
+            sel.typed_value_override = None
+            if sel.state == ReviewedBenefitState.REMOVED.value and sel.catalog_offering_id:
+                sel.state = ReviewedBenefitState.CURRENT.value
+
+
 def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: dict) -> str:
     offering_id = str(operation.get("offering_id") or "")
     offering = db.get(CatalogOffering, offering_id)
@@ -752,6 +787,8 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
         current[0].superseded_by_id = selected.id
     elif desired_state == ReviewedBenefitState.REMOVED.value and current and current[0].id != selected.id:
         current[0].state = ReviewedBenefitState.REMOVED.value
+    if any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override")):
+        _reset_conditional_targets_for_trigger(db, draft, selected.concept_id)
     return f"benefits.{selected.id}"
 
 
@@ -831,6 +868,8 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
             except ValidationError as exc:
                 raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
     selection.selected_by = user.id
+    if any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override")):
+        _reset_conditional_targets_for_trigger(db, draft, selection.concept_id)
     return f"benefits.{selection.id}"
 
 
@@ -853,6 +892,7 @@ def _apply_revert_benefit(db, draft: QuotationDraft, user, operation: dict) -> s
         predecessors[0].state = ReviewedBenefitState.CURRENT.value
         predecessors[0].superseded_by_id = None
         predecessors[0].selected_by = user.id
+    _reset_conditional_targets_for_trigger(db, draft, selection.concept_id)
     return f"benefits.{selection.id}"
 
 

@@ -9,8 +9,10 @@ Enforces:
 
 from __future__ import annotations
 
+import collections
 import logging
 import threading
+import time
 from collections import defaultdict
 from typing import Any
 
@@ -34,6 +36,9 @@ class PacerSentinel:
         self._slot_token_times: dict[int, list[tuple[float, int]]] = defaultdict(list)
         self._slot_daily_counts: dict[int, int] = defaultdict(int)
         self._last_reset_date: str = get_current_pt_cycle_date()
+        self._next_dispatch_at: float = 0.0
+        self._cooldown_until: float = 0.0
+        self._recent_latencies: collections.deque[float] = collections.deque(maxlen=10)
 
     def _check_pt_cycle_reset(self) -> None:
         """Reset daily slot counts when Google AI Studio Pacific Time midnight cycle passes."""
@@ -119,19 +124,37 @@ class PacerSentinel:
         with self._lock:
             self._slot_daily_counts.clear()
 
+    def record_outcome(
+        self,
+        *,
+        latency_sec: float = 0.0,
+        is_rate_limited: bool = False,
+        now: float | None = None,
+    ) -> None:
+        """Feed live Gemini latency and 429 signals back into adaptive pacing."""
+        t = now if now is not None else time.time()
+        with self._lock:
+            if latency_sec > 0:
+                self._recent_latencies.append(latency_sec)
+            if is_rate_limited:
+                # Apply a brief global breathing pause so concurrent workers don't pile onto a 429 wave.
+                self._cooldown_until = max(self._cooldown_until, t + 6.0)
+                self._next_dispatch_at = max(self._next_dispatch_at, self._cooldown_until)
+
     def acquire(
         self,
         slot_idx: int | None = None,
         estimated_tokens: int = 12_000,
         staged_count: int = 1,
         avg_latency_sec: float = 1.5,
-        max_wait_seconds: float = 60.0,
+        max_wait_seconds: float = 120.0,
         sleep_fn: Any = None,
         time_fn: Any = None,
     ) -> tuple[int, float]:
-        """Atomically acquire a slot and apply pacing delay according to Living Eye equilibrium.
+        """Atomically reserve a future slot dispatch timestamp and sleep until its turn.
 
-        Returns (assigned_slot_idx, delay_applied_seconds).
+        Reserving inside the lock prevents concurrent worker threads from waking up at the
+        same instant and firing a 429 burst. Returns (assigned_slot_idx, delay_applied_seconds).
         """
         import time as _time_module
 
@@ -144,25 +167,37 @@ class PacerSentinel:
             else:
                 target_slot = slot_idx % self._slot_count
 
-        breathing_delay = self.calculate_delay(staged_count=staged_count, avg_latency_sec=avg_latency_sec)
+            observed_avg = (
+                sum(self._recent_latencies) / len(self._recent_latencies)
+                if self._recent_latencies
+                else 0.0
+            )
+            effective_avg_latency = max(avg_latency_sec, observed_avg)
+            breathing_delay = self.calculate_delay(
+                staged_count=staged_count,
+                avg_latency_sec=effective_avg_latency,
+            )
 
-        now = _time()
-        can_proceed, reason = self.check_slot_limits(target_slot, now, estimated_tokens)
-
-        delay_to_apply = breathing_delay
-        if not can_proceed:
-            with self._lock:
+            now = _time()
+            scheduled_at = max(now, self._next_dispatch_at, self._cooldown_until)
+            can_proceed, _reason = self.check_slot_limits(target_slot, scheduled_at, estimated_tokens)
+            if not can_proceed:
                 req_times = self._slot_request_times.get(target_slot, [])
                 if req_times:
                     oldest_req = min(req_times)
-                    wait_needed = max(0.1, (oldest_req + 60.0) - now + 0.1)
-                    delay_to_apply = max(breathing_delay, min(wait_needed, max_wait_seconds))
+                    scheduled_at = max(scheduled_at, oldest_req + 60.1)
+
+            delay_to_apply = max(0.0, scheduled_at - now)
+            if max_wait_seconds > 0 and delay_to_apply > max_wait_seconds:
+                delay_to_apply = max_wait_seconds
+                scheduled_at = now + delay_to_apply
+
+            self._next_dispatch_at = scheduled_at + breathing_delay
+            self.record_dispatch(target_slot, scheduled_at, tokens=estimated_tokens)
 
         if delay_to_apply > 0:
             _sleep(delay_to_apply)
 
-        now_after = _time()
-        self.record_dispatch(target_slot, now_after, tokens=estimated_tokens)
         return target_slot, delay_to_apply
 
 

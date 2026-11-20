@@ -140,6 +140,22 @@ def render_design2_html(
     ctx_adjusted_total = str(render_context.get("total_premium_adjusted") or "").strip()
     total_payable = ctx_adjusted_total or _get_val(draft_fields, "total_amount", "RM 5,447.30")
 
+    from app.domain.motor.discount_calculator import calculate_motor_discount
+
+    disc_pct_raw = _get_val(draft_fields, "motor_discount_pct", "")
+    disc_flat_raw = _get_val(draft_fields, "quotation_discount", "")
+    disc_bd = calculate_motor_discount(premium, disc_pct_raw or 0, disc_flat_raw or 0)
+    discount_row_html = ""
+    if disc_bd.effective_discount > 0:
+        pct_num = float(disc_bd.motor_discount_pct)
+        pct_str = f" ({int(pct_num) if pct_num.is_integer() else pct_num:g}%)" if pct_num > 0 else ""
+        discount_label = f"Motor Discount{pct_str} / 保费折扣"
+        discount_row_html = (
+            f'<div class="spec-row"><div class="spec-label">{escape(discount_label)}</div>'
+            f'<div class="spec-colon">:</div>'
+            f'<div class="spec-value" style="color: #059669;">- {escape(_format_money(f"{disc_bd.effective_discount:.2f}"))}</div></div>'
+        )
+
     try:
         rt_num = float(re.sub(r"[^0-9.]", "", roadtax or "0") or "0") if inc_rt else 0.0
         rf_num = float(re.sub(r"[^0-9.]", "", runner or "0") or "0") if inc_rf else 0.0
@@ -223,9 +239,12 @@ def render_design2_html(
         icon_media_html = render_design2_icon_svg(card.get("icon_hint", "generic"), size=38)
 
         indicator_html = (
-            '<svg width="12.5" height="12.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#5ABA00"/><path d="m8.2 12.2 2.5 2.5 5-5.2" stroke="#FFF" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+            '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">'
+            '<rect x="1.5" y="3.5" width="14" height="14" rx="3" fill="#ECFDF5" stroke="#16A34A" stroke-width="1.8"/>'
+            '<path d="M4.8 10.6 L8.6 14.3 L18.4 2.4" stroke="#15803D" stroke-width="2.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+            '</svg>'
             if is_sel
-            else '<div style="width: 10px; height: 10px; border: 1.6px solid #677184; border-radius: 1.5px; background: #FFFFFF;"></div>'
+            else '<div style="width: 11.5px; height: 11.5px; border: 1.7px solid #64748B; border-radius: 2.5px; background: #FFFFFF;"></div>'
         )
 
         addon_grid_html += f"""
@@ -236,11 +255,11 @@ def render_design2_html(
             <div style="flex: 1; min-width: 0; padding: 3.5px 5px 3px 2px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div style="min-height: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2px;">
-                        <div style="font-size: 10.0px; font-weight: 600; color: #0F172A; line-height: 1.14; word-break: break-word;">{title}</div>
-                        <div style="font-size: 8.1px; font-weight: 600; color: #475569; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
+                        <div style="font-size: 11.0px; font-weight: 700; color: #0F172A; line-height: 1.15; word-break: break-word;">{title}</div>
+                        <div style="font-size: 8.8px; font-weight: 700; color: #475569; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
                     </div>
-                    {f'<div style="font-size: 9.1px; font-weight: 600; color: #15803D; margin-top: 1px; line-height: 1.12; word-break: break-word;">{val}</div>' if val else ''}
-                    {f'<div style="font-size: 8.6px; font-weight: 400; color: #334155; line-height: 1.15; margin-top: 1px; word-break: break-word; white-space: normal;">{desc}</div>' if desc else ''}
+                    {f'<div style="font-size: 10.2px; font-weight: 700; color: #15803D; margin-top: 1px; line-height: 1.14; word-break: break-word;">{val}</div>' if val else ''}
+                    {f'<div style="font-size: 9.5px; font-weight: 400; color: #334155; line-height: 1.16; margin-top: 1.5px; word-break: break-word; white-space: normal;">{desc}</div>' if desc else ''}
                 </div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: auto; padding-top: 1px; flex-shrink: 0;">
                     {indicator_html}
@@ -453,6 +472,7 @@ body {{
                         Premium Summary <span style="font-size: 14.0px; font-weight: 600; color: #544F4E;">保费</span>
                     </div>
                     <div class="spec-row"><div class="spec-label">Insurance Premium / 保费</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(premium))}</div></div>
+                    {discount_row_html}
                     <div class="spec-row"><div class="spec-label">Roadtax and Runner Fee / 路税及服务费</div><div class="spec-colon">:</div><div class="spec-value">{escape(rt_combined)}</div></div>
                     <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 12px;">
                         <div style="font-size: 13.8px; font-weight: 700; color: #E52320; white-space: nowrap;">TOTAL PAYABLE 应付总额 :</div>

@@ -260,6 +260,23 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         perils_breakdown?: string[];
         math_balanced?: boolean;
       }>;
+      pipeline_traces?: Array<{
+        company_name?: string;
+        version?: number;
+        filename?: string;
+        session_id?: string | null;
+        job_id?: string | null;
+        job_state?: string | null;
+        reading_quality?: string | null;
+        method_summary?: string[];
+        warnings?: string[];
+        steps?: Array<{
+          timestamp: string;
+          progress: number;
+          stage: string;
+          message: string;
+        }>;
+      }>;
     };
   } | null>(null);
 
@@ -287,6 +304,34 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
   const [showAdjustFeesModal, setShowAdjustFeesModal] = useState(false);
   const [togglingFee, setTogglingFee] = useState<"road_tax" | "runner_fee" | null>(null);
+  const [savingDiscountPct, setSavingDiscountPct] = useState(false);
+
+  const handleApplyMotorDiscountPct = async (rawPct: number) => {
+    if (!data?.tenure) return;
+    const clamped = Math.min(100, Math.max(0, Number.isFinite(rawPct) ? rawPct : 0));
+    try {
+      setSavingDiscountPct(true);
+      const updated = await api<any>(`/comparison/${tenureId}/toggle-fees`, {
+        method: "POST",
+        body: JSON.stringify({
+          motor_discount_pct: clamped,
+        }),
+      });
+      setData(updated);
+      populateEditInputs(updated.tenure);
+      triggerStatus(
+        "success",
+        clamped > 0 ? "Motor Discount Applied" : "Motor Discount Cleared",
+        clamped > 0
+          ? `${clamped}% discount applied to Motor Insurance (excludes Road Tax & Runner Fee).`
+          : "Motor Insurance discount reset to 0%."
+      );
+    } catch (err: any) {
+      triggerStatus("error", "Failed to update motor discount", err.message || String(err));
+    } finally {
+      setSavingDiscountPct(false);
+    }
+  };
 
   const handleToggleFee = async (feeType: "road_tax" | "runner_fee") => {
     if (!data?.tenure) return;
@@ -564,6 +609,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [includeRunnerFeeInput, setIncludeRunnerFeeInput] = useState(true);
   const [windscreenInput, setWindscreenInput] = useState("");
   const [quotationDiscountInput, setQuotationDiscountInput] = useState<string>("0");
+  const [motorDiscountPctInput, setMotorDiscountPctInput] = useState<string>("0");
   const [currentPolicyDiscount, setCurrentPolicyDiscount] = useState<number>(0);
   const [previousPolicyDiscount, setPreviousPolicyDiscount] = useState<number>(0);
   const [engineCcInput, setEngineCcInput] = useState("");
@@ -638,6 +684,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     setIncludeRunnerFeeInput(tenure.include_runner_fee !== false);
     setWindscreenInput(tenure.windscreen_target ? String(tenure.windscreen_target) : "");
     setQuotationDiscountInput(tenure.quotation_discount != null ? String(tenure.quotation_discount) : "0");
+    setMotorDiscountPctInput(tenure.motor_discount_pct != null ? String(tenure.motor_discount_pct) : "0");
     setEngineCcInput(tenure.engine_cc || "");
     setEngineNoInput(tenure.engine_no || "");
     setChassisNoInput(tenure.chassis_no || "");
@@ -818,6 +865,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           include_runner_fee: includeRunnerFeeInput,
           windscreen_target: parseFloat(windscreenInput) || 0,
           quotation_discount: parseFloat(quotationDiscountInput) || 0,
+          motor_discount_pct: Math.min(100, Math.max(0, parseFloat(motorDiscountPctInput) || 0)),
           coverage_start_date: startDateInput || undefined,
           coverage_end_date: endDateInput || undefined,
           customer_name: customerNameInput || undefined,
@@ -2069,6 +2117,69 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 Fix / Adjust Fees
               </Button>
             </div>
+
+            <div className="h-6 w-px bg-[#e5e5ea] hidden sm:block" />
+
+            {/* Sub-Group C: Motor Insurance Percentage Discount (excludes Road Tax & Runner Fee) */}
+            <div
+              className="flex items-center gap-1.5 flex-wrap"
+              title="Applies a % discount strictly to Motor Insurance (excludes Road Tax & Runner Fee)"
+            >
+              <span className="text-xs font-bold text-[#1b1717] shrink-0">Motor Disc:</span>
+              <div className="flex items-center p-0.5 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] gap-0.5">
+                {[0, 5, 10, 15].map((pctOpt) => {
+                  const activePct = Number(tenure.motor_discount_pct || 0);
+                  const isActive = Math.abs(activePct - pctOpt) < 0.001;
+                  return (
+                    <button
+                      key={pctOpt}
+                      type="button"
+                      disabled={savingDiscountPct}
+                      onClick={() => {
+                        setMotorDiscountPctInput(String(pctOpt));
+                        handleApplyMotorDiscountPct(pctOpt);
+                      }}
+                      className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                        isActive
+                          ? pctOpt > 0
+                            ? "bg-emerald-600 text-white shadow-2xs"
+                            : "bg-white text-[#1b1717] shadow-2xs border border-black/5"
+                          : "text-[#6e6e73] hover:text-[#1b1717]"
+                      }`}
+                    >
+                      {pctOpt}%
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={motorDiscountPctInput}
+                  onChange={(e) => setMotorDiscountPctInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyMotorDiscountPct(parseFloat(motorDiscountPctInput) || 0);
+                    }
+                  }}
+                  aria-label="Motor discount percentage"
+                  className="w-14 h-7 rounded-lg px-2 text-xs font-mono font-bold border border-[#e5e5ea] bg-white text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
+                />
+                <span className="text-[11px] font-bold text-[#6e6e73]">%</span>
+                <button
+                  type="button"
+                  disabled={savingDiscountPct}
+                  onClick={() => handleApplyMotorDiscountPct(parseFloat(motorDiscountPctInput) || 0)}
+                  className="h-7 px-2 rounded-lg text-[11px] font-bold bg-[#1b1717] hover:bg-black text-white transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {savingDiscountPct ? "..." : "Apply"}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Right: Matrix Utilities & Audit Diagnostics */}
@@ -2183,6 +2294,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             setWindscreenInput={setWindscreenInput}
             quotationDiscountInput={quotationDiscountInput}
             setQuotationDiscountInput={setQuotationDiscountInput}
+            motorDiscountPctInput={motorDiscountPctInput}
+            setMotorDiscountPctInput={setMotorDiscountPctInput}
             engineCcInput={engineCcInput}
             setEngineCcInput={setEngineCcInput}
             engineNoInput={engineNoInput}

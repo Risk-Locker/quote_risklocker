@@ -157,7 +157,7 @@ class BenefitEvaluationEngine:
                     target_benefit.is_modified = True
                     target_benefit.source_condition_id = condition.id
                     target_benefit.trigger_plan_filter_matched = condition.trigger_plan_filter
-                elif condition.action_type == "replace_description":
+                elif condition.action_type in ("replace_description", "promote_to_addon"):
                     if condition.replacement_description:
                         target_benefit.display_description = condition.replacement_description[:MAX_DESCRIPTION_LENGTH].strip()
                         target_benefit.is_modified = True

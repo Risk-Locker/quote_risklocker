@@ -328,20 +328,27 @@ def sync_and_update_covernote(
             user_id=user_id,
         )
 
-    # 5. Recompute tenure.won_premium = motor_premium + eff_rt + eff_rf (unless explicit total_payable took precedence cleanly)
+    # 5. Recompute tenure.won_premium = discounted motor_premium + eff_rt + eff_rf (unless explicit total_payable took precedence cleanly)
+    from app.domain.motor.discount_calculator import calculate_motor_discount
+
+    pct_val = getattr(tenure, "motor_discount_pct", 0.0) or 0.0
+    flat_val = getattr(tenure, "quotation_discount", 0.0) or 0.0
     if sync_payload.get("total_payable") is not None:
         tenure.won_premium = float(_q2(sync_payload["total_payable"]))
     elif sync_payload.get("motor_premium") is not None:
         new_mp = _q2(sync_payload["motor_premium"])
-        tenure.won_premium = float((new_mp + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
+        disc_bd = calculate_motor_discount(new_mp, pct_val, flat_val)
+        tenure.won_premium = float(disc_bd.net_total_payable(eff_rt, eff_rf))
     elif any(k in payload for k in ("road_tax", "runner_fee", "include_road_tax", "include_runner_fee")) and cn_session and cn_session.draft and isinstance(cn_session.draft.fields, dict):
         prem_dec = _q2(cn_session.draft.fields.get("premium"))
         if prem_dec > _ZERO:
-            tenure.won_premium = float((prem_dec + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
+            disc_bd = calculate_motor_discount(prem_dec, pct_val, flat_val)
+            tenure.won_premium = float(disc_bd.net_total_payable(eff_rt, eff_rf))
     elif cn_session and cn_session.draft and isinstance(cn_session.draft.fields, dict) and tenure.won_premium is None:
         prem_dec = _q2(cn_session.draft.fields.get("premium"))
         if prem_dec > _ZERO:
-            tenure.won_premium = float((prem_dec + eff_rt + eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
+            disc_bd = calculate_motor_discount(prem_dec, pct_val, flat_val)
+            tenure.won_premium = float(disc_bd.net_total_payable(eff_rt, eff_rf))
 
     # 6. Mirror edits strictly if cn_session itself owns a TenureComparisonEntry row (never alter other underwriters!)
     if cn_session:
@@ -375,7 +382,11 @@ def sync_and_update_covernote(
             if sync_payload.get("excess") is not None:
                 ce.excess = _q2(sync_payload["excess"])
             if sync_payload.get("towing_limit") is not None:
-                ce.towing_limit = str(sync_payload["towing_limit"]).strip() or "Unlimited"
+                raw_tow_cn = str(sync_payload["towing_limit"]).strip()
+                if raw_tow_cn.lower() in {"0", "0.0", "0 km", "rm 0", "no towing", "without towing", "not included", "none", "tiada", "nil"}:
+                    ce.towing_limit = "No towing"
+                else:
+                    ce.towing_limit = raw_tow_cn or "Unlimited"
                 ce.towing_km = ce.towing_limit
             if sync_payload.get("windscreen_sum_insured") is not None:
                 ws_dec = _q2(sync_payload["windscreen_sum_insured"])

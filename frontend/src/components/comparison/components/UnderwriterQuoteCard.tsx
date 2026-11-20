@@ -353,18 +353,54 @@ export function UnderwriterQuoteCard({
             </div>
           </div>
 
-          <div className="h-[44px] flex flex-col justify-center">
+          <div className="min-h-[44px] flex flex-col justify-center">
             <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
               Motor Premium
             </span>
-            {onPatchEntryField ? (
-              <InlineComparisonFieldEditor
-                field="motor_premium"
-                label="Motor Premium (RM)"
-                currentValue={entry.exact_motor_premium ?? entry.motor_premium}
-                isOverridden={isFieldOverridden("motor_premium")}
-                onSave={(patch) => onPatchEntryField(entry, patch)}
-              >
+            {(() => {
+              const hasMotorDisc =
+                (entry.net_motor_premium != null && entry.net_motor_premium < (entry.exact_motor_premium ?? entry.motor_premium)) &&
+                ((entry.effective_discount ?? 0) > 0);
+              const grossDisplay = formatMoneyWithRounding(
+                roundingMode === "whole"
+                  ? (entry.whole_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
+                  : (roundingMode === "5cent" || roundingMode === "bnm5")
+                    ? (entry.bnm_5cent_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
+                    : (entry.exact_motor_premium ?? entry.motor_premium),
+                roundingMode
+              );
+              const netDisplay = formatMoneyWithRounding(
+                roundingMode === "whole"
+                  ? (entry.whole_net_motor_premium ?? entry.net_motor_premium ?? entry.motor_premium)
+                  : (roundingMode === "5cent" || roundingMode === "bnm5")
+                    ? (entry.bnm_5cent_net_motor_premium ?? entry.net_motor_premium ?? entry.motor_premium)
+                    : (entry.net_motor_premium ?? entry.motor_premium),
+                roundingMode
+              );
+              const pctVal = Number(entry.motor_discount_pct ?? tenure.motor_discount_pct ?? 0);
+              const pctLabel = pctVal > 0 ? `-${pctVal % 1 === 0 ? pctVal.toFixed(0) : pctVal}%` : "";
+              const motorEl = hasMotorDisc ? (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-mono text-xs text-neutral-400 line-through">
+                    RM {grossDisplay}
+                  </span>
+                  {pctLabel && (
+                    <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-1 py-0.5 rounded border border-emerald-300">
+                      {pctLabel}
+                    </span>
+                  )}
+                  <span
+                    className="font-mono text-sm font-bold text-emerald-700"
+                    title={
+                      entry.net_motor_premium != null
+                        ? `Discounted Motor Insurance: RM ${entry.net_motor_premium.toFixed(2)}`
+                        : undefined
+                    }
+                  >
+                    RM {netDisplay}
+                  </span>
+                </div>
+              ) : (
                 <p
                   className="font-mono text-sm font-bold text-[#1b1717]"
                   title={
@@ -373,35 +409,23 @@ export function UnderwriterQuoteCard({
                       : undefined
                   }
                 >
-                  RM {formatMoneyWithRounding(
-                    roundingMode === "whole"
-                      ? (entry.whole_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
-                      : (roundingMode === "5cent" || roundingMode === "bnm5")
-                        ? (entry.bnm_5cent_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
-                        : (entry.exact_motor_premium ?? entry.motor_premium),
-                    roundingMode
-                  )}
+                  RM {grossDisplay}
                 </p>
-              </InlineComparisonFieldEditor>
-            ) : (
-              <p
-                className="font-mono text-sm font-bold text-[#1b1717]"
-                title={
-                  entry.exact_motor_premium
-                    ? `Exact cents: RM ${entry.exact_motor_premium.toFixed(2)}`
-                    : undefined
-                }
-              >
-                RM {formatMoneyWithRounding(
-                  roundingMode === "whole"
-                    ? (entry.whole_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
-                    : (roundingMode === "5cent" || roundingMode === "bnm5")
-                      ? (entry.bnm_5cent_motor_premium ?? entry.exact_motor_premium ?? entry.motor_premium)
-                      : (entry.exact_motor_premium ?? entry.motor_premium),
-                  roundingMode
-                )}
-              </p>
-            )}
+              );
+              return onPatchEntryField ? (
+                <InlineComparisonFieldEditor
+                  field="motor_premium"
+                  label="Motor Premium (RM)"
+                  currentValue={entry.exact_motor_premium ?? entry.motor_premium}
+                  isOverridden={isFieldOverridden("motor_premium")}
+                  onSave={(patch) => onPatchEntryField(entry, patch)}
+                >
+                  {motorEl}
+                </InlineComparisonFieldEditor>
+              ) : (
+                motorEl
+              );
+            })()}
           </div>
 
           {/* Total Payable Box */}
@@ -428,7 +452,9 @@ export function UnderwriterQuoteCard({
                     )}
                   </span>
                   <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-300">
-                    - RM {(entry.effective_discount ?? tenure.quotation_discount ?? 0).toFixed(2)}
+                    {(entry.motor_discount_pct ?? tenure.motor_discount_pct ?? 0) > 0
+                      ? `-${Number(entry.motor_discount_pct ?? tenure.motor_discount_pct)}% (-RM ${(entry.effective_discount ?? tenure.quotation_discount ?? 0).toFixed(2)})`
+                      : `- RM ${(entry.effective_discount ?? tenure.quotation_discount ?? 0).toFixed(2)}`}
                   </span>
                 </div>
                 <p

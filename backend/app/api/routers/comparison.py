@@ -87,8 +87,9 @@ class FixedCostsUpdateRequest(BaseModel):
     vehicle_type: str | None = Field(None, description="Vehicle type (e.g. Car, NonSaloonCar, Lorry, Motorcycle, CompanyCar)")
     manufacture_year: int | None = Field(None, description="Vehicle year of manufacture (e.g. 2020)")
     quotation_discount: float | None = Field(None, description="Global quotation discount in MYR")
+    motor_discount_pct: float | None = Field(None, description="Percentage discount applied to motor insurance (0-100%)")
 
-    @field_validator("road_tax", "runner_fee", "windscreen_target", "ncd_percentage", "current_ncd", "quotation_discount", mode="before")
+    @field_validator("road_tax", "runner_fee", "windscreen_target", "ncd_percentage", "current_ncd", "quotation_discount", "motor_discount_pct", mode="before")
     def parse_floats(cls, v):
         return _parse_flexible_float(v)
 
@@ -167,6 +168,11 @@ class ToggleFeesRequest(BaseModel):
     include_runner_fee: bool | None = None
     road_tax: float | None = None
     runner_fee: float | None = None
+    motor_discount_pct: float | None = None
+
+    @field_validator("road_tax", "runner_fee", "motor_discount_pct", mode="before")
+    def parse_toggle_floats(cls, v):
+        return _parse_flexible_float(v)
 
 
 @router.get("/{tenure_id}")
@@ -254,6 +260,7 @@ def update_fixed_costs(
             vehicle_type=payload.vehicle_type,
             manufacture_year=payload.manufacture_year,
             quotation_discount=payload.quotation_discount,
+            motor_discount_pct=payload.motor_discount_pct,
         )
         publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Fixed costs updated", extra_scopes=("ledger",))
         return res
@@ -282,6 +289,8 @@ def toggle_tenure_fees(
     rf = payload.runner_fee if payload.runner_fee is not None else float(tenure.runner_fee)
     inc_rt = payload.include_road_tax if payload.include_road_tax is not None else (tenure.include_road_tax is not False)
     inc_rf = payload.include_runner_fee if payload.include_runner_fee is not None else (tenure.include_runner_fee is not False)
+    if payload.motor_discount_pct is not None and (payload.motor_discount_pct < 0 or payload.motor_discount_pct > 100):
+        raise HTTPException(status_code=422, detail="Motor discount percentage must be between 0 and 100%.")
 
     try:
         res = update_tenure_fixed_costs(
@@ -291,6 +300,7 @@ def toggle_tenure_fees(
             runner_fee=rf,
             include_road_tax=inc_rt,
             include_runner_fee=inc_rf,
+            motor_discount_pct=payload.motor_discount_pct,
         )
         publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Fees toggled", extra_scopes=("ledger",))
         return res
@@ -781,7 +791,11 @@ def patch_comparison_entry(
 
     if payload.towing_limit is not None:
         clean_tow = payload.towing_limit.strip()
-        if clean_tow:
+        if clean_tow.lower() in {"0", "0.0", "0 km", "rm 0", "no towing", "without towing", "not included", "none", "tiada", "nil"}:
+            entry.towing_limit = "No towing"
+            entry.towing_km = "No towing"
+            edited_fields.append("towing_limit")
+        elif clean_tow:
             entry.towing_limit = clean_tow
             entry.towing_km = clean_tow
             edited_fields.append("towing_limit")
@@ -979,7 +993,15 @@ def patch_comparison_entry(
     else:
         entry.rate_percentage = 0.0
     if tenure and tenure.covernote_session_id and entry.session_id == tenure.covernote_session_id:
-        tenure.won_premium = entry.total_payable
+        from app.domain.motor.discount_calculator import calculate_motor_discount
+
+        flat_disc = entry.discount if entry.discount is not None else getattr(tenure, "quotation_discount", 0.0)
+        disc_bd = calculate_motor_discount(
+            entry.motor_premium,
+            getattr(tenure, "motor_discount_pct", 0.0),
+            flat_disc,
+        )
+        tenure.won_premium = float(disc_bd.net_total_payable(eff_rt, eff_rf))
 
     db.commit()
 

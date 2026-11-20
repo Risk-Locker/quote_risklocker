@@ -132,9 +132,9 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
     if not target_concept_id or db.get(BenefitConcept, target_concept_id) is None:
         raise AppError("Target benefit concept is invalid.", 422)
 
-    action_type = str(payload.get("action_type") or "replace_description").strip()
-    if action_type not in {"replace_description", "hide_target"}:
-        action_type = "replace_description"
+    action_type = str(payload.get("action_type") or "promote_to_addon").strip()
+    if action_type not in {"promote_to_addon", "replace_description", "hide_target"}:
+        action_type = "promote_to_addon"
 
     replacement_desc = str(payload.get("replacement_description") or "").strip()
     if action_type == "hide_target":
@@ -156,7 +156,7 @@ def save_company_condition(db, user, company_id: str, payload: dict, profile_id:
 
     replacement_value = payload.get("replacement_value")
     if isinstance(replacement_value, str):
-        replacement_value = replacement_value.strip() or None
+        replacement_value = replacement_value.strip()
     else:
         replacement_value = None
 

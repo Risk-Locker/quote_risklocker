@@ -33,6 +33,7 @@ export interface TenureSpec {
   runner_fee_type?: string;
   fixed_costs_total: number;
   quotation_discount?: number;
+  motor_discount_pct?: number;
   windscreen_target: number | null;
   ncd_percentage: number | null;
   engine_cc: string;
@@ -69,7 +70,13 @@ export interface ComparisonEntry {
   include_road_tax?: boolean;
   include_runner_fee?: boolean;
   discount?: number | null;
+  motor_discount_pct?: number | null;
+  motor_discount_amount?: number | null;
   effective_discount?: number | null;
+  net_motor_premium?: number | null;
+  rounded_net_motor_premium?: number | null;
+  bnm_5cent_net_motor_premium?: number | null;
+  whole_net_motor_premium?: number | null;
   total_payable: number;
   rounded_total_payable?: number | null;
   exact_total_payable?: number | null;

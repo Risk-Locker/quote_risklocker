@@ -341,69 +341,98 @@ export function PreviousPolicyValuationPane({
             {/* Motor Premium */}
             <div className="flex justify-between items-center">
               <span className="text-neutral-500">Motor Premium:</span>
-              {onPatchCovernoteField ? (
-                <InlineComparisonFieldEditor
-                  field="motor_premium"
-                  label="Motor Premium (RM)"
-                  currentValue={cn.exact_motor_premium ?? cn.motor_premium}
-                  onSave={onPatchCovernoteField}
-                >
-                  <span className="font-mono font-bold text-neutral-900">
-                    RM {formatMoneyWithRounding(
-                      roundingMode === "whole"
-                        ? (cn.rounded_motor_premium ?? cn.exact_motor_premium ?? cn.motor_premium)
-                        : (cn.exact_motor_premium ?? cn.motor_premium),
-                      roundingMode
+              {(() => {
+                const hasCnDisc =
+                  cn.net_motor_premium != null &&
+                  Number(cn.effective_discount || 0) > 0 &&
+                  cn.net_motor_premium < (cn.exact_motor_premium ?? cn.motor_premium);
+                const grossDisp = formatMoneyWithRounding(
+                  roundingMode === "whole"
+                    ? (cn.rounded_motor_premium ?? cn.exact_motor_premium ?? cn.motor_premium)
+                    : (cn.exact_motor_premium ?? cn.motor_premium),
+                  roundingMode
+                );
+                const netDisp = formatMoneyWithRounding(
+                  roundingMode === "whole"
+                    ? (cn.rounded_net_motor_premium ?? cn.net_motor_premium ?? cn.motor_premium)
+                    : (cn.net_motor_premium ?? cn.motor_premium),
+                  roundingMode
+                );
+                const cnPct = Number(cn.motor_discount_pct || 0);
+                const node = hasCnDisc ? (
+                  <span className="inline-flex items-center gap-1.5 font-mono">
+                    <span className="text-[11px] text-neutral-400 line-through">RM {grossDisp}</span>
+                    {cnPct > 0 && (
+                      <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-1 rounded border border-emerald-300">
+                        -{cnPct % 1 === 0 ? cnPct.toFixed(0) : cnPct}%
+                      </span>
                     )}
+                    <span className="font-bold text-emerald-700">RM {netDisp}</span>
                   </span>
-                </InlineComparisonFieldEditor>
-              ) : (
-                <span className="font-mono font-bold text-neutral-900">
-                  RM {formatMoneyWithRounding(
-                    roundingMode === "whole"
-                      ? (cn.rounded_motor_premium ?? cn.exact_motor_premium ?? cn.motor_premium)
-                      : (cn.exact_motor_premium ?? cn.motor_premium),
-                    roundingMode
-                  )}
-                </span>
-            )}
-          </div>
+                ) : (
+                  <span className="font-mono font-bold text-neutral-900">RM {grossDisp}</span>
+                );
+                return onPatchCovernoteField ? (
+                  <InlineComparisonFieldEditor
+                    field="motor_premium"
+                    label="Motor Premium (RM)"
+                    currentValue={cn.exact_motor_premium ?? cn.motor_premium}
+                    onSave={onPatchCovernoteField}
+                  >
+                    {node}
+                  </InlineComparisonFieldEditor>
+                ) : (
+                  node
+                );
+              })()}
+            </div>
 
             {/* Total Payable */}
             <div className="flex justify-between items-center">
               <span className="text-neutral-500">Premium Payable:</span>
-              {onPatchCovernoteField ? (
-                <InlineComparisonFieldEditor
-                  field="total_payable"
-                  label="Premium Payable (RM)"
-                  currentValue={cn.exact_total_payable ?? cn.total_payable}
-                  onSave={onPatchCovernoteField}
-                >
+              {(() => {
+                const hasCnPayDisc = Number(cn.effective_discount || 0) > 0 && cn.net_total_payable != null;
+                const grossPayDisp = formatMoneyWithRounding(
+                  roundingMode === "whole"
+                    ? (cn.rounded_total_payable ?? Math.round(cn.total_payable))
+                    : (cn.exact_total_payable ?? cn.total_payable),
+                  roundingMode
+                );
+                const netPayDisp = formatMoneyWithRounding(
+                  roundingMode === "whole"
+                    ? (cn.rounded_net_total_payable ?? Math.round(cn.net_total_payable))
+                    : (cn.net_total_payable ?? cn.total_payable),
+                  roundingMode
+                );
+                const payNode = hasCnPayDisc ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 font-mono"
+                    title={`Exact net payable: RM ${Number(cn.net_total_payable).toFixed(2)} (Discount: -RM ${Number(cn.effective_discount).toFixed(2)})`}
+                  >
+                    <span className="text-[11px] text-neutral-400 line-through">RM {grossPayDisp}</span>
+                    <span className="font-bold text-emerald-700">RM {netPayDisp}</span>
+                  </span>
+                ) : (
                   <span
                     className="font-mono font-bold text-emerald-700"
                     title={cn.exact_total_payable != null ? `Exact cents: RM ${Number(cn.exact_total_payable).toFixed(2)}` : undefined}
                   >
-                    RM {formatMoneyWithRounding(
-                      roundingMode === "whole"
-                        ? (cn.rounded_total_payable ?? Math.round(cn.total_payable))
-                        : (cn.exact_total_payable ?? cn.total_payable),
-                      roundingMode
-                    )}
+                    RM {grossPayDisp}
                   </span>
-                </InlineComparisonFieldEditor>
-              ) : (
-                <span
-                  className="font-mono font-bold text-emerald-700"
-                  title={cn.exact_total_payable != null ? `Exact cents: RM ${Number(cn.exact_total_payable).toFixed(2)}` : undefined}
-                >
-                  RM {formatMoneyWithRounding(
-                    roundingMode === "whole"
-                      ? (cn.rounded_total_payable ?? Math.round(cn.total_payable))
-                      : (cn.exact_total_payable ?? cn.total_payable),
-                    roundingMode
-                  )}
-                </span>
-              )}
+                );
+                return onPatchCovernoteField ? (
+                  <InlineComparisonFieldEditor
+                    field="total_payable"
+                    label="Premium Payable (RM)"
+                    currentValue={cn.exact_total_payable ?? cn.total_payable}
+                    onSave={onPatchCovernoteField}
+                  >
+                    {payNode}
+                  </InlineComparisonFieldEditor>
+                ) : (
+                  payNode
+                );
+              })()}
             </div>
 
             {/* Fixed Costs */}

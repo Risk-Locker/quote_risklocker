@@ -69,6 +69,18 @@ def _match_catalog_display(cdv: str, is_rm_based: bool) -> str | None:
     return None
 
 
+def _is_explicit_no_towing(raw_val: str) -> bool:
+    s = (raw_val or "").strip()
+    if not s:
+        return False
+    return bool(
+        re.search(
+            r"(?i)^(?:0(?:\.0+)?|(?:rm|myr)\s*0(?:\.0+)?|0(?:\.0+)?\s*km|no\s*towing|without\s*towing|not\s*included|none|no|tiada|nil)$",
+            s,
+        )
+    )
+
+
 def resolve_insurer_towing_limit(
     company_name: str | None = None,
     combined_text: str = "",
@@ -77,10 +89,13 @@ def resolve_insurer_towing_limit(
     *,
     company_obj: Any = None,
 ) -> str:
-    """Resolve exact towing limit string (RM, km, or Unlimited) from DB policy_rules."""
+    """Resolve exact towing limit string (RM, km, Unlimited, or No towing) from DB policy_rules."""
     comp = (company_name or getattr(company_obj, "name", None) or "").lower().strip()
     text = (combined_text or "").lower()
     raw_ext = str(extracted_towing or "").strip()
+
+    if _is_explicit_no_towing(raw_ext):
+        return "No towing"
 
     if _is_non_comprehensive(text):
         return "-"

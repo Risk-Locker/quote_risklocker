@@ -29,7 +29,7 @@ export function formatBenefitCoverage(
   }
 
   // No towing check
-  if (/no towing|not included|none|tiada|nil|^0\s*km$/i.test(str)) {
+  if (/no towing|without towing|not included|none|tiada|nil|^0(?:\.0+)?(?:\s*km)?$|^(?:rm|myr)\s*0(?:\.0+)?$/i.test(str)) {
     return "No Towing";
   }
 

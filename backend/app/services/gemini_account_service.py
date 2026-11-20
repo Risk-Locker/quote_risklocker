@@ -532,7 +532,13 @@ class GeminiAccountManager:
             return None
 
     def record_slot_success(
-        self, slot_id: str, prompt_tokens: int = 0, candidate_tokens: int = 0, total_tokens: int = 0, latency_ms: int = 0
+        self,
+        slot_id: str,
+        prompt_tokens: int = 0,
+        candidate_tokens: int = 0,
+        total_tokens: int = 0,
+        latency_ms: int = 0,
+        endpoint_slot_override: str | None = None,
     ) -> None:
         with self._lock:
             now = time.time()
@@ -554,7 +560,7 @@ class GeminiAccountManager:
                     account_id=acc_id,
                     api_key_masked=slot.get("masked_key"),
                     model=slot.get("model", "unknown"),
-                    endpoint_slot=slot_id,
+                    endpoint_slot=endpoint_slot_override or slot_id,
                     status_code=200,
                     is_success=True,
                     prompt_tokens=prompt_tokens,
@@ -564,7 +570,13 @@ class GeminiAccountManager:
                 )
 
     def record_slot_failure(
-        self, slot_id: str, status_code: int | str, error_message: str | int = "", latency_ms: int = 0
+        self,
+        slot_id: str,
+        status_code: int | str,
+        error_message: str | int = "",
+        latency_ms: int = 0,
+        endpoint_slot_override: str | None = None,
+        cool_slot: bool = True,
     ) -> None:
         # Defensive parameter auto-normalization if arguments were inverted by caller
         if isinstance(status_code, str) and (isinstance(error_message, int) or (isinstance(error_message, str) and error_message.isdigit())):
@@ -581,9 +593,10 @@ class GeminiAccountManager:
             if slot:
                 slot["failed_calls"] += 1
                 slot["last_error"] = clean_msg
-                if status_code == 429:
+                if status_code == 429 and cool_slot:
                     slot["cooling_until"] = now + 65.0
-            self.record_failure(status_code, clean_msg, key=slot["key"] if slot else None)
+            if cool_slot or status_code != 429:
+                self.record_failure(status_code, clean_msg, key=slot["key"] if slot else None)
 
             # Atomically persist call log to Postgres
             if slot:
@@ -593,12 +606,45 @@ class GeminiAccountManager:
                     account_id=acc_id,
                     api_key_masked=slot.get("masked_key"),
                     model=slot.get("model", "unknown"),
-                    endpoint_slot=slot_id,
+                    endpoint_slot=endpoint_slot_override or slot_id,
                     status_code=status_code,
                     is_success=False,
                     error_message=clean_msg,
                     latency_ms=latency_ms,
                 )
+
+    def persist_account_call_log(
+        self,
+        *,
+        key: str | None,
+        model: str,
+        endpoint_slot: str,
+        status_code: int,
+        is_success: bool,
+        prompt_tokens: int = 0,
+        candidate_tokens: int = 0,
+        total_tokens: int = 0,
+        latency_ms: int = 0,
+        error_message: str | None = None,
+    ) -> None:
+        """Persist a direct/spillover/probe call log entry for an account."""
+        with self._lock:
+            acc = self._find_account_by_key(key)
+            acc_id = acc.id if acc else "unknown"
+            masked = acc.masked_key if acc else None
+        persist_call_log(
+            account_id=acc_id,
+            api_key_masked=masked,
+            model=model,
+            endpoint_slot=endpoint_slot,
+            status_code=status_code,
+            is_success=is_success,
+            prompt_tokens=prompt_tokens,
+            candidate_tokens=candidate_tokens,
+            total_tokens=total_tokens,
+            latency_ms=latency_ms,
+            error_message=error_message,
+        )
 
     def get_accounts(self) -> list[GeminiAccount]:
         with self._lock:
@@ -917,7 +963,82 @@ class GeminiAccountManager:
             else:
                 self.record_failure(res["status_code"], res["error"] or "Probe failed", key=test_key)
 
+        self.persist_account_call_log(
+            key=test_key,
+            model=res.get("model") or model or "unknown",
+            endpoint_slot=f"probe::{target_acc.id}::{res.get('model') or model or 'default'}",
+            status_code=int(res.get("status_code") or (200 if res.get("ok") else 500)),
+            is_success=bool(res.get("ok")),
+            prompt_tokens=1 if res.get("ok") else 0,
+            candidate_tokens=1 if res.get("ok") else 0,
+            total_tokens=2 if res.get("ok") else 0,
+            latency_ms=int(res.get("latency_ms") or 0),
+            error_message=res.get("error"),
+        )
+
         return self.get_quota_stats()
+
+    def probe_model(self, *, model: str, account_index: int | None = None) -> dict[str, Any]:
+        """Probe a specific Gemini model across active accounts (or a single account) and persist logs."""
+        target_model = resolve_active_gemini_model(model)
+        with self._lock:
+            self._check_daily_reset()
+            if account_index is not None and 0 <= account_index < len(self._accounts):
+                targets = [self._accounts[account_index]]
+            else:
+                targets = [a for a in self._accounts if not a.is_paused]
+                if not targets and self._accounts:
+                    targets = [self._accounts[0]]
+            snapshot = [(a.id, a.label, a.masked_key, a.key) for a in targets]
+
+        results: list[dict[str, Any]] = []
+        for acc_id, acc_label, masked, key in snapshot:
+            self.record_request(key)
+            res = self.probe_single_key(key, model=target_model)
+            with self._lock:
+                self._last_probe_cached_time = time.time()
+                acc_obj = self._find_account_by_key(key)
+                if acc_obj:
+                    acc_obj.last_probed_at = datetime.now(timezone.utc).isoformat()
+                if res["ok"]:
+                    self.record_success(prompt_tokens=1, candidate_tokens=1, total_tokens=2, key=key)
+                elif int(res.get("status_code") or 0) in (400, 401, 403):
+                    self.record_failure(res["status_code"], res["error"] or "Probe failed", key=key)
+
+            self.persist_account_call_log(
+                key=key,
+                model=target_model,
+                endpoint_slot=f"probe::{acc_id}::{target_model}",
+                status_code=int(res.get("status_code") or (200 if res.get("ok") else 500)),
+                is_success=bool(res.get("ok")),
+                prompt_tokens=1 if res.get("ok") else 0,
+                candidate_tokens=1 if res.get("ok") else 0,
+                total_tokens=2 if res.get("ok") else 0,
+                latency_ms=int(res.get("latency_ms") or 0),
+                error_message=res.get("error"),
+            )
+            results.append(
+                {
+                    "account_id": acc_id,
+                    "label": acc_label,
+                    "masked_key": masked,
+                    "model": target_model,
+                    "ok": bool(res.get("ok")),
+                    "status_code": int(res.get("status_code") or 500),
+                    "latency_ms": int(res.get("latency_ms") or 0),
+                    "error": res.get("error"),
+                }
+            )
+
+        any_ok = any(r["ok"] for r in results)
+        all_ok = bool(results) and all(r["ok"] for r in results)
+        return {
+            "model": target_model,
+            "overall_ok": any_ok,
+            "all_ok": all_ok,
+            "tested_count": len(results),
+            "results": results,
+        }
 
     def get_quota_stats(self) -> dict[str, Any]:
         with self._lock:
@@ -1444,9 +1565,14 @@ def get_fleet_timeline_data(db: Any) -> dict[str, Any]:
 
     timeline = []
     for log in raw_logs:
+        slot_lower = (log.endpoint_slot or "").lower()
         purpose = "Quotation Extraction"
-        if log.endpoint_slot and "probe" in log.endpoint_slot.lower():
+        if "probe" in slot_lower:
             purpose = "Model Health Probe"
+        elif "grounding" in slot_lower:
+            purpose = "Vehicle Grounding Search"
+        elif "spillover" in slot_lower:
+            purpose = "Quotation Extraction (Fallback)"
         elif log.error_message and "copilot" in log.error_message.lower():
             purpose = "Copilot Assistant"
 
@@ -1472,23 +1598,47 @@ def get_fleet_timeline_data(db: Any) -> dict[str, Any]:
             }
         )
 
-    # 2. Minute-level buckets for the past 60 minutes
+    # 2. Minute-level buckets for the past 60 minutes (dedicated query, not capped at 100 rows)
     minute_map: dict[str, dict[str, int]] = {}
     for i in range(59, -1, -1):
         m_time = (now_utc - timedelta(minutes=i)).astimezone(LOCAL_TZ)
         m_key = m_time.strftime("%H:%M")
-        minute_map[m_key] = {"calls": 0, "total_tokens": 0, "prompt_tokens": 0, "candidate_tokens": 0}
+        minute_map[m_key] = {
+            "calls": 0,
+            "errors": 0,
+            "total_tokens": 0,
+            "prompt_tokens": 0,
+            "candidate_tokens": 0,
+        }
 
     cutoff_60m = now_utc - timedelta(minutes=60)
-    bucket_logs = [log for log in raw_logs if log.created_at and (log.created_at if log.created_at.tzinfo else log.created_at.replace(tzinfo=timezone.utc)) >= cutoff_60m]
+    bucket_stmt = (
+        select(GeminiApiCallLog)
+        .where(GeminiApiCallLog.created_at >= cutoff_60m)
+        .order_by(GeminiApiCallLog.created_at.asc())
+    )
+    bucket_logs = db.execute(bucket_stmt).scalars().all()
+    minute_summary = {"calls": 0, "errors": 0, "tokens": 0}
     for log in bucket_logs:
-        log_myt = log.created_at.astimezone(LOCAL_TZ) if log.created_at.tzinfo else log.created_at.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+        if not log.created_at:
+            continue
+        log_myt = (
+            log.created_at.astimezone(LOCAL_TZ)
+            if log.created_at.tzinfo
+            else log.created_at.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+        )
         m_key = log_myt.strftime("%H:%M")
         if m_key in minute_map:
             minute_map[m_key]["calls"] += 1
+            if not log.is_success:
+                minute_map[m_key]["errors"] += 1
             minute_map[m_key]["total_tokens"] += log.total_tokens or 0
             minute_map[m_key]["prompt_tokens"] += log.prompt_tokens or 0
             minute_map[m_key]["candidate_tokens"] += log.candidate_tokens or 0
+        minute_summary["calls"] += 1
+        if not log.is_success:
+            minute_summary["errors"] += 1
+        minute_summary["tokens"] += log.total_tokens or 0
 
     minute_buckets = [
         {"minute": k, **v} for k, v in minute_map.items()
@@ -1521,6 +1671,7 @@ def get_fleet_timeline_data(db: Any) -> dict[str, Any]:
         "current_cycle": current_cycle,
         "timeline": timeline,
         "minute_buckets": minute_buckets,
+        "minute_summary": minute_summary,
         "daily_history": daily_history,
     }
 

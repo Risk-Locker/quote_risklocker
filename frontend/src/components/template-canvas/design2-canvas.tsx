@@ -187,6 +187,15 @@ function GreenTickSvg({ size = 14 }: { size?: number }) {
   );
 }
 
+function Box2CheckedStampSvg() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 20 20" aria-hidden="true">
+      <rect x="1.5" y="3.5" width="14" height="14" rx="3" fill="#ECFDF5" stroke="#16A34A" strokeWidth="1.8" />
+      <path d="M4.8 10.6 L8.6 14.3 L18.4 2.4" stroke="#15803D" strokeWidth="2.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function Design2CardIconMedia({
   iconHint,
   size = 38,
@@ -317,6 +326,10 @@ export function Design2CanvasView({
   const roadtax = getVal(fields, "roadtax", "40.00");
   const runner = getVal(fields, "runner_fee", "0.00");
   const totalPayable = getVal(fields, "total_amount", "5447.30");
+  const motorDiscountPct = parseFloat(String(getVal(fields, "motor_discount_pct", "0")).replace(/[^0-9.]/g, "") || "0");
+  const motorDiscountAmt = parseFloat(String(getVal(fields, "motor_discount_amount", "0")).replace(/[^0-9.]/g, "") || "0");
+  const flatDiscountAmt = parseFloat(String(getVal(fields, "quotation_discount", "0")).replace(/[^0-9.]/g, "") || "0");
+  const totalDiscountAmt = motorDiscountAmt + flatDiscountAmt;
 
   const rtCombined = useMemo(() => {
     try {
@@ -520,6 +533,17 @@ export function Design2CanvasView({
                     {formatMoney(premium)}
                   </div>
                 </div>
+                {totalDiscountAmt > 0 && (
+                  <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
+                    <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
+                      {motorDiscountPct > 0 ? `Motor Discount (${motorDiscountPct % 1 === 0 ? motorDiscountPct.toFixed(0) : motorDiscountPct}%) / 保费折扣` : "Motor Discount / 保费折扣"}
+                    </div>
+                    <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
+                    <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#059669", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
+                      - {formatMoney(totalDiscountAmt.toFixed(2))}
+                    </div>
+                  </div>
+                )}
                 <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
                   <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
                     Roadtax and Runner Fee / 路税及服务费
@@ -698,32 +722,32 @@ export function Design2CanvasView({
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "2px" }}>
                         <div
                           style={{
-                            fontSize: "10.0px",
-                            fontWeight: 600,
+                            fontSize: "11.0px",
+                            fontWeight: 700,
                             color: "#0F172A",
-                            lineHeight: 1.14,
+                            lineHeight: 1.15,
                             wordBreak: "break-word",
                           }}
                         >
                           {card.title}
                         </div>
-                        <div style={{ fontSize: "8.1px", fontWeight: 600, color: "#334155", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
+                        <div style={{ fontSize: "8.8px", fontWeight: 700, color: "#475569", flexShrink: 0, lineHeight: 1, paddingTop: "1px" }}>
                           {card.serial_number}
                         </div>
                       </div>
                       {card.value && (
-                        <div style={{ fontSize: "9.1px", fontWeight: 600, color: "#15803D", marginTop: "1px", lineHeight: 1.12, wordBreak: "break-word" }}>
+                        <div style={{ fontSize: "10.2px", fontWeight: 700, color: "#15803D", marginTop: "1px", lineHeight: 1.14, wordBreak: "break-word" }}>
                           {card.value}
                         </div>
                       )}
                       {card.description && (
                         <div
                           style={{
-                            fontSize: "8.6px",
+                            fontSize: "9.5px",
                             fontWeight: 400,
                             color: "#334155",
-                            lineHeight: 1.15,
-                            marginTop: "1px",
+                            lineHeight: 1.16,
+                            marginTop: "1.5px",
                             wordBreak: "break-word",
                             whiteSpace: "normal",
                           }}
@@ -734,9 +758,9 @@ export function Design2CanvasView({
                     </div>
                     <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: "auto", paddingTop: "1px", flexShrink: 0 }}>
                       {card.is_selected ? (
-                        <GreenTickSvg size={12.5} />
+                        <Box2CheckedStampSvg />
                       ) : (
-                        <div style={{ width: "10px", height: "10px", border: "1.6px solid #677184", borderRadius: "1.5px", background: "#FFFFFF" }} />
+                        <div style={{ width: "11.5px", height: "11.5px", border: "1.7px solid #64748B", borderRadius: "2.5px", background: "#FFFFFF" }} />
                       )}
                     </div>
                   </div>

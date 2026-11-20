@@ -34,17 +34,26 @@ def format_whatsapp_teaser_from_data(data: dict[str, Any]) -> str:
         val_tag = "Agreed Value" if e.get("agreed_value") else "Market Value"
         betterment_tag = "Yes" if e.get("waiver_betterment") else "No"
         motor_p = float(e.get("rounded_motor_premium") if e.get("rounded_motor_premium") is not None else round(e.get("motor_premium", 0.0)))
+        net_motor_p = float(e.get("rounded_net_motor_premium") if e.get("rounded_net_motor_premium") is not None else motor_p)
         tot_p = float(e.get("rounded_total_payable") if e.get("rounded_total_payable") is not None else round(e.get("total_payable", 0.0)))
+        disc_pct = float(e.get("motor_discount_pct") or 0.0)
         disc = float(e.get("effective_discount") or 0.0)
         net_p = float(e.get("rounded_net_total_payable") if e.get("rounded_net_total_payable") is not None else max(0.0, tot_p - round(disc)))
 
         if disc > 0.0:
+            pct_lbl = f" ({disc_pct:g}%)" if disc_pct > 0.0 else ""
+            motor_line = (
+                f"   • Motor Insurance: RM {motor_p:,.2f} → *RM {net_motor_p:,.2f}* (-{disc_pct:g}%)"
+                if disc_pct > 0.0 and net_motor_p < motor_p
+                else f"   • Motor Insurance: RM {motor_p:,.2f}"
+            )
             payable_lines = [
                 f"   • Total Payable: RM {tot_p:,.2f}",
-                f"   • Discount: - RM {disc:,.2f}",
+                f"   • Motor Discount{pct_lbl}: - RM {disc:,.2f}",
                 f"   • *NET TOTAL PAYABLE: RM {net_p:,.2f}*",
             ]
         else:
+            motor_line = f"   • Motor Insurance: RM {motor_p:,.2f}"
             payable_lines = [
                 f"   • *TOTAL PAYABLE: RM {tot_p:,.2f}*",
             ]
@@ -52,7 +61,7 @@ def format_whatsapp_teaser_from_data(data: dict[str, Any]) -> str:
         lines.extend([
             f"*{idx}. {e['company_name']}{rec_tag}*",
             f"   • Sum Insured: RM {e['sum_insured']:,.2f} ({val_tag})",
-            f"   • Motor Insurance: RM {motor_p:,.2f}",
+            motor_line,
             *payable_lines,
             f"   • Towing: {e['towing_limit']}",
             f"   • Waiver of Betterment: {betterment_tag} | Excess: RM {e['excess']:.2f}",

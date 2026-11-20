@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.services.vehicle_tracking_service import is_valid_malaysian_plate, parse_date_safe
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.errors import AIExtractionUnavailableException
 from app.core.workspace import QC_TEMP_ROOT, REPOSITORY_ROOT, qc_temp_directory, resolve_qc_path
@@ -203,6 +203,27 @@ def process_extraction_job(
 
     heartbeat_job(db, job, worker_id=worker_id, progress=5, phase="validating_source", lease_seconds=300)
     logger.info("Job %s: validating source document (file=%s, name=%s)", job.id, uploaded.id, uploaded.original_filename)
+    _job_started_perf = __import__("time").perf_counter()
+    pipeline_trace: list[dict] = []
+
+    def _trace(progress: int, stage: str, message: str, detail: dict | None = None, ts: str | None = None) -> None:
+        entry: dict = {
+            "ts": ts or datetime.now(timezone.utc).isoformat(),
+            "progress": progress,
+            "stage": stage,
+            "message": message,
+        }
+        if detail:
+            entry["detail"] = detail
+        pipeline_trace.append(entry)
+
+    _trace(
+        0,
+        "staged",
+        f"Staged PDF '{uploaded.original_filename}' queued for worker '{worker_id}' (attempt {job.attempt}/{job.max_attempts}).",
+        {"job_id": str(job.id), "filename": uploaded.original_filename, "attempt": job.attempt},
+        ts=job.created_at.isoformat() if getattr(job, "created_at", None) else None,
+    )
     # Track the local ephemeral path for post-extraction Supabase promotion.
     _ephemeral_path: Path | None = None
     if uploaded.storage_provider == "local_ephemeral":
@@ -249,6 +270,12 @@ def process_extraction_job(
         raise JobProcessingError("source_limit_exceeded", "The uploaded document exceeds the configured source limit.")
 
     logger.info("Job %s: source document ready (%d bytes)", job.id, len(source_bytes))
+    _trace(
+        5,
+        "source_validated",
+        f"Source document verified ({len(source_bytes):,} bytes, SHA-256 OK, storage={uploaded.storage_provider}).",
+        {"size_bytes": len(source_bytes), "storage_provider": uploaded.storage_provider},
+    )
 
     if job.cancelled_at is not None or job.state == "cancelled":
         logger.info("Job %s was cancelled before extraction started; aborting.", job.id)
@@ -270,17 +297,56 @@ def process_extraction_job(
         )
         enhanced_reading = False
 
+    # Count queued + active extract_pdf jobs so PacerSentinel switches to batch pacing (>20 staged)
+    try:
+        staged_count = int(
+            db.scalar(
+                select(func.count(Job.id)).where(
+                    Job.job_type == "extract_pdf",
+                    Job.state.in_(["queued", "processing"]),
+                )
+            )
+            or 1
+        )
+    except Exception:
+        staged_count = 1
+
+    # Sync active slot count into PacerSentinel from Gemini pool
+    try:
+        from app.services.gemini_account_service import get_key_pool
+        active_slots = [e for e in get_key_pool().get_fleet_endpoints() if not e.get("is_paused")]
+        if pacer is None and active_slots:
+            get_pacer_sentinel(slot_count=len(active_slots))
+    except Exception:
+        pass
+
     # Autonomous Living Eye pacing before LLM extraction
     active_pacer = pacer or get_pacer_sentinel()
-    slot_idx, pacing_delay = active_pacer.acquire(estimated_tokens=estimated_tokens)
+    slot_idx, pacing_delay = active_pacer.acquire(
+        estimated_tokens=estimated_tokens,
+        staged_count=staged_count,
+    )
     if pacing_delay > 0:
         logger.info(
-            "Job %s: PacerSentinel applied %.2fs breathing delay (slot=%d, tokens=%d)",
+            "Job %s: PacerSentinel applied %.2fs breathing delay (slot=%d, staged=%d, tokens=%d)",
             job.id,
             pacing_delay,
             slot_idx,
+            staged_count,
             estimated_tokens,
         )
+    _trace(
+        10,
+        "preflight_and_pacing",
+        f"Preflight ~{estimated_tokens:,} tokens across {token_info.get('page_count', 0)} page(s); PacerSentinel slot {slot_idx} applied {pacing_delay:.2f}s delay (staged_queue={staged_count}).",
+        {
+            "estimated_tokens": estimated_tokens,
+            "page_count": token_info.get("page_count", 0),
+            "staged_count": staged_count,
+            "pacer_slot": slot_idx,
+            "pacing_delay_s": round(pacing_delay, 2),
+        },
+    )
 
     # Check cancellation after pacing delay
     db.refresh(job)
@@ -327,6 +393,33 @@ def process_extraction_job(
     full = result.get("full_record") or {}
     draft_data = result.get("draft") or {}
     values = _record_values(full)
+    _gemini_telemetry = list(full.get("gemini_telemetry") or [])
+    for _gt in _gemini_telemetry:
+        if _gt.get("is_success"):
+            _trace(
+                55,
+                "gemini_ai_call",
+                f"Gemini call succeeded on {_gt.get('model')} ({_gt.get('slot_id')}) in {_gt.get('latency_ms', 0)}ms — {_gt.get('total_tokens', 0):,} tokens.",
+                _gt,
+            )
+        else:
+            _trace(
+                45,
+                "gemini_ai_call",
+                f"Gemini call returned HTTP {_gt.get('status_code')} on {_gt.get('model')} ({_gt.get('slot_id')}) in {_gt.get('latency_ms', 0)}ms: {_gt.get('error') or 'error'}",
+                _gt,
+            )
+    _trace(
+        80,
+        "extraction_complete",
+        f"Extraction finished ({len(draft_data.get('fields') or {})} fields, {len(values.get('benefit_lines') or [])} benefit lines, quality={values.get('reading_quality')}, methods={values.get('method_summary')}).",
+        {
+            "field_count": len(draft_data.get("fields") or {}),
+            "benefit_line_count": len(values.get("benefit_lines") or []),
+            "reading_quality": values.get("reading_quality"),
+            "method_summary": values.get("method_summary"),
+        },
+    )
     heartbeat_job(db, job, worker_id=worker_id, progress=85, phase="saving_review", lease_seconds=300)
     logger.info("Job %s: extraction completed (%d fields), saving review records", job.id, len(draft_data.get("fields") or {}))
     if not values["company_resolution"]:
@@ -490,13 +583,24 @@ def process_extraction_job(
     if company_id:
         draft.company_id = company_id
         uploaded.insurance_company_id = company_id
-    finalize_catalog_and_3eye_gate(
+    catalog_ctx, three_eye = finalize_catalog_and_3eye_gate(
         db=db,
         draft=draft,
         grounding=level2_grounding,
         raw_text=raw_evidence,
         record=record,
         company_resolution=values.get("company_resolution"),
+    )
+    _trace(
+        90,
+        "grounding_and_3eye",
+        f"Resolved insurer='{session.detected_company or 'Unknown'}', vehicle_type='{(draft.fields.get('vehicle_type') or {}).get('value') if isinstance(draft.fields.get('vehicle_type'), dict) else ''}', grounding={level2_grounding.get('source', 'n/a')}, 3-eye={three_eye.get('status', 'n/a')}.",
+        {
+            "detected_company": session.detected_company,
+            "grounding_source": level2_grounding.get("source"),
+            "three_eye_status": three_eye.get("status"),
+            "referee_notices": referee_notices,
+        },
     )
 
     existing_line_ids = {
@@ -901,6 +1005,26 @@ def process_extraction_job(
                     )
         draft.display_options = curr_opts
         tenure_id_out = tenure.id
+        _trace(
+            95,
+            "tenure_ingestion",
+            f"Ingested as {session.document_type} v{getattr(session, 'tenure_version', 1)} into tenure {tenure.id} (duplicate={bool(curr_opts.get('duplicate_detected'))}).",
+            {
+                "tenure_id": tenure.id,
+                "document_type": session.document_type,
+                "version": getattr(session, "tenure_version", 1),
+                "duplicate_detected": bool(curr_opts.get("duplicate_detected")),
+            },
+        )
+
+    _total_ms = int((__import__("time").perf_counter() - _job_started_perf) * 1000)
+    _trace(
+        100,
+        "completed",
+        f"Pipeline completed in {_total_ms}ms (session={session.id}, draft={draft.id}, tenure={tenure_id_out}).",
+        {"duration_ms": _total_ms, "session_id": session.id, "draft_id": draft.id, "tenure_id": tenure_id_out},
+    )
+    record.company_resolution = {**(record.company_resolution or {}), "pipeline_trace": pipeline_trace}
 
     complete_job(
         db,

@@ -63,6 +63,7 @@ class ExtractionOrchestrator:
         benefit_lines: list[dict] = []
         # Check Gemini Multimodal Extraction (Free Tier / Multi-Key Pool)
         gemini_res = None
+        gemini_telemetry: list[dict] = []
         try:
             from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
 
@@ -89,6 +90,7 @@ class ExtractionOrchestrator:
                     correction_memory=db_corrections,
                     prompt_override=prompt_override,
                     batch_item_index=item_idx,
+                    telemetry_log=gemini_telemetry,
                 )
                 if not gemini_res:
                     if fail_closed:
@@ -104,7 +106,9 @@ class ExtractionOrchestrator:
             else:
                 gemini_res = None
             if gemini_res:
-                method_summary.append("Gemini 3.1 Flash AI Extraction")
+                winning_call = next((t for t in reversed(gemini_telemetry) if t.get("is_success")), None)
+                used_model = winning_call.get("model") if winning_call else "gemini"
+                method_summary.append(f"Gemini AI Extraction ({used_model})")
                 for key, val in gemini_res.items():
                     if key in {"detected_benefits", "detected_package_name"} or val is None or str(val).strip() == "":
                         continue
@@ -403,6 +407,7 @@ class ExtractionOrchestrator:
                 "candidates": candidate_payload,
                 "benefit_lines": benefit_lines,
                 "method_summary": method_summary,
+                "gemini_telemetry": gemini_telemetry,
                 "warnings": warnings,
                 "reading_quality": reading_quality,
             },

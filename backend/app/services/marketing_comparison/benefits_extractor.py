@@ -1177,17 +1177,24 @@ def _resolve_comparison_benefits(
                 else:
                     towing_limit_val = t_val
 
-    raw_towing = _safe_str(f.get("towing_limit") or f.get("towing"))
+    towing_field_raw = f.get("towing_limit") if f.get("towing_limit") is not None else f.get("towing")
+    towing_manual_override = isinstance(towing_field_raw, dict) and towing_field_raw.get("status") == "manual_override"
+    raw_towing = _safe_str(towing_field_raw)
 
-    clean_towing = resolve_insurer_towing_limit(
-        company_name=comp_name_str,
-        combined_text=combined_text,
-        extracted_towing=raw_towing,
-        catalog_display_value=towing_limit_val,
-        company_obj=comp_obj,
-    )
-    if clean_towing == "-":
-        clean_towing = None
+    if towing_manual_override and raw_towing:
+        clean_towing = normalize_towing_km(raw_towing, combined_text="", company_name=comp_name_str)
+    elif "towing" in disabled_domains and not towing_manual_override:
+        clean_towing = "No towing"
+    else:
+        clean_towing = resolve_insurer_towing_limit(
+            company_name=comp_name_str,
+            combined_text=combined_text,
+            extracted_towing=raw_towing,
+            catalog_display_value=towing_limit_val,
+            company_obj=comp_obj,
+        )
+        if clean_towing == "-":
+            clean_towing = None
 
     canonical_perils_list = format_canonical_perils(combined_text, tokens)
 
@@ -1493,6 +1500,7 @@ def _resolve_comparison_benefits(
     else:
         tag_suppression: list[tuple[bool, str]] = [
             (ws_explicitly_removed or windscreen_amount is None, "WINDSCREEN"),
+            ("towing" in disabled_domains or (clean_towing or "").lower() == "no towing", "TOWING"),
             (not has_special_perils, "FLOOD"),
             (not has_llp, "LLP"),
             (not has_llp, "LLOP"),

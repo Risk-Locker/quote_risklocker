@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Infinity as InfinityIcon, MapPin, Money } from "@phosphor-icons/react";
+import { Check, Infinity as InfinityIcon, MapPin, Money, Prohibit } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-type TowingMode = "rm" | "km" | "unlimited";
+type TowingMode = "rm" | "km" | "unlimited" | "none";
 
 const RM_PRESETS = ["RM 100", "RM 200", "RM 300", "RM 400", "RM 500", "RM 600"];
 const KM_PRESETS = ["50 km", "100 km", "150 km", "200 km", "300 km", "365 km"];
@@ -19,12 +19,18 @@ export interface TowingLimitSelectorProps {
 
 function parseTowingMode(raw: string): { mode: TowingMode; numberStr: string } {
   const s = (raw || "").trim();
+  if (/^(?:0(?:\.0+)?|(?:rm|myr)\s*0(?:\.0+)?|0(?:\.0+)?\s*km|no\s*towing|without\s*towing|not\s*included|none|no|tiada|nil)$/i.test(s)) {
+    return { mode: "none", numberStr: "0" };
+  }
   const rmMatch = s.match(/^(?:rm|myr)\s*([\d,]+)/i);
   if (rmMatch) {
-    return { mode: "rm", numberStr: rmMatch[1].replace(/,/g, "") };
+    const cleanNum = rmMatch[1].replace(/,/g, "");
+    if (Number(cleanNum) <= 0) return { mode: "none", numberStr: "0" };
+    return { mode: "rm", numberStr: cleanNum };
   }
   const kmMatch = s.match(/^(\d+)\s*km\b/i);
   if (kmMatch) {
+    if (Number(kmMatch[1]) <= 0) return { mode: "none", numberStr: "0" };
     return { mode: "km", numberStr: kmMatch[1] };
   }
   return { mode: "unlimited", numberStr: "" };
@@ -53,25 +59,35 @@ export function TowingLimitSelector({
   const handleModeSwitch = (nextMode: TowingMode) => {
     if (disabled) return;
     setMode(nextMode);
+    if (nextMode === "none") {
+      setCustomNum("0");
+      onChange("No towing");
+      return;
+    }
     if (nextMode === "unlimited") {
       setCustomNum("");
       onChange("Unlimited");
       return;
     }
     if (nextMode === "rm") {
-      const seed = parseTowingMode(value).mode === "rm" && customNum ? customNum : "200";
+      const seed = parseTowingMode(value).mode === "rm" && customNum && Number(customNum) > 0 ? customNum : "200";
       setCustomNum(seed);
       onChange(`RM ${seed}`);
       return;
     }
-    const seed = parseTowingMode(value).mode === "km" && customNum ? customNum : "100";
+    const seed = parseTowingMode(value).mode === "km" && customNum && Number(customNum) > 0 ? customNum : "100";
     setCustomNum(seed);
     onChange(`${seed} km`);
   };
 
   const handleCustomSubmit = () => {
     const digits = customNum.replace(/[^\d]/g, "");
-    if (!digits || Number(digits) <= 0) return;
+    if (!digits) return;
+    if (Number(digits) === 0) {
+      setMode("none");
+      onChange("No towing");
+      return;
+    }
     if (mode === "rm") {
       onChange(`RM ${digits}`);
     } else if (mode === "km") {
@@ -134,6 +150,18 @@ export function TowingLimitSelector({
           <InfinityIcon size={13} weight="bold" />
           Unlimited
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "none"}
+          disabled={disabled}
+          onClick={() => handleModeSwitch("none")}
+          className={tabBtnClass(mode === "none")}
+          title="No towing / 0 coverage"
+        >
+          <Prohibit size={13} weight="bold" />
+          No (0)
+        </button>
       </div>
 
       {mode === "rm" && (
@@ -162,10 +190,10 @@ export function TowingLimitSelector({
             <span className="text-[11px] font-bold text-[#6e6e73] shrink-0">RM</span>
             <Input
               type="number"
-              min={50}
+              min={0}
               step={50}
               disabled={disabled}
-              placeholder="Custom RM (e.g. 400)"
+              placeholder="Custom RM (0 = No towing)"
               value={customNum}
               onChange={(e) => {
                 setCustomNum(e.target.value);
@@ -221,10 +249,10 @@ export function TowingLimitSelector({
           <div className="flex items-center gap-1.5">
             <Input
               type="number"
-              min={10}
+              min={0}
               step={10}
               disabled={disabled}
-              placeholder="Custom KM (e.g. 250)"
+              placeholder="Custom KM (0 = No towing)"
               value={customNum}
               onChange={(e) => {
                 setCustomNum(e.target.value);
@@ -260,6 +288,13 @@ export function TowingLimitSelector({
         <div className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] border border-emerald-200 bg-emerald-50/70 px-2.5 py-2 text-[11px] font-semibold text-emerald-800">
           <Check size={13} weight="bold" className="shrink-0" />
           <span>Unlimited emergency towing coverage selected</span>
+        </div>
+      )}
+
+      {mode === "none" && (
+        <div className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] border border-amber-200 bg-amber-50/70 px-2.5 py-2 text-[11px] font-semibold text-amber-900">
+          <Prohibit size={13} weight="bold" className="shrink-0" />
+          <span>No towing coverage (0 / Not Included)</span>
         </div>
       )}
     </div>

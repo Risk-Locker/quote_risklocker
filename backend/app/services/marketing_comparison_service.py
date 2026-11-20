@@ -198,6 +198,10 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     ExtractionRecord.raw_text,
                     ExtractionRecord.ocr_text,
                     ExtractionRecord.benefit_lines,
+                    ExtractionRecord.method_summary,
+                    ExtractionRecord.warnings,
+                    ExtractionRecord.reading_quality,
+                    ExtractionRecord.company_resolution,
                 ),
             )
             .where(
@@ -1221,6 +1225,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             else None
         )
 
+        from app.domain.motor.discount_calculator import calculate_motor_discount
+
         raw_motor_prem = float(e.motor_premium)
         rounded_motor_prem = float(round(raw_motor_prem))
         bnm_5c_motor_prem = float(apply_bnm_cash_rounding(raw_motor_prem))
@@ -1232,10 +1238,18 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         whole_tot = float(apply_whole_ringgit_rounding(exact_tot))
         whole_motor_prem = float(apply_whole_ringgit_rounding(raw_motor_prem))
 
-        # Effective discount: entry-level discount if specified, else tenure-level quotation discount
-        effective_discount = float(e.discount) if e.discount is not None else float(getattr(tenure, "quotation_discount", 0.0) or 0.0)
-        net_exact_tot = max(0.0, exact_tot - effective_discount)
-        net_rounded_tot = max(0.0, rounded_tot - round(effective_discount))
+        # Effective discount: percentage discount applied strictly to Motor Insurance + optional flat RM discount
+        motor_disc_pct = float(getattr(tenure, "motor_discount_pct", 0.0) or 0.0)
+        flat_disc = float(e.discount) if e.discount is not None else float(getattr(tenure, "quotation_discount", 0.0) or 0.0)
+        disc_bd = calculate_motor_discount(raw_motor_prem, motor_disc_pct, flat_disc)
+        effective_discount = float(disc_bd.effective_discount)
+        net_motor_prem = float(disc_bd.net_motor_premium)
+        rounded_net_motor_prem = float(round(net_motor_prem))
+        bnm_5c_net_motor_prem = float(apply_bnm_cash_rounding(net_motor_prem))
+        whole_net_motor_prem = float(apply_whole_ringgit_rounding(net_motor_prem))
+
+        net_exact_tot = float(disc_bd.net_total_payable(rt, rf))
+        net_rounded_tot = max(0.0, rounded_net_motor_prem + rt + rf)
         bnm_5c_net_tot = float(apply_bnm_cash_rounding(net_exact_tot))
         whole_net_tot = float(apply_whole_ringgit_rounding(net_exact_tot))
 
@@ -1257,7 +1271,13 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "include_road_tax": getattr(e, "include_road_tax", True) if getattr(e, "include_road_tax", None) is not None else (tenure.include_road_tax if tenure.include_road_tax is not None else True),
             "include_runner_fee": getattr(e, "include_runner_fee", True) if getattr(e, "include_runner_fee", None) is not None else (tenure.include_runner_fee if tenure.include_runner_fee is not None else True),
             "discount": float(e.discount) if e.discount is not None else None,
+            "motor_discount_pct": float(disc_bd.motor_discount_pct),
+            "motor_discount_amount": float(disc_bd.pct_discount_amount),
             "effective_discount": effective_discount,
+            "net_motor_premium": net_motor_prem,
+            "rounded_net_motor_premium": rounded_net_motor_prem,
+            "bnm_5cent_net_motor_premium": bnm_5c_net_motor_prem,
+            "whole_net_motor_premium": whole_net_motor_prem,
             "total_payable": float(e.total_payable) if e.total_payable is not None else exact_tot,
             "rounded_total_payable": rounded_tot,
             "bnm_5cent_total_payable": bnm_5c_tot,
@@ -1553,6 +1573,17 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         e_fmt = e_date.strftime("%d/%m/%Y") if e_date else ""
         cov_period_str = f"{s_fmt} - {e_fmt}" if s_fmt and e_fmt else (s_fmt or "—")
 
+        from app.domain.motor.discount_calculator import calculate_motor_discount
+
+        cn_disc_bd = calculate_motor_discount(
+            cn_prem,
+            getattr(tenure, "motor_discount_pct", 0.0) or 0.0,
+            getattr(tenure, "quotation_discount", 0.0) or 0.0,
+        )
+        cn_net_prem = float(cn_disc_bd.net_motor_premium)
+        cn_gross_tot_pay = round(cn_prem + cn_eff_rt + cn_eff_rf, 2)
+        cn_net_tot_pay = float(cn_disc_bd.net_total_payable(cn_eff_rt, cn_eff_rf))
+
         covernote_policy = {
             "session_id": cn_session.id,
             "company_name": cn_comp,
@@ -1567,13 +1598,20 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "motor_premium": cn_prem,
             "rounded_motor_premium": float(round(float(cn_prem))),
             "exact_motor_premium": float(cn_prem),
+            "motor_discount_pct": float(cn_disc_bd.motor_discount_pct),
+            "motor_discount_amount": float(cn_disc_bd.pct_discount_amount),
+            "effective_discount": float(cn_disc_bd.effective_discount),
+            "net_motor_premium": cn_net_prem,
+            "rounded_net_motor_premium": float(round(cn_net_prem)),
             "road_tax": cn_eff_rt,
             "runner_fee": cn_eff_rf,
             "include_road_tax": (tenure.include_road_tax is not False),
             "include_runner_fee": (tenure.include_runner_fee is not False),
-            "total_payable": cn_tot_pay,
+            "total_payable": cn_gross_tot_pay,
             "rounded_total_payable": float(round(float(cn_prem))) + cn_eff_rt + cn_eff_rf,
-            "exact_total_payable": cn_tot_pay,
+            "exact_total_payable": cn_gross_tot_pay,
+            "net_total_payable": cn_net_tot_pay,
+            "rounded_net_total_payable": float(round(cn_net_prem)) + cn_eff_rt + cn_eff_rf,
             "excess": cn_excess,
             "waiver_betterment": cn_waiver_bet,
             "betterment_rate": cn_bet_rate,
@@ -1700,6 +1738,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "runner_fee_type": "passport" if (float(tenure.runner_fee) >= 20.0 or (cust_ic and cust_ic[0].isalpha() and not cust_ic.upper().startswith("PENDING-"))) else "mykad",
             "fixed_costs_total": (float(tenure.road_tax) if tenure.include_road_tax is not False else 0.0) + (float(tenure.runner_fee) if tenure.include_runner_fee is not False else 0.0),
             "quotation_discount": float(getattr(tenure, "quotation_discount", 0.0) or 0.0),
+            "motor_discount_pct": float(getattr(tenure, "motor_discount_pct", 0.0) or 0.0),
             "windscreen_target": float(tenure.windscreen_target) if tenure.windscreen_target else None,
             "ncd_percentage": float(tenure.ncd_percentage) if tenure.ncd_percentage is not None else None,
             "car_brand": (tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None) or waterfall_brand,
@@ -1777,8 +1816,167 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 }
                 for ed in entry_dicts
             ],
+            "pipeline_traces": _build_pipeline_traces(db, entry_dicts, session_map),
         },
     }
+
+
+def _build_pipeline_traces(
+    db: Session,
+    entry_dicts: list[dict[str, Any]],
+    session_map: dict[str, SessionModel],
+) -> list[dict[str, Any]]:
+    """Build authentic 0%->100% pipeline execution logs per quotation from Job + ExtractionRecord."""
+    file_ids = [ed.get("uploaded_file_id") for ed in entry_dicts if ed.get("uploaded_file_id")]
+    jobs_by_file: dict[str, Job] = {}
+    if file_ids:
+        jobs = list(
+            db.scalars(
+                select(Job)
+                .where(Job.uploaded_file_id.in_(file_ids), Job.job_type == "extract_pdf")
+                .order_by(Job.created_at.desc())
+            ).all()
+        )
+        for j in jobs:
+            if j.uploaded_file_id and j.uploaded_file_id not in jobs_by_file:
+                jobs_by_file[j.uploaded_file_id] = j
+
+    myt_tz = timezone(timedelta(hours=8))
+
+    def _fmt_ts(ts_val: Any) -> str:
+        if isinstance(ts_val, datetime):
+            dt = ts_val if ts_val.tzinfo else ts_val.replace(tzinfo=timezone.utc)
+            return dt.astimezone(myt_tz).strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(ts_val, str) and ts_val:
+            try:
+                dt = datetime.fromisoformat(ts_val.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(myt_tz).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return ts_val
+        return "—"
+
+    comparison_now_myt = datetime.now(timezone.utc).astimezone(myt_tz).strftime("%Y-%m-%d %H:%M:%S")
+    traces: list[dict[str, Any]] = []
+
+    for ed in entry_dicts:
+        sess_id = ed.get("session_id")
+        file_id = ed.get("uploaded_file_id")
+        sess = session_map.get(sess_id) if sess_id else None
+        up_file = getattr(sess, "uploaded_file", None) if sess else None
+        rec = getattr(up_file, "extraction_record", None) if up_file else None
+        job = jobs_by_file.get(file_id) if file_id else None
+        comp_res = dict(getattr(rec, "company_resolution", None) or {}) if rec else {}
+        method_summary = list(getattr(rec, "method_summary", None) or []) if rec else []
+        warnings = list(getattr(rec, "warnings", None) or []) if rec else []
+        raw_trace = list(comp_res.get("pipeline_trace") or [])
+
+        steps: list[dict[str, Any]] = []
+        if raw_trace:
+            for item in raw_trace:
+                steps.append(
+                    {
+                        "timestamp": _fmt_ts(item.get("ts")),
+                        "progress": int(item.get("progress") or 0),
+                        "stage": str(item.get("stage") or "step"),
+                        "message": str(item.get("message") or ""),
+                    }
+                )
+        else:
+            # Reconstruct authentic historical log steps from Job.phase_timestamps + ExtractionRecord
+            if job is not None:
+                phases = dict(job.phase_timestamps or {})
+                steps.append(
+                    {
+                        "timestamp": _fmt_ts(job.created_at),
+                        "progress": 0,
+                        "stage": "staged",
+                        "message": f"Staged '{ed.get('original_filename') or 'quotation.pdf'}' (job={job.id}, attempt={job.attempt}/{job.max_attempts}).",
+                    }
+                )
+                if phases.get("validating_source"):
+                    steps.append(
+                        {
+                            "timestamp": _fmt_ts(phases.get("validating_source")),
+                            "progress": 5,
+                            "stage": "source_validated",
+                            "message": "Source document validated and integrity-checked.",
+                        }
+                    )
+                if phases.get("extracting"):
+                    steps.append(
+                        {
+                            "timestamp": _fmt_ts(phases.get("extracting")),
+                            "progress": 15,
+                            "stage": "extracting",
+                            "message": f"Executed extraction pipeline: {', '.join(method_summary) if method_summary else 'Native/OCR extraction'}.",
+                        }
+                    )
+                if phases.get("saving_review"):
+                    l2 = comp_res.get("level2_grounding") or {}
+                    three_eye = comp_res.get("three_eye_consensus") or {}
+                    steps.append(
+                        {
+                            "timestamp": _fmt_ts(phases.get("saving_review")),
+                            "progress": 85,
+                            "stage": "saving_review",
+                            "message": (
+                                f"Resolved insurer '{ed.get('company_name')}', "
+                                f"grounding={l2.get('source', 'n/a')}, 3-eye={three_eye.get('status', 'n/a')}."
+                            ),
+                        }
+                    )
+                if job.completed_at:
+                    steps.append(
+                        {
+                            "timestamp": _fmt_ts(job.completed_at),
+                            "progress": int(job.progress or 100),
+                            "stage": job.state or "completed",
+                            "message": f"Job finished with state='{job.state}' (reading_quality={getattr(rec, 'reading_quality', 'n/a')}).",
+                        }
+                    )
+            else:
+                steps.append(
+                    {
+                        "timestamp": _fmt_ts(getattr(sess, "created_at", None)),
+                        "progress": 100,
+                        "stage": "manual_or_legacy",
+                        "message": (
+                            f"Manual/Direct entry for {ed.get('company_name')} "
+                            f"(methods: {', '.join(method_summary) if method_summary else 'Manual / Legacy'})."
+                        ),
+                    }
+                )
+
+        steps.append(
+            {
+                "timestamp": comparison_now_myt,
+                "progress": 100,
+                "stage": "comparison_rendered",
+                "message": (
+                    f"Loaded into Comparison Matrix ({ed.get('company_name')} v{ed.get('version')}, "
+                    f"Net Payable RM {float(ed.get('total_payable', 0.0) or 0.0):,.2f})."
+                ),
+            }
+        )
+
+        traces.append(
+            {
+                "company_name": ed.get("company_name"),
+                "version": ed.get("version"),
+                "filename": ed.get("original_filename") or getattr(up_file, "original_filename", None) or "Manual Entry",
+                "session_id": sess_id,
+                "job_id": str(job.id) if job else None,
+                "job_state": job.state if job else "manual",
+                "reading_quality": getattr(rec, "reading_quality", None),
+                "method_summary": method_summary,
+                "warnings": warnings,
+                "steps": steps,
+            }
+        )
+
+    return traces
 
 
 def update_tenure_fixed_costs(
@@ -1805,6 +2003,7 @@ def update_tenure_fixed_costs(
     vehicle_type: str | None = None,
     manufacture_year: int | None = None,
     quotation_discount: float | None = None,
+    motor_discount_pct: float | None = None,
 ) -> dict[str, Any]:
     """Update fixed tenure expenses, coverage dates, vehicle specs, and recalculate total payables for all columns."""
     from app.services.tenure_identity_sync_service import sync_tenure_identity_transaction
@@ -1832,6 +2031,7 @@ def update_tenure_fixed_costs(
         vehicle_type=vehicle_type,
         manufacture_year=manufacture_year,
         quotation_discount=quotation_discount,
+        motor_discount_pct=motor_discount_pct,
     )
     db.commit()
     return get_marketing_comparison(db, tenure_id)
@@ -2205,6 +2405,14 @@ def select_winner_and_generate_draft(
             db.add(stub_file)
             db.flush()
 
+            from app.domain.motor.discount_calculator import calculate_motor_discount
+
+            eff_rt_s = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+            eff_rf_s = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+            flat_d_s = entry.discount if entry.discount is not None else (getattr(tenure, "quotation_discount", 0.0) or 0.0)
+            bd_s = calculate_motor_discount(entry.motor_premium, getattr(tenure, "motor_discount_pct", 0.0) or 0.0, flat_d_s)
+            net_tot_s = float(bd_s.net_total_payable(eff_rt_s, eff_rf_s))
+
             # Create QuotationDraft with valid uploaded_file_id
             new_draft = QuotationDraft(
                 id=new_id(),
@@ -2219,10 +2427,19 @@ def select_winner_and_generate_draft(
                     "sum_insured": float(entry.sum_insured),
                     "coverage_amount": float(entry.sum_insured),
                     "basic_premium": float(entry.motor_premium),
-                    "road_tax": float(entry.road_tax),
-                    "runner_fee": float(entry.runner_fee),
-                    "total_payable": float(entry.total_payable),
-                    "total_amount": float(entry.total_payable),
+                    "premium": float(entry.motor_premium),
+                    "motor_premium": float(entry.motor_premium),
+                    "motor_discount_pct": float(bd_s.motor_discount_pct),
+                    "motor_discount_amount": float(bd_s.pct_discount_amount),
+                    "quotation_discount": float(bd_s.flat_discount_amount),
+                    "road_tax": eff_rt_s,
+                    "roadtax": eff_rt_s,
+                    "runner_fee": eff_rf_s,
+                    "service_fee": eff_rf_s,
+                    "include_road_tax": (tenure.include_road_tax is not False),
+                    "include_runner_fee": (tenure.include_runner_fee is not False),
+                    "total_payable": net_tot_s,
+                    "total_amount": net_tot_s,
                     "towing_limit": entry.towing_limit,
                     "agreed_value": entry.agreed_value,
                     "waiver_of_betterment": entry.waiver_betterment,
@@ -2271,10 +2488,16 @@ def select_winner_and_generate_draft(
     rec_entries = [e for e in all_entries if e.is_recommended]
 
     if rec_entries:
+        from app.domain.motor.discount_calculator import calculate_motor_discount
+
         primary = entry if entry.is_recommended else rec_entries[0]
         tenure.status = "quoted"
         tenure.winning_company_id = primary.company_id
-        tenure.won_premium = primary.total_payable
+        eff_rt_w = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+        eff_rf_w = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+        flat_w = primary.discount if primary.discount is not None else (getattr(tenure, "quotation_discount", 0.0) or 0.0)
+        bd_w = calculate_motor_discount(primary.motor_premium, getattr(tenure, "motor_discount_pct", 0.0) or 0.0, flat_w)
+        tenure.won_premium = float(bd_w.net_total_payable(eff_rt_w, eff_rf_w))
         if primary.session_id:
             s_primary = db.get(SessionModel, primary.session_id)
             if s_primary:
@@ -2363,10 +2586,22 @@ def generate_quotation_for_entry(
         sess.quotation_status = "ready"
         ref_num = sess.quotation_ref
         if sess.draft:
+            from app.domain.motor.discount_calculator import calculate_motor_discount
+
             draft_id = sess.draft.id
             fields = dict(sess.draft.fields or {})
             fields["quotation_reference"] = {"value": ref_num, "status": "ready", "message": ""}
+            eff_rt_g = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+            eff_rf_g = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+            flat_g = entry.discount if entry.discount is not None else (getattr(tenure, "quotation_discount", 0.0) or 0.0)
+            bd_g = calculate_motor_discount(entry.motor_premium, getattr(tenure, "motor_discount_pct", 0.0) or 0.0, flat_g)
+            net_tot_g = float(bd_g.net_total_payable(eff_rt_g, eff_rf_g))
+            fields["motor_discount_pct"] = {"value": f"{bd_g.motor_discount_pct:.2f}", "status": "ready", "message": ""}
+            fields["motor_discount_amount"] = {"value": f"{bd_g.pct_discount_amount:.2f}", "status": "ready", "message": ""}
+            fields["quotation_discount"] = {"value": f"{bd_g.flat_discount_amount:.2f}", "status": "ready", "message": ""}
+            fields["total_amount"] = {"value": f"{net_tot_g:.2f}", "status": "ready", "message": ""}
             sess.draft.fields = fields
+            flag_modified(sess.draft, "fields")
     else:
         # Create stub UploadedFile, QuotationDraft, and SessionModel
         comp = None
@@ -2408,6 +2643,14 @@ def generate_quotation_for_entry(
         db.add(stub_file)
         db.flush()
 
+        from app.domain.motor.discount_calculator import calculate_motor_discount
+
+        eff_rt_g2 = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
+        eff_rf_g2 = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+        flat_g2 = entry.discount if entry.discount is not None else (getattr(tenure, "quotation_discount", 0.0) or 0.0)
+        bd_g2 = calculate_motor_discount(entry.motor_premium, getattr(tenure, "motor_discount_pct", 0.0) or 0.0, flat_g2)
+        net_tot_g2 = float(bd_g2.net_total_payable(eff_rt_g2, eff_rf_g2))
+
         new_draft = QuotationDraft(
             id=new_id(),
             uploaded_file_id=stub_file.id,
@@ -2421,10 +2664,19 @@ def generate_quotation_for_entry(
                 "sum_insured": float(entry.sum_insured),
                 "coverage_amount": float(entry.sum_insured),
                 "basic_premium": float(entry.motor_premium),
-                "road_tax": float(entry.road_tax),
-                "runner_fee": float(entry.runner_fee),
-                "total_payable": float(entry.total_payable),
-                "total_amount": float(entry.total_payable),
+                "premium": float(entry.motor_premium),
+                "motor_premium": float(entry.motor_premium),
+                "motor_discount_pct": float(bd_g2.motor_discount_pct),
+                "motor_discount_amount": float(bd_g2.pct_discount_amount),
+                "quotation_discount": float(bd_g2.flat_discount_amount),
+                "road_tax": eff_rt_g2,
+                "roadtax": eff_rt_g2,
+                "runner_fee": eff_rf_g2,
+                "service_fee": eff_rf_g2,
+                "include_road_tax": (tenure.include_road_tax is not False),
+                "include_runner_fee": (tenure.include_runner_fee is not False),
+                "total_payable": net_tot_g2,
+                "total_amount": net_tot_g2,
                 "towing_limit": entry.towing_limit,
                 "agreed_value": entry.agreed_value,
                 "waiver_of_betterment": entry.waiver_betterment,
