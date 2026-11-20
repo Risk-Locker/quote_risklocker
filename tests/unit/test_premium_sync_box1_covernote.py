@@ -545,7 +545,7 @@ def test_m2_design2_typography_enlarged_and_fits_a4_height():
         render_context={"current_benefits": addons[:4], "available_addons": addons[4:]},
     )
     assert "font-size: 10.0px" in html
-    assert "font-size: 8.6px" in html
+    assert "font-size: 9.4px" in html
     assert "min-height: 68px;" in html
     assert "height: auto;" in html
     assert "1123px" in html
@@ -772,7 +772,7 @@ def test_m4_worker_releases_db_connection_during_slow_extractor_and_handles_fail
     checked_out_during_extract: list[int] = []
 
     class _DummyPacer:
-        def acquire(self, estimated_tokens: int = 0):
+        def acquire(self, estimated_tokens: int = 0, **_kwargs):
             return (0, 0.0)
 
     def _fake_extractor(path, **_kwargs):

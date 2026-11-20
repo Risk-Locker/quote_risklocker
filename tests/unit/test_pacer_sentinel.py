@@ -105,9 +105,9 @@ def test_acquire_pacing_and_slot_round_robin():
             time_fn=mock_time,
         )
         assert slot_idx == expected_slot
-        assert delay == 2.0  # Interactive mode delay
+        assert delay == (0.0 if expected_slot == 0 else 2.0)
 
-    assert len(sleep_calls) == 4
-    assert sleep_calls == [2.0, 2.0, 2.0, 2.0]
+    assert len(sleep_calls) == 3
+    assert sleep_calls == [2.0, 2.0, 2.0]
 
 

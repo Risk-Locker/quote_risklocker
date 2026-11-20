@@ -667,6 +667,7 @@ export function detectTowingUpgrade(
       tv && typeof tv === "object"
         ? `${tv.display_text || ""} ${tv.value || ""} ${tv.plan_key || ""} ${tv.enum_key || ""}`.toLowerCase()
         : String(tv || "").toLowerCase();
+    if (/\b1\s*-\s*4\b/.test(`${valStr} ${tvStr}`)) continue;
     const combined = `${title} ${concept} ${valStr} ${descStr} ${offKey} ${tvStr}`;
 
     if (combined.includes("oto 360") || combined.includes("oto_360") || combined.includes("oto-360") || combined.includes("oto360")) {
@@ -950,8 +951,31 @@ export function extractFreeCoverageItems(
         cTitle = stripTrailingMetricParens(cTitle);
       }
       const cDesc = String(raw.description || raw.short_description || "").trim();
-      const outTitle = formatTowingTitle(cTitle, cVal, hasManualValOvr);
-      const outDesc = cDesc || "24/7 accidental towing service to nearest panel workshop or approved repairer.";
+      const hasManualOverride = Boolean(
+        raw.has_manual_override ||
+        hasManualValOvr ||
+        isHideCov ||
+        raw.is_manual ||
+        String(raw.source || "").toLowerCase() === "manual" ||
+        raw.label_override
+      );
+      const hasPromotedTowing = (activeBenefits || []).some(
+        (b: any) => Boolean(b?.promoted_to_addon)
+      );
+      let towingUpgrade: { title: string; description: string } | null = null;
+      if (!isComm && !isNonComp && !hasManualOverride && !hasPromotedTowing) {
+        const cardAlreadyUpgraded =
+          cVal.toLowerCase().includes("unlimited") ||
+          cTitle.toLowerCase().includes("unlimited") ||
+          cTitle.toLowerCase().includes("extended");
+        if (!cardAlreadyUpgraded) {
+          towingUpgrade = detectTowingUpgrade(activeBenefits, insNameStr);
+        }
+      }
+      const outTitle = towingUpgrade ? towingUpgrade.title : formatTowingTitle(cTitle, cVal, hasManualValOvr);
+      const outDesc = towingUpgrade
+        ? towingUpgrade.description
+        : cDesc || "24/7 accidental towing service to nearest panel workshop or approved repairer.";
       const normOut = normalizeCode(outTitle);
       if (!seen.has(normOut) && !seen.has("emergency_towing_assistance")) {
         seen.add(normOut);

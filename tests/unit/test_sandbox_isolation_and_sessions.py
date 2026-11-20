@@ -150,7 +150,7 @@ def test_sandbox_extraction_never_pollutes_live_ledger(db_session: Session, staf
         max_source_pdf_bytes = 20 * 1024 * 1024
 
     class DummyPacer:
-        def acquire(self, estimated_tokens: int = 0):
+        def acquire(self, estimated_tokens: int = 0, **_kwargs):
             return 0, 0.0
 
     process_extraction_job(

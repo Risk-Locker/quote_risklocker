@@ -686,6 +686,8 @@ def detect_towing_upgrade(
             tv_str = f"{tv.get('display_text') or ''} {tv.get('value') or ''} {tv.get('plan_key') or ''} {tv.get('enum_key') or ''}".lower()
         elif tv is not None:
             tv_str = str(tv).lower()
+        if re.search(r"\b1\s*-\s*4\b", f"{val_str} {tv_str}"):
+            continue
         combined = f"{title} {concept} {val_str} {desc_str} {off_key} {tv_str}"
 
         # 1. Etiqa + OTO 360
@@ -978,8 +980,33 @@ def extract_free_coverage_items(
             if is_hide_cov or has_manual_val_ovr:
                 c_title = _strip_trailing_metric_parens(c_title)
             c_desc = str(raw.get("description") or raw.get("short_description") or "").strip()
-            out_title = _format_towing_title(c_title, c_val, is_manual_val=has_manual_val_ovr)
-            out_desc = c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer."
+            has_manual_override = bool(
+                raw.get("has_manual_override")
+                or has_manual_val_ovr
+                or is_hide_cov
+                or raw.get("is_manual")
+                or str(raw.get("source") or "").lower() == "manual"
+                or raw.get("label_override")
+            )
+            has_promoted_towing = any(
+                isinstance(b, dict) and b.get("promoted_to_addon")
+                for b in (active_benefits or [])
+            )
+            towing_upgrade = None
+            if not is_comm and not is_non_comp and not has_manual_override and not has_promoted_towing:
+                card_already_upgraded = (
+                    "unlimited" in c_val.lower()
+                    or "unlimited" in c_title.lower()
+                    or "extended" in c_title.lower()
+                )
+                if not card_already_upgraded:
+                    towing_upgrade = detect_towing_upgrade(active_benefits, insurer_name)
+            out_title = towing_upgrade["title"] if towing_upgrade else _format_towing_title(c_title, c_val, is_manual_val=has_manual_val_ovr)
+            out_desc = (
+                towing_upgrade["description"]
+                if towing_upgrade
+                else (c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer.")
+            )
 
             norm_out = _normalize_benefit_code(out_title)
             if norm_out not in seen_titles and "emergency_towing_assistance" not in seen_titles:

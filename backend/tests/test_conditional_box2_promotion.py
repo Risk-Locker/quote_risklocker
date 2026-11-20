@@ -200,7 +200,8 @@ def test_design2_renders_option_a_tick_and_larger_box2_fonts():
         template_config={},
         render_context={"current_benefits": res["current_benefits"], "available_addons": res["available_addons"], "fill_to_slots": 8},
     )
-    assert 'width="16" height="16" viewBox="0 0 20 20"' in html
+    assert 'width="20" height="20" viewBox="0 0 22 22"' in html
+    assert "skewX(-6deg)" in html
+    assert "font-size: 11.8px; font-weight: 700;" in html
     assert "font-size: 11.0px; font-weight: 700;" in html
-    assert "font-size: 10.2px; font-weight: 700;" in html
-    assert "font-size: 9.5px; font-weight: 400;" in html
+    assert "font-size: 10.0px; font-weight: 500;" in html

@@ -511,10 +511,10 @@ def test_call_gemini_grounded_search_rotates_slots_after_429(monkeypatch):
         def acquire_parallel_slot(self, batch_item_index=0, requested_model=None):
             return slots[batch_item_index % len(slots)]
 
-        def record_slot_failure(self, slot_id, status_code, err_msg, latency_ms=0):
+        def record_slot_failure(self, slot_id, status_code, err_msg, latency_ms=0, **_kwargs):
             recorded_failures.append(f"{slot_id}:{status_code}")
 
-        def record_slot_success(self, slot_id, prompt_tokens=0, candidate_tokens=0, total_tokens=0, latency_ms=0):
+        def record_slot_success(self, slot_id, prompt_tokens=0, candidate_tokens=0, total_tokens=0, latency_ms=0, **_kwargs):
             recorded_successes.append(slot_id)
 
         def record_failure(self, *args, **kwargs):

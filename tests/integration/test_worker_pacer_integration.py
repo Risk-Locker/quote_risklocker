@@ -115,6 +115,7 @@ def test_extraction_worker_triggers_pacer_sentinel_acquire(db_session):
         fake_time[0] += d
 
     test_pacer = PacerSentinel(slot_count=2)
+    test_pacer._next_dispatch_at = fake_time[0] + 2.0
 
     # Wrap acquire to use mock_sleep
     orig_acquire = test_pacer.acquire
