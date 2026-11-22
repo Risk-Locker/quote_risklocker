@@ -69,6 +69,7 @@ import { NcdEntitlementModal } from "./components/NcdEntitlementModal";
 import { AdjustFeesModal } from "./components/AdjustFeesModal";
 import { EditCoverNoteModal } from "./components/EditCoverNoteModal";
 import { SnapshotPreviewModal } from "./components/SnapshotPreviewModal";
+import { waitForSnapshotAssets } from "./hooks/useSnapshotExport";
 import { SourcePdfViewerPane } from "./components/SourcePdfViewerPane";
 import { UnderwriterQuoteCard } from "./components/UnderwriterQuoteCard";
 import { CustomerVehicleLedgerPane } from "./components/CustomerVehicleLedgerPane";
@@ -1174,8 +1175,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     if (!snapshotGridRef.current) return;
     try {
       setCopyingSnapshot(true);
+      await waitForSnapshotAssets(snapshotGridRef.current);
       const blob = await toBlob(snapshotGridRef.current, {
-        pixelRatio: 2,
+        pixelRatio: 3,
         backgroundColor: "#ffffff",
         cacheBust: true,
       });
@@ -1194,8 +1196,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     if (!snapshotGridRef.current) return;
     try {
       setDownloadingSnapshot(true);
+      await waitForSnapshotAssets(snapshotGridRef.current);
       const dataUrl = await toPng(snapshotGridRef.current, {
-        pixelRatio: 2,
+        pixelRatio: 3,
         backgroundColor: "#ffffff",
         cacheBust: true,
       });
