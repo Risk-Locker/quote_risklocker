@@ -67,6 +67,20 @@ def render_design2_icon_svg(icon_hint: str, size: int = 38) -> str:
             f'<circle cx="13.5" cy="31.8" r="1.2" fill="{_BLK}"/>'
             f'<circle cx="35.5" cy="31.8" r="1.2" fill="{_BLK}"/>'
         ),
+        # 02b: Unique Unlimited Towing — charcoal hook-and-boom recovery truck + Risklocker red infinity loop
+        "unlimited_towing": (
+            f'<path d="M17.2 10C14.2 10 12 12 12 14.6C12 17.2 14.2 19.2 17.2 19.2C20.2 19.2 22.3 16.4 24 14.6C25.7 12.8 27.8 10 30.8 10C33.8 10 36 12 36 14.6C36 17.2 33.8 19.2 30.8 19.2C27.8 19.2 25.7 16.4 24 14.6C22.3 12.8 20.2 10 17.2 10Z" fill="none" stroke="{_RED}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M8 31H24V34.5H8Z" fill="{_BLK}"/>'
+            f'<path d="M24 23.5H33.5L39 28.5V34.5H24V23.5Z" fill="{_BLK}"/>'
+            f'<path d="M26.5 25.6H32.2L35.8 28.8H26.5V25.6Z" fill="#FFFFFF"/>'
+            f'<path d="M24 26L14 21.5L11.5 24.5" fill="none" stroke="{_BLK}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M11.5 24.5V27.6C11.5 28.8 10.4 29.5 9.2 29.2" fill="none" stroke="{_RED}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<circle cx="14.5" cy="35.2" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<circle cx="33.5" cy="35.2" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<circle cx="14.5" cy="35.2" r="1.2" fill="{_BLK}"/>'
+            f'<circle cx="33.5" cy="35.2" r="1.2" fill="{_BLK}"/>'
+            f'<line x1="6" y1="39.5" x2="42" y2="39.5" stroke="{_BLK}" stroke-width="1.8" stroke-linecap="round"/>'
+        ),
         # 03: Two front-view cars colliding + red jagged starburst
         "llop": (
             f'<path d="M5 24L8.5 17H21.5L24.5 24V31H5V24Z" fill="{_BLK}"/>'

@@ -98,9 +98,35 @@ export function UnderwriterQuoteCard({
       entry.special_perils.trim().toLowerCase()
     )
   );
+  const renderReviewFlag = (fieldKey: string, label: string) => {
+    const reason = entry.review_flags?.[fieldKey];
+    if (!reason) return null;
+    return (
+      <span
+        className="inline-flex items-center gap-0.5 rounded bg-amber-50 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-800 normal-case"
+        title={reason}
+      >
+        <span>⚠</span>
+        {onPatchEntryField ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPatchEntryField(entry, { confirm_review_fields: [fieldKey] });
+            }}
+            className="rounded bg-emerald-600 text-white px-1 hover:bg-emerald-700 cursor-pointer"
+            title={`Confirm ${label}`}
+          >
+            ✓
+          </button>
+        ) : null}
+      </span>
+    );
+  };
 
   return (
     <div
+      id={`comparison-entry-${entry.id}`}
       key={entry.id}
       className={`w-[275px] shrink-0 rounded-[var(--rl-radius)] bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${isViewingPdf
           ? "border-2 border-[#1b1717] ring-4 ring-[#1b1717]/15 shadow-xl scale-[1.01]"
@@ -130,9 +156,12 @@ export function UnderwriterQuoteCard({
         <div className={`p-4 border-b ${isWinner ? "border-[#e5e5ea] bg-[#f5f5f7]/60" : "border-[#e5e5ea]"}`}>
           {/* Row 1: Company Name + Visibility Toggle */}
           <div className="flex items-center justify-between gap-2 h-7">
-            <h3 className="font-bold text-sm text-[#1b1717] uppercase tracking-tight truncate whitespace-nowrap" title={entry.company_name}>
-              {formatShortInsurerName(entry.company_name)}
-            </h3>
+            <div className="flex items-center gap-1 min-w-0">
+              <h3 className="font-bold text-sm text-[#1b1717] uppercase tracking-tight truncate whitespace-nowrap" title={entry.company_name}>
+                {formatShortInsurerName(entry.company_name)}
+              </h3>
+              {renderReviewFlag("company_name", "Insurer Name")}
+            </div>
             <div className="flex items-center gap-1 shrink-0">
               {isViewingPdf && (
                 <span className="rounded bg-[#1b1717] text-white px-1.5 py-0.2 text-[9px] font-bold">
@@ -326,8 +355,9 @@ export function UnderwriterQuoteCard({
         {/* Numeric Figures Card with Exact Locked Heights */}
         <div className="p-4 space-y-3.5 border-b border-[#e5e5ea]">
           <div className="h-[48px] flex flex-col justify-center">
-            <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
-              Sum Insured
+            <span className="text-[11px] uppercase font-bold text-[#6e6e73] flex items-center gap-1 mb-0.5">
+              <span>Sum Insured</span>
+              {renderReviewFlag("sum_insured", "Sum Insured")}
             </span>
             <div className="flex items-baseline gap-1.5">
               {onPatchEntryField ? (
@@ -354,8 +384,9 @@ export function UnderwriterQuoteCard({
           </div>
 
           <div className="min-h-[44px] flex flex-col justify-center">
-            <span className="text-[11px] uppercase font-bold text-[#6e6e73] block mb-0.5">
-              Motor Premium
+            <span className="text-[11px] uppercase font-bold text-[#6e6e73] flex items-center gap-1 mb-0.5">
+              <span>Motor Premium</span>
+              {renderReviewFlag("motor_premium", "Motor Premium")}
             </span>
             {(() => {
               const hasMotorDisc =
@@ -510,7 +541,10 @@ export function UnderwriterQuoteCard({
         <div className="p-4 space-y-2 text-xs divide-y divide-[#e5e5ea]">
           {/* Towing Limit */}
           <div className="h-8 flex items-center justify-between pt-1">
-            <span className="text-[#6e6e73]">Towing:</span>
+            <span className="text-[#6e6e73] flex items-center gap-1">
+              <span>Towing:</span>
+              {renderReviewFlag("towing_limit", "Towing Limit")}
+            </span>
             {onPatchEntryField ? (
               <InlineComparisonFieldEditor
                 field="towing_limit"
@@ -560,6 +594,7 @@ export function UnderwriterQuoteCard({
           <div className="h-8 flex items-center justify-between pt-2">
             <div className="flex items-center gap-1 text-[#6e6e73]">
               <span>Betterment:</span>
+              {renderReviewFlag("waiver_betterment", "Betterment")}
             </div>
             {onPatchEntryField ? (
               <InlineComparisonFieldEditor
@@ -598,7 +633,10 @@ export function UnderwriterQuoteCard({
 
           {/* Excess */}
           <div className="h-8 flex items-center justify-between pt-2">
-            <span className="text-[#6e6e73]">Excess:</span>
+            <span className="text-[#6e6e73] flex items-center gap-1">
+              <span>Excess:</span>
+              {renderReviewFlag("excess", "Excess")}
+            </span>
             {onPatchEntryField ? (
               <InlineComparisonFieldEditor
                 field="excess"
@@ -634,7 +672,10 @@ export function UnderwriterQuoteCard({
 
           {/* Windscreen (Target vs Sourced) */}
           <div className="min-h-[38px] flex items-center justify-between pt-2">
-            <span className="text-[#6e6e73]">Windscreen:</span>
+            <span className="text-[#6e6e73] flex items-center gap-1">
+              <span>Windscreen:</span>
+              {renderReviewFlag("windscreen_sum_insured", "Windscreen")}
+            </span>
             <div className="text-right">
               {onPatchEntryField ? (
                 <InlineComparisonFieldEditor
@@ -674,7 +715,10 @@ export function UnderwriterQuoteCard({
 
           {/* Special Perils / Flood */}
           <div className="h-8 flex items-center justify-between pt-2">
-            <span className="text-[#6e6e73]">Special Perils:</span>
+            <span className="text-[#6e6e73] flex items-center gap-1">
+              <span>Special Perils:</span>
+              {renderReviewFlag("special_perils", "Special Perils")}
+            </span>
             {onPatchEntryField ? (
               <InlineComparisonFieldEditor
                 field="special_perils"
@@ -746,7 +790,10 @@ export function UnderwriterQuoteCard({
 
           {onPatchEntryField && (
             <div className="pt-2 flex items-center justify-between">
-              <span className="text-[10px] text-[#6e6e73] font-semibold">Extra Add-ons:</span>
+              <span className="text-[10px] text-[#6e6e73] font-semibold flex items-center gap-1">
+                <span>Extra Add-ons:</span>
+                {renderReviewFlag("extra_addons", "Extra Add-ons")}
+              </span>
               <DynamicAddonsControl
                 currentExtraAddons={entry.extra_addons}
                 catalog={dynamicAddonCatalog}

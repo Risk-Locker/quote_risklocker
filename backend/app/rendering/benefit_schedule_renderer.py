@@ -252,6 +252,8 @@ def _extract_field(fields: dict[str, Any], keys: tuple[str, ...], fallback: str 
 
 def _format_price_badge(item: dict[str, Any]) -> tuple[str, str]:
     """Returns (badge_text, css_style_suffix)."""
+    if item.get("cost_status") == "bundle_included" or item.get("is_bundle_effect"):
+        return ("", "")
     if item.get("cost_status") == "included" or item.get("is_pure_default"):
         return ("INCLUDED FOC", "background:#ECFDF5;color:#15803D;border:1px solid #A7F3D0;")
     price = item.get("price") or item.get("optional_price")
@@ -450,7 +452,7 @@ def render_design2_schedule_pages(
                 </div>
             </div>
             <div style="flex-shrink:0;">
-                <span style="font-size:7.6px;font-weight:800;padding:2px 6px;border-radius:4px;white-space:nowrap;{row['badge_css']}">{escape(row['badge_text'])}</span>
+                {f'<span style="font-size:7.6px;font-weight:800;padding:2px 6px;border-radius:4px;white-space:nowrap;{row["badge_css"]}">{escape(row["badge_text"])}</span>' if row.get("badge_text") else ""}
             </div>
         </div>
         """

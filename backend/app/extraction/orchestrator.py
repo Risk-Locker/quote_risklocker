@@ -152,12 +152,15 @@ class ExtractionOrchestrator:
                     candidates["tier_name"] = [pkg_candidate]
 
                 # Map Gemini detected benefits
+                from app.services.bundle_plan_matcher import extract_plan_tier_token
+
                 gemini_benefits = gemini_res.get("detected_benefits") or []
                 for b_item in gemini_benefits:
                     if isinstance(b_item, dict):
                         b_label = str(b_item.get("label") or "").strip()
                         b_val = str(b_item.get("value") or "").strip()
                         b_key = str(b_item.get("concept_key") or "").strip()
+                        b_plan = str(b_item.get("plan_tier") or "").strip()
                         cov_limit = str(b_item.get("coverage_limit") or "").strip()
                         cost = str(b_item.get("premium_cost") or "").strip()
                         is_optional = bool(b_item.get("is_optional_cover", False))
@@ -166,12 +169,14 @@ class ExtractionOrchestrator:
                         b_label = b_item.strip()
                         b_val = ""
                         b_key = ""
+                        b_plan = ""
                         cov_limit = ""
                         cost = ""
                         is_optional = False
                         b_raw = b_label
                     else:
                         continue
+                    inferred_plan = b_plan or extract_plan_tier_token(f"{b_label} {b_val} {b_raw}") or ""
 
                     if b_label:
                         if is_spurious_benefit_line(b_label) or is_spurious_benefit_line(b_raw):
@@ -256,6 +261,14 @@ class ExtractionOrchestrator:
                                     "display_text": cost,
                                 }
 
+                        elif inferred_plan:
+                            typed_val = {
+                                "type": "custom",
+                                "value": inferred_plan,
+                                "plan_key": inferred_plan.lower().replace(" ", "_"),
+                                "display_text": inferred_plan,
+                            }
+
                         benefit_lines.append({
                             "line_id": f"gemini_{len(benefit_lines) + 1}",
                             "raw_label": b_label,
@@ -274,6 +287,7 @@ class ExtractionOrchestrator:
                             "is_detected": True,
                             "coverage_limit": final_cov_limit,
                             "premium_cost": cost,
+                            "plan_tier": inferred_plan,
                             "is_optional_cover": is_optional,
                             "extracted_value": typed_val,
                             "candidate_mappings": [
@@ -288,6 +302,7 @@ class ExtractionOrchestrator:
                                     "shaped_description": f"{b_label} ({final_cov_limit})" if final_cov_limit else b_label,
                                     "coverage_limit": final_cov_limit,
                                     "premium_cost": cost,
+                                    "plan_tier": inferred_plan,
                                     "is_detected": True,
                                 }
                             ] if concept_id or c_key else [],

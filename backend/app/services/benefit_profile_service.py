@@ -16,6 +16,7 @@ from app.core.cache import _memory_cache, invalidate_cache
 from app.core.errors import AppError
 from app.domain.benefits import BenefitValue
 from app.models.enums import Role
+from sqlalchemy.orm import selectinload
 from app.models.tables import (
     AuditEvent,
     BenefitAlias,
@@ -29,6 +30,9 @@ from app.models.tables import (
     BusinessAsset,
     CatalogOffering,
     CompanyAlias,
+    CompanyBenefitBundle,
+    CompanyBenefitBundleEffect,
+    CompanyBenefitBundleTier,
     CompanyBenefitCondition,
     CompanyBenefitConfig,
     BenefitProfile,
@@ -135,6 +139,12 @@ def list_benefit_profiles(db, user) -> list[dict]:
             .group_by(CompanyBenefitCondition.profile_id)
         ).all()
     )
+    bundles_counts = dict(
+        db.execute(
+            select(CompanyBenefitBundle.profile_id, func.count(CompanyBenefitBundle.id))
+            .group_by(CompanyBenefitBundle.profile_id)
+        ).all()
+    )
 
     result = [
         {
@@ -146,6 +156,7 @@ def list_benefit_profiles(db, user) -> list[dict]:
             "notes": p.notes,
             "configs_count": configs_counts.get(p.id, 0),
             "conditions_count": conditions_counts.get(p.id, 0),
+            "bundles_count": bundles_counts.get(p.id, 0),
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         }
@@ -284,11 +295,72 @@ def clone_benefit_profile(db, user, profile_id: str, payload: dict) -> dict:
             )
         )
 
+    # Deep copy ALL bundled benefits (bundles -> tiers -> effects) across all companies
+    parent_bundles = list(
+        db.scalars(
+            select(CompanyBenefitBundle)
+            .where(CompanyBenefitBundle.profile_id == parent.id)
+            .options(selectinload(CompanyBenefitBundle.tiers).selectinload(CompanyBenefitBundleTier.effects))
+        ).all()
+    )
+    for b in parent_bundles:
+        new_bundle = CompanyBenefitBundle(
+            id=new_id(),
+            company_id=b.company_id,
+            profile_id=new_profile.id,
+            bundle_key=b.bundle_key,
+            name=b.name,
+            primary_concept_id=b.primary_concept_id,
+            trigger_concept_ids=list(b.trigger_concept_ids or []),
+            match_aliases=list(b.match_aliases or []),
+            catalog_scope=b.catalog_scope,
+            force_box2=b.force_box2,
+            has_plan_tiers=b.has_plan_tiers,
+            is_active=b.is_active,
+            sort_order=b.sort_order,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        db.add(new_bundle)
+        db.flush()
+        for t in list(b.tiers or []):
+            new_tier = CompanyBenefitBundleTier(
+                id=new_id(),
+                bundle_id=new_bundle.id,
+                tier_key=t.tier_key,
+                label=t.label,
+                match_tokens=list(t.match_tokens or []),
+                is_default_fallback=t.is_default_fallback,
+                sort_order=t.sort_order,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            db.add(new_tier)
+            db.flush()
+            for eff in list(t.effects or []):
+                db.add(
+                    CompanyBenefitBundleEffect(
+                        id=new_id(),
+                        tier_id=new_tier.id,
+                        target_concept_id=eff.target_concept_id,
+                        effect_type=eff.effect_type,
+                        display_title=eff.display_title,
+                        display_value=eff.display_value,
+                        display_description=eff.display_description,
+                        icon_hint=eff.icon_hint,
+                        comparison_value=eff.comparison_value,
+                        sort_order=eff.sort_order,
+                        created_at=utcnow(),
+                        updated_at=utcnow(),
+                    )
+                )
+
     _audit(db, user, "business.benefit_profile.clone", "benefit_profile", new_profile.id, {
         "parent_profile_id": parent.id,
         "name": new_profile.name,
         "configs_cloned": len(parent_configs),
         "conditions_cloned": len(parent_conditions),
+        "bundles_cloned": len(parent_bundles),
     })
     db.commit()
     invalidate_cache("business:benefit_profiles")
@@ -439,6 +511,7 @@ def delete_benefit_profile(db, user, profile_id: str) -> None:
     if profile.is_active:
         raise AppError("Cannot delete an active profile. Switch to another active profile first.", 400)
 
+    db.execute(delete(CompanyBenefitBundle).where(CompanyBenefitBundle.profile_id == profile_id))
     db.execute(delete(CompanyBenefitCondition).where(CompanyBenefitCondition.profile_id == profile_id))
     db.execute(delete(CompanyBenefitConfig).where(CompanyBenefitConfig.profile_id == profile_id))
     db.delete(profile)

@@ -268,8 +268,19 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
 
     company_conditions = []
     company_configs = []
+    company_bundles = []
+    catalog_name = None
+    if getattr(draft, "catalog_revision_id", None):
+        try:
+            cat_rev_obj = db.get(BenefitCatalogRevision, draft.catalog_revision_id)
+            if cat_rev_obj and getattr(cat_rev_obj, "catalog_id", None):
+                cat_obj = db.get(BenefitCatalog, cat_rev_obj.catalog_id)
+                catalog_name = getattr(cat_obj, "name", None) if cat_obj else None
+        except Exception:
+            catalog_name = None
     if getattr(draft, "company_id", None):
         from app.services.business_setup_service import get_active_benefit_profile
+        from app.services.company_benefit_bundle_service import load_active_company_bundles
         try:
             active_prof = get_active_benefit_profile(db)
             if active_prof:
@@ -286,6 +297,7 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
                         CompanyBenefitConfig.profile_id == active_prof.id,
                     )
                 ).all())
+                company_bundles = load_active_company_bundles(db, draft.company_id, profile_id=active_prof.id)
         except Exception:
             pass
 
@@ -300,6 +312,7 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
         selections=valid_selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,
         plans=plans, eval_context=eval_context, insurer_catalog=insurer_catalog,
         company_conditions=company_conditions, company_configs=company_configs,
+        company_bundles=company_bundles, catalog_name=catalog_name,
         visual_profile_assets=visual_profile_assets,
     )
 

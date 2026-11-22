@@ -357,7 +357,14 @@ def _dynamic_benefit_grid(
         # --- Cost / price badge ---
         price_badge = ""
         price = card.get("price") or card.get("optional_price")
-        if is_purchased_extra and kind != "available_addons" and not card.get("is_pure_default") and card.get("_showCost", True):
+        if (
+            is_purchased_extra
+            and kind != "available_addons"
+            and not card.get("is_pure_default")
+            and not card.get("is_bundle_effect")
+            and card.get("cost_status") != "bundle_included"
+            and card.get("_showCost", True)
+        ):
             p_val = None
             if price:
                 p_val = (price.get("amount") if price.get("amount") is not None else price.get("value")) if isinstance(price, dict) else price

@@ -141,6 +141,7 @@ export type BenefitProfile = {
   notes?: string | null;
   configs_count?: number;
   conditions_count?: number;
+  bundles_count?: number;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -174,6 +175,47 @@ export type CompanyBenefitCondition = {
   sort_order?: number;
   trigger_concept?: ConceptSummary | null;
   target_concept?: ConceptSummary | null;
+};
+
+export type CompanyBenefitBundleEffect = {
+  id?: string;
+  tier_id?: string;
+  target_concept_id: string;
+  effect_type: "upgrade_to_box2" | "add_to_box2" | "hide_from_box1";
+  display_title?: string | null;
+  display_value?: string | null;
+  display_description?: string | null;
+  icon_hint?: string | null;
+  comparison_value?: string | null;
+  sort_order?: number;
+};
+
+export type CompanyBenefitBundleTier = {
+  id?: string;
+  bundle_id?: string;
+  tier_key?: string;
+  label: string;
+  match_tokens: string[];
+  is_default_fallback: boolean;
+  sort_order?: number;
+  effects: CompanyBenefitBundleEffect[];
+};
+
+export type CompanyBenefitBundle = {
+  id: string;
+  company_id: string;
+  profile_id?: string | null;
+  bundle_key: string;
+  name: string;
+  primary_concept_id: string;
+  trigger_concept_ids: string[];
+  match_aliases: string[];
+  catalog_scope?: string | null;
+  force_box2: boolean;
+  has_plan_tiers: boolean;
+  is_active: boolean;
+  sort_order?: number;
+  tiers: CompanyBenefitBundleTier[];
 };
 
 export type CompanyWorkspaceData = {

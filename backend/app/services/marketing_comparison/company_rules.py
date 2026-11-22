@@ -133,6 +133,8 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
             "base_limit": "100 km",
             "lite_limit": "50 km",
             "premier_limit": "365 km",
+            "sdpa_triggers": ["private car 365", "pc 365", "pc365", "365 plan"],
+            "sdpa_plan1_limit": "600 km",
             "unlimited_triggers": ["amdrive plus"],
         },
     },

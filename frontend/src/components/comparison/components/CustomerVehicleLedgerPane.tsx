@@ -701,8 +701,13 @@ export function CustomerVehicleLedgerPane({
             </div>
           ) : (
             <div className="space-y-1.5">
-              <div className="flex justify-between">
-                <span className="text-[#6e6e73]">Registration No:</span>
+              <div className="flex justify-between items-center gap-1">
+                <span className="text-[#6e6e73] flex items-center gap-1">
+                  <span>Registration No:</span>
+                  {tenure.review_flags?.vehicle_no && (
+                    <span className="text-[10px] text-amber-700 font-bold" title={tenure.review_flags.vehicle_no}>⚠</span>
+                  )}
+                </span>
                 {tenure.is_plate_undetected || tenure.vehicle_no === "N/A" ? (
                   <span className="font-mono font-bold text-[11px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                     N/A (Undetected)
@@ -711,8 +716,13 @@ export function CustomerVehicleLedgerPane({
                   <span className="font-mono font-bold text-[#1b1717]">{tenure.vehicle_no}</span>
                 )}
               </div>
-              <div className="flex justify-between">
-                <span className="text-[#6e6e73]">Brand &amp; Model:</span>
+              <div className="flex justify-between items-center gap-1">
+                <span className="text-[#6e6e73] flex items-center gap-1">
+                  <span>Brand &amp; Model:</span>
+                  {tenure.review_flags?.vehicle_model && (
+                    <span className="text-[10px] text-amber-700 font-bold" title={tenure.review_flags.vehicle_model}>⚠</span>
+                  )}
+                </span>
                 <span className="font-semibold text-[#1b1717]">
                   {(() => {
                     const brand = (tenure.car_brand || "").trim();
@@ -750,15 +760,25 @@ export function CustomerVehicleLedgerPane({
                   <span className="font-semibold text-[#1b1717]">{tenure.coverage_type}</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span className="text-[#6e6e73]">Year of Make:</span>
+              <div className="flex justify-between items-center gap-1">
+                <span className="text-[#6e6e73] flex items-center gap-1">
+                  <span>Year of Make:</span>
+                  {tenure.review_flags?.manufacture_year && (
+                    <span className="text-[10px] text-amber-700 font-bold" title={tenure.review_flags.manufacture_year}>⚠</span>
+                  )}
+                </span>
                 <span className="font-semibold text-[#1b1717]">
                   {tenure.manufacture_year || "Not Recorded"}
                   {vehicleAge ? ` (${vehicleAge} yrs)` : ""}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-[#6e6e73]">Engine Capacity:</span>
+              <div className="flex justify-between items-center gap-1">
+                <span className="text-[#6e6e73] flex items-center gap-1">
+                  <span>Engine Capacity:</span>
+                  {tenure.review_flags?.engine_cc && (
+                    <span className="text-[10px] text-amber-700 font-bold" title={tenure.review_flags.engine_cc}>⚠</span>
+                  )}
+                </span>
                 <span className="font-semibold text-[#1b1717]">{tenure.engine_cc}</span>
               </div>
               {tenure.engine_no && (

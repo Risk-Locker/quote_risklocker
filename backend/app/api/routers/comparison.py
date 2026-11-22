@@ -18,7 +18,7 @@ from app.core.config import Settings
 from app.db.session import get_db
 from app.services.realtime_hub import publish_realtime_update
 from app.models.enums import Role
-from app.models.tables import InsuranceCompany, InsuranceTenure, Session as SessionModel, TenureComparisonEntry, UploadedFile, User, new_id
+from app.models.tables import DraftBenefitSelection, InsuranceCompany, InsuranceTenure, Session as SessionModel, TenureComparisonEntry, UploadedFile, User, new_id
 from app.services.marketing_comparison_service import (
     delete_comparison_entry,
     format_whatsapp_teaser,
@@ -746,6 +746,7 @@ class UpdateComparisonEntryPatch(BaseModel):
     notes: str | None = None
     expected_version: int | None = None
     clear_override_field: str | None = None
+    confirm_review_fields: list[str] | None = None
 
 
 @router.patch("/{tenure_id}/entries/{entry_id}")
@@ -760,7 +761,9 @@ def patch_comparison_entry(
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     from sqlalchemy.orm.attributes import flag_modified
     from app.services.marketing_comparison.materialize import (
+        clear_entry_review_flags,
         get_entry_overrides,
+        get_entry_review_flags,
         record_manual_overrides,
     )
     from app.services.marketing_comparison_service import (
@@ -1188,6 +1191,51 @@ def patch_comparison_entry(
         )
         tenure.won_premium = float(disc_bd.net_total_payable(eff_rt, eff_rf))
 
+    # Handle explicit user confirmation of review/uncertain flags
+    confirmed_review_fields: list[str] = []
+    if getattr(payload, "confirm_review_fields", None):
+        confirmed_review_fields = [str(fk).strip() for fk in (payload.confirm_review_fields or []) if str(fk).strip()]
+        if confirmed_review_fields:
+            clear_entry_review_flags(entry, confirmed_review_fields)
+            if entry.session_id:
+                s_conf = db.get(SessionModel, entry.session_id)
+                if s_conf and s_conf.draft:
+                    if isinstance(s_conf.draft.fields, dict):
+                        conf_map = {
+                            "company_name": ("insurance_company", "company_name"),
+                            "sum_insured": ("sum_insured", "coverage_amount", "market_value", "agreed_value"),
+                            "motor_premium": ("motor_premium", "premium", "premium_due", "basic_premium", "basic_contribution"),
+                            "agreed_value": ("valuation_type",),
+                            "valuation_type": ("valuation_type",),
+                            "towing_limit": ("towing", "towing_limit"),
+                            "special_perils": ("special_perils",),
+                            "llp_llop": ("llp_llop",),
+                            "waiver_betterment": ("waiver_of_betterment",),
+                            "betterment_rate": ("betterment_rate",),
+                            "excess": ("excess", "excess_amount"),
+                            "windscreen_sum_insured": ("windscreen_sum_insured", "windscreen"),
+                        }
+                        f_conf = dict(s_conf.draft.fields)
+                        conf_touched = False
+                        for cf in confirmed_review_fields:
+                            for dk in conf_map.get(cf, (cf,)):
+                                if isinstance(f_conf.get(dk), dict) and f_conf[dk].get("status") == "check_needed":
+                                    f_conf[dk] = {**f_conf[dk], "status": "ready", "message": ""}
+                                    conf_touched = True
+                        if conf_touched:
+                            s_conf.draft.fields = f_conf
+                            flag_modified(s_conf.draft, "fields")
+                    if "towing_limit" in confirmed_review_fields or "extra_addons" in confirmed_review_fields:
+                        for sel_conf in db.scalars(
+                            select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == s_conf.draft_id)
+                        ).all():
+                            ev_conf = dict(sel_conf.evidence_snapshot or {}) if isinstance(sel_conf.evidence_snapshot, dict) else {}
+                            if ev_conf.get("plan_tier_uncertain"):
+                                ev_conf["plan_tier_uncertain"] = False
+                                ev_conf.pop("needs_review_reason", None)
+                                sel_conf.evidence_snapshot = ev_conf
+                                flag_modified(sel_conf, "evidence_snapshot")
+
     db.commit()
 
     # Re-rank after modification
@@ -1225,6 +1273,7 @@ def patch_comparison_entry(
         "special_perils": entry.special_perils,
         "llp_llop": entry.llp_llop,
         "extra_addons": getattr(entry, "extra_addons", None) or {},
+        "review_flags": get_entry_review_flags(entry),
         "betterment_is_auto": not any(
             k in get_entry_overrides(entry) for k in ("waiver_betterment", "betterment_rate")
         ),

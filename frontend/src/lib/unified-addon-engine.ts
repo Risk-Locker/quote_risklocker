@@ -578,9 +578,12 @@ function matchCatalogItem(item: any) {
 }
 
 function inferIconHint(item: any, matchedCat: any): string {
-  if (item?.icon_hint && item.icon_hint !== "generic") return String(item.icon_hint);
-  if (matchedCat?.icon_hint) return String(matchedCat.icon_hint);
   const txt = `${item?.id || ""} ${item?.concept_key || ""} ${item?.title || item?.label || ""}`.toLowerCase();
+  if (item?.icon_hint && item.icon_hint !== "generic") return String(item.icon_hint);
+  if (txt.includes("towing") && txt.includes("unlimited") && !txt.includes("battery") && !txt.includes("international")) {
+    return "unlimited_towing";
+  }
+  if (matchedCat?.icon_hint) return String(matchedCat.icon_hint);
   if (txt.includes("ncd") || txt.includes("cashback")) return "ncd";
   if (txt.includes("detail") || txt.includes("clean") || txt.includes("respray") || txt.includes("paint")) return "respray";
   if (txt.includes("out of pocket") || txt.includes("cart") || txt.includes("allowance") || txt.includes("courtesy")) return "cart";
@@ -628,6 +631,8 @@ export function isBenefitSelected(
   if (sourceKind === "available") {
     return false;
   }
+
+  if (item?.promoted_to_addon || item?.is_bundle_effect || item?.cost_status === "bundle_included") return true;
 
   if (item?.is_extra || item?.cost_status === "paid" || hasPositivePrice(item)) return true;
 
@@ -939,7 +944,15 @@ export function extractFreeCoverageItems(
   };
 
   for (const raw of activeBenefits || []) {
-    if (raw?.promoted_to_addon || raw?.is_extra || raw?.cost_status === "paid" || hasPositivePrice(raw)) continue;
+    if (
+      raw?.promoted_to_addon ||
+      raw?.is_bundle ||
+      raw?.is_bundle_effect ||
+      raw?.cost_status === "bundle_included" ||
+      raw?.is_extra ||
+      raw?.cost_status === "paid" ||
+      hasPositivePrice(raw)
+    ) continue;
 
     const isHideCov = isCoverageHiddenOrCleared(raw);
     const hasManualValOvr = hasManualValueOverride(raw);
@@ -1138,11 +1151,14 @@ export function buildUnifiedMatrixCards(
       formattedVal = "";
     }
 
-    const costStatus = sel
-      ? String(item.cost_status || "paid")
-      : item.cost_status === "included"
-        ? "included"
-        : "optional";
+    const isBundleEff = Boolean(item?.is_bundle_effect || item?.cost_status === "bundle_included");
+    const costStatus = isBundleEff
+      ? "bundle_included"
+      : sel
+        ? String(item.cost_status || "paid")
+        : item.cost_status === "included"
+          ? "included"
+          : "optional";
     const assetId = item.asset_id || item.default_asset_id || matched?.default_asset_id;
     return {
       id: catId,
@@ -1153,14 +1169,18 @@ export function buildUnifiedMatrixCards(
       icon_hint: inferIconHint(item, matched),
       is_selected: sel,
       cost_status: costStatus,
-      price: item.price ?? item.optional_price,
+      is_bundle_effect: isBundleEff,
+      price: isBundleEff ? undefined : (item.price ?? item.optional_price),
       concept_key: item.concept_key || catId,
       asset_id: assetId || undefined,
     };
   };
 
   const pushItem = (item: any, sourceKind: "active" | "available") => {
-    const matched = matchCatalogItem(item);
+    let matched = matchCatalogItem(item);
+    if (matched && Boolean(item?.is_bundle) && !Boolean(item?.is_bundle_effect)) {
+      matched = null;
+    }
     const sel = isBenefitSelected(item, selSet, sourceKind, matched?.id);
 
     // Keep non-matrix unselected basic perks strictly inside "Free Added Coverage"
@@ -1177,6 +1197,11 @@ export function buildUnifiedMatrixCards(
       if (!existing) {
         canonicalOverrides[catId] = nextCard;
         orderedActiveIds.push(catId);
+      } else if (
+        Boolean(item?.is_bundle_effect || item?.cost_status === "bundle_included") &&
+        !Boolean(existing.is_bundle_effect)
+      ) {
+        canonicalOverrides[catId] = { ...nextCard, is_selected: true };
       } else {
         if (!existing.value && nextCard.value) existing.value = nextCard.value;
         if (!existing.price && nextCard.price) existing.price = nextCard.price;

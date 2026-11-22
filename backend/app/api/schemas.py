@@ -385,6 +385,46 @@ class CompanyBenefitConditionSaveRequest(StrictRequest):
     is_active: bool = True
 
 
+class CompanyBenefitBundleEffectRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
+    id: str | None = None
+    target_concept_id: str
+    effect_type: str = Field(default="upgrade_to_box2", pattern=r"^(upgrade_to_box2|add_to_box2|hide_from_box1)$")
+    display_title: str | None = Field(default=None, max_length=255)
+    display_value: str | None = Field(default=None, max_length=120)
+    display_description: str | None = Field(default=None, max_length=1000)
+    icon_hint: str | None = Field(default=None, max_length=80)
+    comparison_value: str | None = Field(default=None, max_length=120)
+    sort_order: int = Field(default=0, ge=0)
+
+
+class CompanyBenefitBundleTierRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
+    id: str | None = None
+    tier_key: str | None = Field(default=None, max_length=80)
+    label: str = Field(min_length=1, max_length=120)
+    match_tokens: list[str] = Field(default_factory=list, max_length=60)
+    is_default_fallback: bool = False
+    sort_order: int = Field(default=0, ge=0)
+    effects: list[CompanyBenefitBundleEffectRequest] = Field(default_factory=list, max_length=50)
+
+
+class CompanyBenefitBundleSaveRequest(StrictRequest):
+    model_config = ConfigDict(extra="ignore")
+    id: str | None = None
+    bundle_key: str | None = Field(default=None, max_length=120)
+    name: str = Field(min_length=1, max_length=255)
+    primary_concept_id: str
+    trigger_concept_ids: list[str] = Field(default_factory=list, max_length=30)
+    match_aliases: list[str] = Field(default_factory=list, max_length=60)
+    catalog_scope: str | None = Field(default=None, max_length=160)
+    force_box2: bool = True
+    has_plan_tiers: bool = False
+    is_active: bool = True
+    sort_order: int = Field(default=0, ge=0)
+    tiers: list[CompanyBenefitBundleTierRequest] = Field(min_length=1, max_length=25)
+
+
 class CatalogOfferingSaveRequest(StrictRequest):
     model_config = ConfigDict(extra="ignore")
     id: str | None = None

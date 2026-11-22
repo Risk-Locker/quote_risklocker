@@ -211,6 +211,7 @@ export interface PolicyFieldsCardProps {
     tierId?: string | null,
     options?: { stageOnly?: boolean }
   ) => void;
+  onConfirmField?: (fieldName: string, value: string) => void;
 }
 
 export function PolicyFieldsCard({
@@ -239,6 +240,7 @@ export function PolicyFieldsCard({
   companyWorkspace,
   categorizedProducts,
   pinCatalog,
+  onConfirmField,
 }: PolicyFieldsCardProps) {
   // Streamlined Canonical Layout: 3 focused sections without technical clutter
 
@@ -274,11 +276,34 @@ export function PolicyFieldsCard({
     const fieldModified = isFieldModified(field.name);
 
     return (
-      <label key={field.name} className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]">
+      <label
+        key={field.name}
+        id={`workspace-field-${field.name}`}
+        className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]"
+      >
         <span className="flex items-center justify-between gap-1">
           <span className="truncate">{fieldLabel}</span>
           <div className="flex items-center gap-1.5 shrink-0">
-            {needsCheck ? <span className="text-[10px] text-amber-700 font-bold">Check value</span> : null}
+            {needsCheck ? (
+              <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                <span>⚠ Verify</span>
+                {onConfirmField ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onConfirmField(field.name, formValues[field.name] ?? "");
+                    }}
+                    className="inline-flex items-center gap-0.5 rounded bg-emerald-600 px-1 py-0.5 text-[9px] font-bold text-white hover:bg-emerald-700 cursor-pointer"
+                    title="Confirm extracted value"
+                  >
+                    <Check size={9} weight="bold" />
+                    <span>OK</span>
+                  </button>
+                ) : null}
+              </span>
+            ) : null}
             {field.name === "roadtax" ? (
               <label className="flex items-center gap-1 text-[10px] text-[var(--rl-text-muted)] cursor-pointer">
                 <input

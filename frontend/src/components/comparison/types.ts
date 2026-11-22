@@ -45,6 +45,7 @@ export interface TenureSpec {
   winning_file_name?: string | null;
   policy_number?: string | null;
   covernote_session_id?: string | null;
+  review_flags?: Record<string, string>;
 }
 
 export interface DynamicAddonDefinition {
@@ -108,6 +109,7 @@ export interface ComparisonEntry {
   is_recommended: boolean;
   is_manual: boolean;
   manual_overrides?: string[];
+  review_flags?: Record<string, string>;
   is_hidden?: boolean;
   manual_rank?: number | null;
   sort_order: number;

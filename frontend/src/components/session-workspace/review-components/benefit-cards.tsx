@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { ArrowCounterClockwise, ArrowLeft, ArrowRight, Check, Eye, EyeSlash, Lock, PencilSimple, Sparkle, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Design2BenefitIconSvg } from "@/components/template-canvas/design2-icons";
 import { fileUrl } from "@/lib/api";
 import type { BenefitCardSummary } from "../types";
 
@@ -1444,9 +1445,13 @@ export function MatrixAddonCard({
           #{serialStr}
         </span>
         <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--rl-border)] bg-white p-1">
-          {assetUrl ? (
+          {card.icon_hint === "unlimited_towing" ? (
+            <Design2BenefitIconSvg hint={card.icon_hint} size={36} />
+          ) : assetUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={fileUrl(assetUrl)} alt={card.label} className="size-full object-contain" />
+          ) : card.icon_hint ? (
+            <Design2BenefitIconSvg hint={card.icon_hint} size={36} />
           ) : (
             <Sparkle size={22} className={isSelected ? "text-emerald-600" : "text-[var(--rl-text-muted)]"} />
           )}
@@ -1454,7 +1459,7 @@ export function MatrixAddonCard({
       </div>
 
       {/* 3. Middle Body: Title, Limit, Price, Description */}
-      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+      <div id={`workspace-benefit-${selectionId || card.card_key}`} className="flex-1 min-w-0 flex flex-col gap-1.5">
         {/* Title Row */}
         <div className="flex items-center gap-2 flex-wrap">
           {isEditingTitle ? (
@@ -1498,12 +1503,78 @@ export function MatrixAddonCard({
             </span>
           )}
 
+          {card.is_bundle_effect || card.cost_status === "bundle_included" ? (
+            <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 shrink-0">
+              Upgraded Benefit
+            </span>
+          ) : null}
+
+          {card.plan_tier_uncertain && (
+            <span
+              className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-800 shrink-0"
+              title={card.needs_review_reason || "Plan tier was uncertain and defaulted to Plan 1. Please verify."}
+            >
+              <span>⚠ Verify Plan</span>
+              {selectionId && !pending ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onQueue(
+                      { op: "benefit_update", selection_id: selectionId, confirm_plan_tier: true },
+                      `benefits.${selectionId}.plan_tier`
+                    )
+                  }
+                  className="inline-flex items-center gap-0.5 rounded bg-emerald-600 px-1 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 cursor-pointer"
+                  title="Confirm detected plan tier"
+                >
+                  <Check size={9} weight="bold" />
+                  <span>Confirm</span>
+                </button>
+              ) : null}
+            </span>
+          )}
+
           {savedField && (
             <span className="text-[13px] font-bold text-emerald-600 flex items-center gap-0.5">
               <Check size={14} weight="bold" /> Saved
             </span>
           )}
         </div>
+
+        {/* Bundled Benefit Plan Tier Selector */}
+        {card.available_bundle_tiers && card.available_bundle_tiers.length > 0 && selectionId && !pending && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] font-semibold text-[var(--rl-text-muted)]">Plan Level:</span>
+            {card.available_bundle_tiers.map((tierOpt) => {
+              const isActiveTier = card.selected_bundle_tier_id
+                ? card.selected_bundle_tier_id === tierOpt.id
+                : (card.selected_bundle_tier_label || "").toLowerCase() === tierOpt.label.toLowerCase();
+              return (
+                <button
+                  key={tierOpt.id}
+                  type="button"
+                  onClick={() =>
+                    onQueue(
+                      {
+                        op: "benefit_update",
+                        selection_id: selectionId,
+                        bundle_tier_id: tierOpt.id,
+                      },
+                      `benefits.${selectionId}.plan_tier`
+                    )
+                  }
+                  className={`rounded px-2 py-0.5 text-[11px] font-bold transition-colors cursor-pointer border ${
+                    isActiveTier
+                      ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
+                      : "bg-white text-[var(--rl-text-strong)] border-[var(--rl-border)] hover:bg-neutral-100"
+                  }`}
+                >
+                  {tierOpt.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Coverage Limit & Price Row (Spacious & Clean) */}
         <div className="flex items-center gap-4 flex-wrap text-[18px]">
@@ -1573,7 +1644,8 @@ export function MatrixAddonCard({
             )}
           </div>
 
-          {/* Premium Price */}
+          {/* Premium Price (hidden for unlocked side-by-side bundle benefit cards — price lives only on parent bundle) */}
+          {!(card.is_bundle_effect || card.cost_status === "bundle_included") && (
           <div className="flex items-center gap-1.5 text-[16px]">
             <span className="font-semibold text-[var(--rl-text-muted)]">Price:</span>
             {isEditingPrice ? (
@@ -1631,6 +1703,7 @@ export function MatrixAddonCard({
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* Description Row */}

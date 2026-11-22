@@ -112,7 +112,59 @@ def record_manual_overrides(
     except Exception:
         pass
     entry.is_manual = bool(seen) or (getattr(entry, "session_id", None) is None and bool(getattr(entry, "is_manual", False)))
+    if edited_fields:
+        clear_entry_review_flags(entry, list(edited_fields))
     return seen
+
+
+def get_entry_review_flags(entry: Any) -> dict[str, str]:
+    """Return active field -> reason uncertainty flags stored on the comparison entry."""
+    raw = getattr(entry, "review_flags", None)
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(k): str(v)
+        for k, v in raw.items()
+        if not str(k).startswith("_") and str(v or "").strip()
+    }
+
+
+def get_confirmed_review_fields(entry: Any) -> set[str]:
+    """Return set of field keys explicitly confirmed by a user."""
+    raw = getattr(entry, "review_flags", None)
+    if not isinstance(raw, dict):
+        return set()
+    conf = raw.get("_confirmed")
+    return {str(k) for k in conf} if isinstance(conf, list) else set()
+
+
+def clear_entry_review_flags(
+    entry: Any,
+    fields: Iterable[str],
+) -> dict[str, str]:
+    """Clear active review flags for the given fields and remember user confirmation."""
+    raw = dict(getattr(entry, "review_flags", None) or {})
+    confirmed = set(raw.get("_confirmed") or []) if isinstance(raw.get("_confirmed"), list) else set()
+    changed = False
+    for f in fields:
+        fk = str(f).strip()
+        if not fk:
+            continue
+        if fk in raw:
+            raw.pop(fk, None)
+            changed = True
+        if fk not in confirmed:
+            confirmed.add(fk)
+            changed = True
+    if confirmed:
+        raw["_confirmed"] = sorted(confirmed)
+    if changed:
+        entry.review_flags = raw
+        try:
+            flag_modified(entry, "review_flags")
+        except Exception:
+            pass
+    return get_entry_review_flags(entry)
 
 
 def materialize_comparison_entries(db: Session, tenure_id: str) -> dict[str, Any]:

@@ -22,7 +22,9 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.services.marketing_comparison.materialize import (
     OVERRIDABLE_ENTRY_FIELDS,
+    get_confirmed_review_fields,
     get_entry_overrides,
+    get_entry_review_flags,
     is_field_overridden,
     record_manual_overrides,
 )
@@ -95,10 +97,43 @@ from app.services.marketing_comparison.benefits_extractor import (
     _to_float,
     calculate_exact_rate,
     detect_runner_fee_from_id,
+    extract_draft_review_flags,
     extract_strict_schedule_excess,
+    extract_tenure_review_flags,
     format_canonical_perils,
     prefetch_comparison_benefit_context,
 )
+
+
+def _build_persisted_review_flags(
+    existing_raw: Any,
+    f_dict: dict[str, Any],
+    b_res_dict: dict[str, Any] | None,
+    *,
+    sum_ins: float | None,
+    motor_prem: float | None,
+    cov_type: str | None,
+    overrides: list[str] | tuple[str, ...],
+) -> dict[str, Any]:
+    confirmed: list[str] = []
+    if isinstance(existing_raw, dict) and isinstance(existing_raw.get("_confirmed"), list):
+        confirmed = sorted({str(x) for x in existing_raw["_confirmed"] if str(x).strip()})
+    b_d = b_res_dict or {}
+    fresh = extract_draft_review_flags(
+        f_dict if isinstance(f_dict, dict) else {},
+        towing_uncertain=bool(b_d.get("towing_uncertain")),
+        towing_reason=b_d.get("towing_uncertain_reason"),
+        selection_flags=b_d.get("selection_review_flags"),
+        sum_insured=sum_ins,
+        motor_premium=motor_prem,
+        coverage_type=cov_type,
+        manual_overrides=list(overrides or []),
+        confirmed_fields=confirmed,
+    )
+    out: dict[str, Any] = dict(fresh)
+    if confirmed:
+        out["_confirmed"] = confirmed
+    return out
 from app.services.marketing_comparison.covernote_classifier import (
     is_covernote_document,
 )
@@ -485,6 +520,15 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 special_perils=b_res["special_perils"],
                 llp_llop=b_res["llp_llop"],
                 extra_addons=dict(b_res.get("extra_addons") or {}),
+                review_flags=_build_persisted_review_flags(
+                    None,
+                    f,
+                    b_res,
+                    sum_ins=sum_ins,
+                    motor_prem=motor_prem,
+                    cov_type=cov_type_val,
+                    overrides=[],
+                ),
                 sort_order=idx,
                 is_recommended=bool(
                     (tenure.winning_quotation_ref and s.quotation_ref == tenure.winning_quotation_ref)
@@ -576,6 +620,16 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         existing_match.llp_llop = b_res["llp_llop"]
                     if not is_field_overridden(existing_match, "extra_addons"):
                         existing_match.extra_addons = dict(b_res.get("extra_addons") or {})
+                    existing_match.review_flags = _build_persisted_review_flags(
+                        getattr(existing_match, "review_flags", None),
+                        f,
+                        b_res,
+                        sum_ins=existing_match.sum_insured,
+                        motor_prem=existing_match.motor_premium,
+                        cov_type=cov_type_val,
+                        overrides=get_entry_overrides(existing_match),
+                    )
+                    flag_modified(existing_match, "review_flags")
                     if not existing_match.is_manual and not get_entry_overrides(existing_match):
                         existing_match.version = s.tenure_version or (existing_match.version or 1)
                 else:
@@ -604,6 +658,15 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         special_perils=b_res["special_perils"],
                         llp_llop=b_res["llp_llop"],
                         extra_addons=dict(b_res.get("extra_addons") or {}),
+                        review_flags=_build_persisted_review_flags(
+                            None,
+                            f,
+                            b_res,
+                            sum_ins=sum_ins,
+                            motor_prem=motor_prem,
+                            cov_type=cov_type_val,
+                            overrides=[],
+                        ),
                         sort_order=len(entries) + idx,
                         version=s.tenure_version or 1,
                         is_recommended=bool(
@@ -1247,6 +1310,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         # Resolve canonical short perils and detailed perils with prices for this entry
         entry_perils = []
         entry_detailed_perils = []
+        entry_b_res: dict[str, Any] = {}
         entry_extra_addons = dict(getattr(e, "extra_addons", None) or {})
         if s_obj:
             entry_b_res = _resolve_comparison_benefits(
@@ -1257,6 +1321,27 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             if not is_field_overridden(e, "extra_addons"):
                 merged_dyn = {**dict(entry_b_res.get("extra_addons") or {}), **entry_extra_addons}
                 entry_extra_addons = merged_dyn
+        entry_confirmed = get_confirmed_review_fields(e)
+        entry_overrides = get_entry_overrides(e)
+        entry_skip = set(entry_confirmed) | set(entry_overrides)
+        if "towing_km" in entry_skip:
+            entry_skip.add("towing_limit")
+        merged_review_flags = {
+            k: v for k, v in get_entry_review_flags(e).items() if k not in entry_skip
+        }
+        live_review_flags = extract_draft_review_flags(
+            f_obj if isinstance(f_obj, dict) else {},
+            towing_uncertain=bool(entry_b_res.get("towing_uncertain")) if s_obj else False,
+            towing_reason=entry_b_res.get("towing_uncertain_reason") if s_obj else None,
+            selection_flags=entry_b_res.get("selection_review_flags") if s_obj else None,
+            sum_insured=float(e.sum_insured or 0.0),
+            motor_premium=float(e.motor_premium or 0.0),
+            coverage_type=_extract_val(f_obj.get("coverage_type")) if isinstance(f_obj, dict) else None,
+            manual_overrides=entry_overrides,
+            confirmed_fields=entry_confirmed,
+        )
+        for fk, reason in live_review_flags.items():
+            merged_review_flags.setdefault(fk, reason)
         entry_perils_str = ", ".join(entry_perils) if entry_perils else ""
 
         entry_ncd = _extract_ncd_from_draft(f_obj, s_obj=s_obj)
@@ -1366,6 +1451,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "uploaded_at": e.uploaded_at.isoformat() if e.uploaded_at else (e.created_at.isoformat() if e.created_at else None),
             "is_manual": e.is_manual,
             "manual_overrides": get_entry_overrides(e),
+            "review_flags": merged_review_flags,
             "sort_order": e.sort_order,
             "notes": e.notes,
             "ranking_explanation": ranking_explanations_map.get(e.id) or e.notes,
@@ -1794,6 +1880,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 sessions,
                 is_commercial=bool(is_commercial_veh or resolved_vtype == "Lorry"),
             ),
+            "review_flags": extract_tenure_review_flags(tenure, sessions),
         },
         "covernote_policy": covernote_policy,
         "unlinked_covernotes": unlinked_covernotes,

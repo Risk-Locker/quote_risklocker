@@ -58,6 +58,7 @@ from app.api.schemas import (
     CompanyBenefitProfileUpdateRequest,
     CompanyBenefitConfigsUpdateRequest,
     CompanyBenefitConditionSaveRequest,
+    CompanyBenefitBundleSaveRequest,
     CompanyMatrixDiffRequest,
     RecordBulkActionRequest,
     RecordSavedViewRequest,
@@ -285,6 +286,7 @@ from app.services.business_setup_service import (
     clone_company_profile,
     create_company_profile,
     delete_company_condition,
+    delete_company_bundle,
     delete_company_profile,
     get_catalog_workspace,
     get_business_company_workspace,
@@ -302,10 +304,12 @@ from app.services.business_setup_service import (
     delete_business_asset_folder,
     list_business_companies,
     list_company_aliases,
+    list_company_bundles,
     list_company_conditions,
     list_company_profiles,
     list_source_documents,
     save_benefit_concept,
+    save_company_bundle,
     save_company_condition,
     update_company_benefit_configs,
     update_company_profile,
@@ -671,6 +675,41 @@ def business_company_condition_delete(
     user: User = Depends(current_user),
 ) -> dict:
     delete_company_condition(db, user, company_id, condition_id)
+    return {"ok": True}
+
+
+@router.get("/business/companies/{company_id}/bundles")
+def business_company_bundles_list(
+    company_id: str,
+    profile_id: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
+    return {"bundles": list_company_bundles(db, user, company_id, profile_id=profile_id)}
+
+
+@router.post("/business/companies/{company_id}/bundles")
+def business_company_bundle_save(
+    company_id: str,
+    payload: CompanyBenefitBundleSaveRequest,
+    profile_id: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
+    return {"bundle": save_company_bundle(db, user, company_id, payload.model_dump(), profile_id=profile_id)}
+
+
+@router.delete("/business/companies/{company_id}/bundles/{bundle_id}")
+def business_company_bundle_delete(
+    company_id: str,
+    bundle_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF)
+    delete_company_bundle(db, user, company_id, bundle_id)
     return {"ok": True}
 
 

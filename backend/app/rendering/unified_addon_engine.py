@@ -568,11 +568,13 @@ def _match_catalog_item(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _infer_icon_hint(item: dict[str, Any], matched_cat: dict[str, Any] | None) -> str:
+    txt = f"{item.get('id') or ''} {item.get('concept_key') or ''} {item.get('title') or item.get('label') or ''}".lower()
     if item.get("icon_hint") and item["icon_hint"] != "generic":
         return str(item["icon_hint"])
+    if "towing" in txt and "unlimited" in txt and "battery" not in txt and "international" not in txt:
+        return "unlimited_towing"
     if matched_cat and matched_cat.get("icon_hint"):
         return matched_cat["icon_hint"]
-    txt = f"{item.get('id') or ''} {item.get('concept_key') or ''} {item.get('title') or item.get('label') or ''}".lower()
     if "ncd" in txt or "cashback" in txt:
         return "ncd"
     if "detail" in txt or "clean" in txt or "respray" in txt or "paint" in txt:
@@ -645,6 +647,9 @@ def is_item_selected(
 
     if source_kind == "available":
         return False
+
+    if item.get("promoted_to_addon") or item.get("is_bundle_effect") or item.get("cost_status") == "bundle_included":
+        return True
 
     if item.get("is_extra") or item.get("cost_status") == "paid" or _positive_price(item):
         return True
@@ -968,7 +973,15 @@ def extract_free_coverage_items(
         return False
 
     for raw in active_benefits or []:
-        if raw.get("promoted_to_addon") or raw.get("is_extra") or raw.get("cost_status") == "paid" or _positive_price(raw):
+        if (
+            raw.get("promoted_to_addon")
+            or raw.get("is_bundle")
+            or raw.get("is_bundle_effect")
+            or raw.get("cost_status") == "bundle_included"
+            or raw.get("is_extra")
+            or raw.get("cost_status") == "paid"
+            or _positive_price(raw)
+        ):
             continue
 
         is_hide_cov = _is_coverage_hidden_or_cleared(raw)
@@ -1165,10 +1178,15 @@ def build_unified_matrix_cards(
         if is_hide_cov and not is_mandatory_cov:
             formatted_val = ""
 
+        is_bundle_eff = bool(item.get("is_bundle_effect") or item.get("cost_status") == "bundle_included")
         cost_status = (
-            str(item.get("cost_status") or "paid")
-            if sel
-            else ("included" if item.get("cost_status") == "included" else "optional")
+            "bundle_included"
+            if is_bundle_eff
+            else (
+                str(item.get("cost_status") or "paid")
+                if sel
+                else ("included" if item.get("cost_status") == "included" else "optional")
+            )
         )
         return {
             "id": cat_id,
@@ -1179,13 +1197,17 @@ def build_unified_matrix_cards(
             "icon_hint": _infer_icon_hint(item, matched_cat),
             "is_selected": sel,
             "cost_status": cost_status,
-            "price": item.get("price") or item.get("optional_price"),
+            "is_bundle_effect": is_bundle_eff,
+            "price": None if is_bundle_eff else (item.get("price") or item.get("optional_price")),
             "concept_key": str(item.get("concept_key") or cat_id),
             "asset_id": item.get("asset_id") or (matched_cat.get("default_asset_id") if matched_cat else None),
         }
 
     def _push_item(item: dict[str, Any], source_kind: str) -> None:
         matched_cat = _match_catalog_item(item)
+        if matched_cat is not None and bool(item.get("is_bundle")) and not bool(item.get("is_bundle_effect")):
+            # Parent bundles (e.g. Breakdown Towing Assistance) must stay separate from the unlocked Box 2 target slot
+            matched_cat = None
         sel = is_item_selected(
             item,
             selected_ids,
@@ -1210,6 +1232,8 @@ def build_unified_matrix_cards(
             if existing is None:
                 canonical_overrides[cat_id] = _build_card_dict(item, cat_id, sel, matched_cat)
                 ordered_active_ids.append(cat_id)
+            elif bool(item.get("is_bundle_effect") or item.get("cost_status") == "bundle_included") and not bool(existing.get("is_bundle_effect")):
+                canonical_overrides[cat_id] = _build_card_dict(item, cat_id, True, matched_cat)
             else:
                 # Never overwrite a selected active card's status; only enrich missing price/value/description
                 new_card = _build_card_dict(item, cat_id, sel, matched_cat)

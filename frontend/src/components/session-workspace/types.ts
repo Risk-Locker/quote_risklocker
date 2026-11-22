@@ -33,6 +33,23 @@ export type BenefitCardSummary = {
   initial_price?: { amount?: number | string; currency?: string } | null;
   detected_cost?: string | number | null;
   detected_limit?: string | number | null;
+  icon_hint?: string | null;
+  is_bundle?: boolean;
+  is_bundle_effect?: boolean;
+  bundle_id?: string | null;
+  bundle_name?: string | null;
+  selected_bundle_tier_id?: string | null;
+  selected_bundle_tier_label?: string | null;
+  available_bundle_tiers?: Array<{
+    id: string;
+    tier_key: string;
+    label: string;
+    is_default_fallback?: boolean;
+  }>;
+  plan_tier_uncertain?: boolean;
+  needs_review_reason?: string | null;
+  bundle_parent_selection_id?: string | null;
+  bundle_parent_label?: string | null;
 };
 
 

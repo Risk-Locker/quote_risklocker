@@ -80,6 +80,119 @@ def _safe_str(val: Any) -> str:
     return str(raw).strip()
 
 
+_SCALAR_REVIEW_FIELD_MAP: dict[str, str] = {
+    "insurance_company": "company_name",
+    "company_name": "company_name",
+    "sum_insured": "sum_insured",
+    "coverage_amount": "sum_insured",
+    "market_value": "sum_insured",
+    "agreed_value": "sum_insured",
+    "motor_premium": "motor_premium",
+    "premium": "motor_premium",
+    "premium_due": "motor_premium",
+    "basic_premium": "motor_premium",
+    "basic_contribution": "motor_premium",
+    "towing": "towing_limit",
+    "towing_limit": "towing_limit",
+    "excess": "excess",
+    "excess_amount": "excess",
+    "windscreen": "windscreen_sum_insured",
+    "windscreen_sum_insured": "windscreen_sum_insured",
+    "special_perils": "special_perils",
+    "llp_llop": "llp_llop",
+    "valuation_type": "valuation_type",
+    "waiver_of_betterment": "waiver_betterment",
+    "betterment_rate": "waiver_betterment",
+}
+
+
+def extract_draft_review_flags(
+    f: dict[str, Any],
+    *,
+    towing_uncertain: bool = False,
+    towing_reason: str | None = None,
+    selection_flags: dict[str, str] | None = None,
+    sum_insured: float | None = None,
+    motor_premium: float | None = None,
+    coverage_type: str | None = None,
+    manual_overrides: list[str] | tuple[str, ...] | set[str] = (),
+    confirmed_fields: list[str] | tuple[str, ...] | set[str] = (),
+) -> dict[str, str]:
+    """Compute uncertain/missing field -> reason flags for comparison entries from draft & bundle extraction."""
+    flags: dict[str, str] = {}
+    skip = {str(x).strip() for x in manual_overrides if x} | {str(x).strip() for x in confirmed_fields if x}
+    if "towing_km" in skip:
+        skip.add("towing_limit")
+
+    if isinstance(f, dict):
+        for raw_key, raw_obj in f.items():
+            if not isinstance(raw_obj, dict):
+                continue
+            target_key = _SCALAR_REVIEW_FIELD_MAP.get(str(raw_key))
+            if not target_key or target_key in skip:
+                continue
+            status_val = str(raw_obj.get("status") or "").strip().lower()
+            conf_raw = raw_obj.get("confidence")
+            low_conf = False
+            if conf_raw is not None:
+                try:
+                    low_conf = float(conf_raw) < 0.72
+                except (TypeError, ValueError):
+                    low_conf = False
+            if status_val == "check_needed" or low_conf:
+                reason = str(raw_obj.get("message") or "").strip() or (
+                    "Low extraction confidence — please verify" if low_conf else "Needs verification"
+                )
+                flags.setdefault(target_key, reason)
+
+    if towing_uncertain and "towing_limit" not in skip:
+        flags["towing_limit"] = towing_reason or "Plan level uncertain — defaulted to Plan 1. Please verify."
+
+    if isinstance(selection_flags, dict):
+        for fk, reason in selection_flags.items():
+            if fk not in skip and reason:
+                flags.setdefault(fk, reason)
+
+    cov_low = str(coverage_type or "").lower()
+    is_non_comp = "third party" in cov_low or "tpo" in cov_low or "tpft" in cov_low
+    if sum_insured is not None and not is_non_comp and float(sum_insured or 0.0) <= 0.0 and "sum_insured" not in skip:
+        flags.setdefault("sum_insured", "Sum insured missing or 0 — please verify quotation")
+    if motor_premium is not None and float(motor_premium or 0.0) <= 0.0 and "motor_premium" not in skip:
+        flags.setdefault("motor_premium", "Motor premium missing or 0 — please verify quotation")
+
+    return flags
+
+
+def extract_tenure_review_flags(
+    tenure: Any,
+    sessions: list[Any] | None = None,
+) -> dict[str, str]:
+    """Compute uncertain/missing vehicle & tenure ledger review flags."""
+    flags: dict[str, str] = {}
+    veh_no = str(getattr(tenure, "vehicle_no", "") or "").strip()
+    if bool(getattr(tenure, "is_plate_undetected", False)) or not veh_no or veh_no.upper() == "N/A":
+        flags["vehicle_no"] = "Vehicle plate undetected — verify registration no."
+    if not str(getattr(tenure, "car_brand", "") or "").strip() and not str(getattr(tenure, "vehicle_model", "") or "").strip():
+        flags["vehicle_model"] = "Vehicle brand/model missing — please verify"
+    if not str(getattr(tenure, "engine_cc", "") or "").strip():
+        flags["engine_cc"] = "Engine capacity (CC/kW) missing — verify for road tax"
+    for s in sessions or []:
+        f = getattr(getattr(s, "draft", None), "fields", None)
+        if not isinstance(f, dict):
+            continue
+        for draft_key, target_key in (
+            ("vehicle_no", "vehicle_no"),
+            ("car_model", "vehicle_model"),
+            ("engine_cc", "engine_cc"),
+            ("customer_name", "customer_name"),
+            ("vehicle_year", "manufacture_year"),
+        ):
+            obj = f.get(draft_key)
+            if isinstance(obj, dict) and obj.get("status") == "check_needed":
+                flags.setdefault(target_key, str(obj.get("message") or "Extracted value needs verification"))
+    return flags
+
+
 def _extract_ncd_from_draft(f: dict[str, Any], s_obj: Any = None) -> float | None:
     """Extract numeric NCD percentage from draft fields and session extraction records.
     
@@ -795,6 +908,54 @@ def prefetch_comparison_benefit_context(
         ).all():
             towing_by_rev.setdefault(off.catalog_revision_id, off)
 
+    from sqlalchemy import or_ as _or
+    from sqlalchemy.orm import selectinload as _selectinload
+    from app.models.tables import (
+        BenefitCatalog,
+        BenefitCatalogRevision,
+        BenefitProfile,
+        CompanyBenefitBundle,
+        CompanyBenefitBundleTier,
+    )
+
+    bundles_by_company: dict[str, list[CompanyBenefitBundle]] = {}
+    if comp_ids:
+        active_prof_id = db.scalars(
+            select(BenefitProfile.id).where(BenefitProfile.is_active.is_(True))
+        ).first()
+        b_stmt = (
+            select(CompanyBenefitBundle)
+            .where(
+                CompanyBenefitBundle.company_id.in_(list(comp_ids)),
+                CompanyBenefitBundle.is_active.is_(True),
+            )
+            .options(
+                _selectinload(CompanyBenefitBundle.tiers).selectinload(CompanyBenefitBundleTier.effects)
+            )
+            .order_by(CompanyBenefitBundle.sort_order.asc(), CompanyBenefitBundle.name.asc())
+        )
+        if active_prof_id:
+            b_stmt = b_stmt.where(
+                _or(
+                    CompanyBenefitBundle.profile_id == active_prof_id,
+                    CompanyBenefitBundle.profile_id.is_(None),
+                )
+            )
+        else:
+            b_stmt = b_stmt.where(CompanyBenefitBundle.profile_id.is_(None))
+        for bundle in db.scalars(b_stmt).all():
+            bundles_by_company.setdefault(bundle.company_id, []).append(bundle)
+
+    catalog_rev_names: dict[str, str] = {}
+    if cat_rev_ids:
+        for rev_id, cat_name in db.execute(
+            select(BenefitCatalogRevision.id, BenefitCatalog.name)
+            .join(BenefitCatalog, BenefitCatalogRevision.catalog_id == BenefitCatalog.id)
+            .where(BenefitCatalogRevision.id.in_(cat_rev_ids))
+        ).all():
+            if rev_id and cat_name:
+                catalog_rev_names[str(rev_id)] = str(cat_name)
+
     return {
         "selections_by_draft": selections_by_draft,
         "all_selections_by_draft": all_selections_by_draft,
@@ -804,6 +965,8 @@ def prefetch_comparison_benefit_context(
         "companies_by_id": companies_by_id,
         "conditions_by_company": conditions_by_company,
         "towing_by_rev": towing_by_rev,
+        "bundles_by_company": bundles_by_company,
+        "catalog_rev_names": catalog_rev_names,
     }
 
 
@@ -1143,6 +1306,116 @@ def _resolve_comparison_benefits(
         comp_obj = prefetched["companies_by_id"].get(target_comp_id) if prefetched is not None else db.get(InsuranceCompany, target_comp_id)
         if comp_obj and comp_obj.name:
             comp_name_str = comp_obj.name
+    if not comp_name_str and session:
+        comp_name_str = getattr(session, "detected_company", "") or ""
+    if not comp_name_str:
+        comp_name_str = _safe_str(f.get("insurance_company"))
+
+    towing_uncertain = False
+    towing_uncertain_reason: str | None = None
+    bundle_towing_km: str | None = None
+    selection_review_flags: dict[str, str] = {}
+
+    for sel in selections:
+        sel_ev_chk = getattr(sel, "evidence_snapshot", None)
+        if isinstance(sel_ev_chk, dict) and sel_ev_chk.get("plan_tier_uncertain"):
+            sel_c = concepts.get(sel.concept_id) if sel.concept_id else None
+            sel_blob = " ".join([
+                str(sel.selection_key or ""),
+                str(sel.label_override or ""),
+                str(getattr(sel_c, "label", "") or ""),
+            ]).lower()
+            fk = (
+                "towing_limit"
+                if any(k in sel_blob for k in ("towing", "private car 365", "motor pa", "smart driver", "e-assist", "oto 360", "autobuddy", "motorshield", "motor easy"))
+                else "extra_addons"
+            )
+            selection_review_flags.setdefault(
+                fk,
+                str(sel_ev_chk.get("needs_review_reason") or "").strip()
+                or f"Plan level uncertain on {sel.label_override or getattr(sel_c, 'label', 'benefit')} — please verify.",
+            )
+
+    # Resolve authoritative active DB CompanyBenefitBundle towing upgrade before legacy fallback
+    towing_field_raw = f.get("towing") or f.get("towing_limit")
+    towing_manual_override = isinstance(towing_field_raw, dict) and towing_field_raw.get("status") == "manual_override"
+    if not towing_manual_override and "towing" not in disabled_domains and target_comp_id:
+        from app.models.tables import BenefitCatalog, BenefitCatalogRevision
+        from app.services.bundle_plan_matcher import match_bundle_for_selection, match_bundle_for_text, resolve_bundle_tier
+        from app.services.company_benefit_bundle_service import load_active_company_bundles
+
+        if prefetched is not None and "bundles_by_company" in prefetched:
+            comp_bundles = prefetched["bundles_by_company"].get(target_comp_id) or []
+        else:
+            comp_bundles = load_active_company_bundles(db, target_comp_id)
+
+        if comp_bundles:
+            cat_name = ""
+            if session and getattr(session, "draft", None):
+                cat_rev_id = getattr(session.draft, "catalog_revision_id", None)
+                if cat_rev_id:
+                    if prefetched is not None and "catalog_rev_names" in prefetched:
+                        cat_name = prefetched["catalog_rev_names"].get(str(cat_rev_id), "")
+                    elif db is not None:
+                        rev_row = db.execute(
+                            select(BenefitCatalog.name)
+                            .join(BenefitCatalogRevision, BenefitCatalogRevision.catalog_id == BenefitCatalog.id)
+                            .where(BenefitCatalogRevision.id == cat_rev_id)
+                        ).scalar_one_or_none()
+                        if rev_row:
+                            cat_name = str(rev_row)
+            matched_bundle = None
+            matched_sel = None
+            for sel in selections:
+                mb = match_bundle_for_selection(sel, None, concepts.get(sel.concept_id) if sel.concept_id else None, comp_bundles, catalog_name=cat_name)
+                if mb is not None:
+                    matched_bundle = mb
+                    matched_sel = sel
+                    break
+            if matched_bundle is None:
+                matched_bundle = match_bundle_for_text(combined_text, comp_bundles, catalog_name=cat_name)
+            if matched_bundle is not None:
+                chosen_tier, is_unc = resolve_bundle_tier(
+                    matched_bundle,
+                    selection=matched_sel,
+                    extra_text=combined_text,
+                )
+                if chosen_tier is not None:
+                    sel_ev = (getattr(matched_sel, "evidence_snapshot", None) or {}) if matched_sel else {}
+                    if isinstance(sel_ev, dict) and sel_ev.get("plan_tier_uncertain") is False:
+                        is_unc = False
+                    elif isinstance(sel_ev, dict) and sel_ev.get("plan_tier_uncertain") is True:
+                        is_unc = True
+                    # Find towing effect in chosen tier (upgrade_to_box2 or add_to_box2 targeting towing)
+                    eff_match = None
+                    for eff in sorted(getattr(chosen_tier, "effects", []) or [], key=lambda x: getattr(x, "sort_order", 0)):
+                        eff_type = str(getattr(eff, "effect_type", "") or "")
+                        if eff_type == "hide_from_box1":
+                            continue
+                        disp_title = str(getattr(eff, "display_title", "") or "")
+                        tc = str(getattr(eff, "target_concept_id", "") or "")
+                        if eff_type in ("upgrade_to_box2", "add_to_box2") and (
+                            tc == "47e25689-0ef1-4db5-ae8e-251e8cd94af1" or "towing" in disp_title.lower()
+                        ):
+                            eff_match = eff
+                            break
+                    if eff_match is not None:
+                        cv = str(getattr(eff_match, "comparison_value", "") or "").strip()
+                        if not cv:
+                            tl_raw = str(getattr(eff_match, "display_title", "") or "")
+                            if "unlimited" in tl_raw.lower():
+                                cv = "Unlimited"
+                            else:
+                                m_cv = re.search(r"((?:rm\s*)?[\d,]+\s*(?:km)?)", tl_raw, re.IGNORECASE)
+                                cv = m_cv.group(1).strip() if m_cv else tl_raw
+                        if cv:
+                            bundle_towing_km = cv
+                            towing_uncertain = bool(is_unc)
+                            if towing_uncertain:
+                                towing_uncertain_reason = (
+                                    f"Plan level not detected on {matched_bundle.name} — defaulted to {chosen_tier.label}. Please verify."
+                                )
+                                selection_review_flags["towing_limit"] = towing_uncertain_reason
     if not comp_name_str and session and getattr(session, "draft", None) and getattr(session.draft, "company_id", None):
         d_cid = session.draft.company_id
         comp_obj = prefetched["companies_by_id"].get(d_cid) if prefetched is not None else db.get(InsuranceCompany, d_cid)
@@ -1185,6 +1458,8 @@ def _resolve_comparison_benefits(
         clean_towing = normalize_towing_km(raw_towing, combined_text="", company_name=comp_name_str)
     elif "towing" in disabled_domains and not towing_manual_override:
         clean_towing = "No towing"
+    elif bundle_towing_km and not towing_manual_override:
+        clean_towing = bundle_towing_km
     else:
         clean_towing = resolve_insurer_towing_limit(
             company_name=comp_name_str,
@@ -1521,6 +1796,9 @@ def _resolve_comparison_benefits(
         "llp_llop": llp_val,
         "towing_limit": clean_towing,
         "towing_km": clean_towing,
+        "towing_uncertain": towing_uncertain,
+        "towing_uncertain_reason": towing_uncertain_reason,
+        "selection_review_flags": selection_review_flags,
         "extra_addons": extra_addons_map,
         "combined_text": combined_text,
         "canonical_perils": canonical_perils_list,

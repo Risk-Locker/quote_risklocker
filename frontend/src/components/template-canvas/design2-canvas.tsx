@@ -397,7 +397,7 @@ export function Design2CanvasView({
           description: c.description || "Included rider / selected upgrade.",
           value: c.value || "",
           hint: c.icon_hint || "generic",
-          badge: "SELECTED",
+          badge: c.cost_status === "bundle_included" ? "" : "SELECTED",
         })),
     ];
   }, [freeItems, addonCards]);
@@ -924,9 +924,11 @@ export function Design2CanvasView({
                         <div style={{ fontSize: "8.2px", color: "#334155", lineHeight: 1.28, marginTop: "1px" }}>{row.description}</div>
                       </div>
                     </div>
-                    <span style={{ fontSize: "7.6px", fontWeight: 800, padding: "2px 6px", borderRadius: "4px", whiteSpace: "nowrap", background: "#ECFDF5", color: "#15803D", border: "1px solid #A7F3D0" }}>
-                      {row.badge}
-                    </span>
+                    {row.badge && (
+                      <span style={{ fontSize: "7.6px", fontWeight: 800, padding: "2px 6px", borderRadius: "4px", whiteSpace: "nowrap", background: "#ECFDF5", color: "#15803D", border: "1px solid #A7F3D0" }}>
+                        {row.badge}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

@@ -412,6 +412,7 @@ class TenureComparisonEntry(Base, TimestampMixin):
     is_recommended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     manual_overrides: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    review_flags: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default=text("'{}'"))
     is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"), index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1204,6 +1205,7 @@ class DraftBenefitSelection(Base, TimestampMixin):
     selected_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     superseded_by_id: Mapped[str | None] = mapped_column(ForeignKey("draft_benefit_selections.id", ondelete="SET NULL"), nullable=True)
     package_plan_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_package_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    bundle_tier_id: Mapped[str | None] = mapped_column(ForeignKey("company_benefit_bundle_tiers.id", ondelete="SET NULL"), nullable=True, index=True)
     price: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
@@ -1313,6 +1315,7 @@ class BenefitProfile(Base, TimestampMixin):
 
     configs: Mapped[list["CompanyBenefitConfig"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     conditions: Mapped[list["CompanyBenefitCondition"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+    bundles: Mapped[list["CompanyBenefitBundle"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
 
 
 CompanyBenefitProfile = BenefitProfile
@@ -1360,6 +1363,93 @@ class CompanyBenefitCondition(Base, TimestampMixin):
     company: Mapped["InsuranceCompany"] = relationship()
     profile: Mapped[BenefitProfile | None] = relationship(back_populates="conditions")
     trigger_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[trigger_concept_id])
+    target_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[target_concept_id])
+
+
+class CompanyBenefitBundle(Base, TimestampMixin):
+    __tablename__ = "company_benefit_bundles"
+    __table_args__ = (
+        Index("idx_company_benefit_bundles_company_profile", "company_id", "profile_id"),
+        Index(
+            "uq_company_benefit_bundle_profile_key",
+            "company_id",
+            "profile_id",
+            "bundle_key",
+            unique=True,
+            postgresql_where=text("profile_id IS NOT NULL"),
+            sqlite_where=text("profile_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_company_benefit_bundle_global_key",
+            "company_id",
+            "bundle_key",
+            unique=True,
+            postgresql_where=text("profile_id IS NULL"),
+            sqlite_where=text("profile_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(ForeignKey("insurance_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id: Mapped[str | None] = mapped_column(ForeignKey("benefit_profiles.id", ondelete="CASCADE"), nullable=True, index=True)
+    bundle_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    primary_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+    trigger_concept_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"), nullable=False)
+    match_aliases: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"), nullable=False)
+    catalog_scope: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    force_box2: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    has_plan_tiers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+
+    company: Mapped["InsuranceCompany"] = relationship()
+    profile: Mapped[BenefitProfile | None] = relationship(back_populates="bundles")
+    primary_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[primary_concept_id])
+    tiers: Mapped[list["CompanyBenefitBundleTier"]] = relationship(
+        back_populates="bundle",
+        cascade="all, delete-orphan",
+        order_by="CompanyBenefitBundleTier.sort_order",
+    )
+
+
+class CompanyBenefitBundleTier(Base, TimestampMixin):
+    __tablename__ = "company_benefit_bundle_tiers"
+    __table_args__ = (
+        UniqueConstraint("bundle_id", "tier_key", name="uq_company_benefit_bundle_tier_key"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    bundle_id: Mapped[str] = mapped_column(ForeignKey("company_benefit_bundles.id", ondelete="CASCADE"), nullable=False, index=True)
+    tier_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    match_tokens: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"), nullable=False)
+    is_default_fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+
+    bundle: Mapped["CompanyBenefitBundle"] = relationship(back_populates="tiers")
+    effects: Mapped[list["CompanyBenefitBundleEffect"]] = relationship(
+        back_populates="tier",
+        cascade="all, delete-orphan",
+        order_by="CompanyBenefitBundleEffect.sort_order",
+    )
+
+
+class CompanyBenefitBundleEffect(Base, TimestampMixin):
+    __tablename__ = "company_benefit_bundle_effects"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    tier_id: Mapped[str] = mapped_column(ForeignKey("company_benefit_bundle_tiers.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_concept_id: Mapped[str] = mapped_column(ForeignKey("benefit_concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+    effect_type: Mapped[str] = mapped_column(String(40), nullable=False, default="upgrade_to_box2")
+    display_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_value: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    display_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    icon_hint: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    comparison_value: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+
+    tier: Mapped["CompanyBenefitBundleTier"] = relationship(back_populates="effects")
     target_concept: Mapped["BenefitConcept"] = relationship(foreign_keys=[target_concept_id])
 
 

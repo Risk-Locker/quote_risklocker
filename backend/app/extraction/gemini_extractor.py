@@ -230,6 +230,10 @@ GEMINI_EXTRACTION_SCHEMA = {
                         "type": "string",
                         "description": "The coverage value, limit amount, or description (e.g. 'RM 4,000.00', 'Unlimited Towing', 'Included', 'Plan 2'). If no coverage amount exists (e.g. LLTP/LLOP endorsements), output 'Included' or 'Selected'.",
                     },
+                    "plan_tier": {
+                        "type": "string",
+                        "description": "Explicit plan number/tier if the benefit or bundle mentions a plan (e.g. 'Plan 1', 'Plan 2', 'Plan 3', 'Plan 4', 'EV Plan', 'Plan A', 'Plan B'). Empty string if no plan tier exists.",
+                    },
                     "coverage_limit": {
                         "type": "string",
                         "description": "Explicit sum insured or coverage limit amount ONLY (e.g. '2,650' or 'RM 2,650' for Windscreen, '1,000' for Key Replacement, '14 Days / RM 200 daily' for CART). If the add-on has NO explicit coverage amount or sum insured stated in the quotation (e.g. Legal Liability to Passengers, Legal Liability of Passengers, All Drivers, 24-hr Towing), this MUST be empty string (\"\"). NEVER copy the premium price into coverage_limit.",
@@ -429,6 +433,7 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - **No Coverage Limit**: If the benefit is a legal liability endorsement or service rider without an explicit sum insured (e.g. `Legal Liability to Passengers ... RM 41.85`, `Legal Liability of Passengers ... RM 7.50`, `All Drivers ... RM 20.00`, `24-hr Towing`), `coverage_limit` MUST BE EMPTY `""` or null. NEVER put the premium cost or price into `coverage_limit`.
 11. **BENEFITS, PERILS & COVER NOTE ENDORSEMENTS**:
    - **Quotations**: Extract concrete coverages, riders, or add-ons that are explicitly listed in the quotation's pricing schedule, benefits table, or endorsements summary.
+   - **Bundled Riders & Plan Tiers**: Always preserve exact plan numbers/tiers in both `label` and `plan_tier` (e.g. `Private Car 365 Plan 1` / `Plan 2` / `Plan 3` / `Plan 4`, `Motor PA Plus Plan 1..4`, `E-Assist Smart Driver Plan 1 / Plan 2 / EV Plan`, `Motor Easy Bundle`, `AutoBuddy`, `Motor Shield`, `OTO 360`, `Driver & Passenger Protector N4`). NEVER extract the base AmAssurance policy title (`auto365 Comprehensive Lite`, `auto365 Comprehensive Plus`, `auto365 Comprehensive Premier`) as an extra add-on benefit — that goes in `detected_package_name` only.
    - **Cover Notes & Policy Schedules**: Always extract all active endorsements and perils listed under 'Endorsements:', 'Endorsements Attached', 'Perils Covered', or 'Clauses' (such as Endorsement 57 / Flood / Special Perils, Endorsement 72 / LLOP, Endorsement 100 / LLP, Endorsement 97 or 89 / Windscreen, Endorsement 112 / CART, Endorsement 113 / Betterment, Endorsement 111 / NCD Relief, Endorsement 25 / SRCC, DPA, DPP, SDPA, AutoBuddy, OTO 360, etc.) even when no separate price is listed. Set value to 'Included' and is_optional_cover to true.
    - DO NOT extract contact phone numbers (e.g. '03-2262 8666'), email addresses, document revision codes, basic premium, NCD deduction, Service Tax, or generic PDS disclaimer examples as benefits.
 12. **QUOTATION REFERENCE**:

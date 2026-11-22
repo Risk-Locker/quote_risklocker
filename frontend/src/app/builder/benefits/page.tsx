@@ -51,6 +51,7 @@ import type {
   CatalogSummary as Catalog,
   CatalogWorkspaceData as CatalogWorkspace,
   BenefitProfile,
+  CompanyBenefitBundle,
   CompanyBenefitCondition,
   CompanyBenefitConfig,
   CompanyBenefitProfile,
@@ -408,7 +409,10 @@ function BenefitsPageContent() {
   const [configsCategoryFilter, setConfigsCategoryFilter] = useState<"all" | "default" | "addon">("all");
   const [customizingCostIds, setCustomizingCostIds] = useState<Set<string>>(new Set());
 
-  // Tab 3: Company Conditions state
+  // Tab 3: Company Bundles & Conditions state
+  const [companyBundles, setCompanyBundles] = useState<CompanyBenefitBundle[]>([]);
+  const [bundlesLoading, setBundlesLoading] = useState(false);
+  const [bundleSaving, setBundleSaving] = useState(false);
   const [companyConditions, setCompanyConditions] = useState<CompanyBenefitCondition[]>([]);
   const [conditionsLoading, setConditionsLoading] = useState(false);
   const [conditionDialog, setConditionDialog] = useState(false);
@@ -543,6 +547,53 @@ function BenefitsPageContent() {
       if (mountedRef.current) setConfigsLoading(false);
     }
   }, []);
+
+  const loadCompanyBundles = useCallback(async (companyId: string, profileId?: string) => {
+    if (!companyId) return;
+    setBundlesLoading(true);
+    try {
+      const url = profileId
+        ? `/business/companies/${companyId}/bundles?profile_id=${encodeURIComponent(profileId)}`
+        : `/business/companies/${companyId}/bundles`;
+      const res = await api<{ bundles: CompanyBenefitBundle[] }>(url);
+      if (mountedRef.current) setCompanyBundles(res.bundles || []);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setBundlesLoading(false);
+    }
+  }, []);
+
+  const saveCompanyBundle = useCallback(async (payload: Omit<CompanyBenefitBundle, "id" | "company_id" | "bundle_key"> & { id?: string; bundle_key?: string }) => {
+    if (!selectedCompanyId) return;
+    setBundleSaving(true);
+    setError("");
+    try {
+      const url = selectedProfileId
+        ? `/business/companies/${selectedCompanyId}/bundles?profile_id=${encodeURIComponent(selectedProfileId)}`
+        : `/business/companies/${selectedCompanyId}/bundles`;
+      await api(url, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      await loadCompanyBundles(selectedCompanyId, selectedProfileId);
+    } finally {
+      if (mountedRef.current) setBundleSaving(false);
+    }
+  }, [selectedCompanyId, selectedProfileId, loadCompanyBundles]);
+
+  const deleteCompanyBundle = useCallback(async (bundleId: string) => {
+    if (!selectedCompanyId) return;
+    setBundlesLoading(true);
+    try {
+      await api(`/business/companies/${selectedCompanyId}/bundles/${bundleId}`, { method: "DELETE" });
+      await loadCompanyBundles(selectedCompanyId, selectedProfileId);
+    } catch (err) {
+      if (mountedRef.current) setError(apiErrorMessage(err));
+    } finally {
+      if (mountedRef.current) setBundlesLoading(false);
+    }
+  }, [selectedCompanyId, selectedProfileId, loadCompanyBundles]);
 
   const loadCompanyConditions = useCallback(async (companyId: string, profileId?: string) => {
     if (!companyId) return;
@@ -1131,8 +1182,9 @@ function BenefitsPageContent() {
     if (selectedCompanyId && selectedProfileId) {
       loadCompanyConfigs(selectedCompanyId, selectedProfileId);
       loadCompanyConditions(selectedCompanyId, selectedProfileId);
+      loadCompanyBundles(selectedCompanyId, selectedProfileId);
     }
-  }, [selectedCompanyId, selectedProfileId, loadCompanyConfigs, loadCompanyConditions]);
+  }, [selectedCompanyId, selectedProfileId, loadCompanyConfigs, loadCompanyConditions, loadCompanyBundles]);
 
   useEffect(() => {
     if (screenTab === "matrix" && selectedCompanyId) {
@@ -2572,7 +2624,10 @@ ${aiMarkdownTable}`;
                 type="button"
                 onClick={() => {
                   setScreenTab("conditions");
-                  if (selectedCompanyId && selectedProfileId) loadCompanyConditions(selectedCompanyId, selectedProfileId);
+                  if (selectedCompanyId && selectedProfileId) {
+                    loadCompanyConditions(selectedCompanyId, selectedProfileId);
+                    loadCompanyBundles(selectedCompanyId, selectedProfileId);
+                  }
                 }}
                 className={`flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 transition-all ${
                   screenTab === "conditions"
@@ -2581,7 +2636,7 @@ ${aiMarkdownTable}`;
                 }`}
               >
                 <Lightning size={14} weight={screenTab === "conditions" ? "bold" : "regular"} />
-                <span>3. Benefit Conditions</span>
+                <span>3. Bundles &amp; Conditions</span>
               </button>
               <button
                 type="button"
@@ -2679,6 +2734,11 @@ ${aiMarkdownTable}`;
             isProfileArchived={isProfileArchived}
             selectedProfile={selectedProfile}
             selectedCompany={selectedCompany}
+            companyBundles={companyBundles}
+            bundlesLoading={bundlesLoading}
+            bundleSaving={bundleSaving}
+            onSaveBundle={saveCompanyBundle}
+            onDeleteBundle={deleteCompanyBundle}
             companyConditions={companyConditions}
             conditionsLoading={conditionsLoading}
             concepts={concepts}

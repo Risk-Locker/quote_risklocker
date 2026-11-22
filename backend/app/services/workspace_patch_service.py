@@ -662,9 +662,10 @@ def _resolve_selection(db, draft: QuotationDraft, selection_id: str) -> DraftBen
 
 
 def _reset_conditional_targets_for_trigger(db, draft: QuotationDraft, trigger_concept_id: str | None) -> None:
-    """Clear temporary overrides on target benefits when a trigger add-on is toggled or changes plan."""
+    """Clear temporary overrides on target benefits when a trigger add-on or bundle changes plan."""
     if not trigger_concept_id or not getattr(draft, "company_id", None):
         return
+    target_ids: set[str] = set()
     try:
         conds = list(
             db.scalars(
@@ -675,17 +676,96 @@ def _reset_conditional_targets_for_trigger(db, draft: QuotationDraft, trigger_co
                 )
             ).all()
         )
+        target_ids.update(str(c.target_concept_id) for c in conds if getattr(c, "target_concept_id", None))
     except Exception:
-        conds = []
-    target_ids = {str(c.target_concept_id) for c in conds if getattr(c, "target_concept_id", None)}
+        pass
+    try:
+        from app.services.company_benefit_bundle_service import load_active_company_bundles
+
+        for b in load_active_company_bundles(db, draft.company_id):
+            trig_set = {str(b.primary_concept_id)} | {str(x) for x in (b.trigger_concept_ids or []) if x}
+            if str(trigger_concept_id) in trig_set:
+                for t in list(getattr(b, "tiers", None) or []):
+                    for eff in list(getattr(t, "effects", None) or []):
+                        if getattr(eff, "target_concept_id", None):
+                            target_ids.add(str(eff.target_concept_id))
+    except Exception:
+        pass
     if not target_ids:
         return
     for sel in _draft_selections_with_pending(db, draft.id):
         if sel.concept_id and str(sel.concept_id) in target_ids:
+            ev_s = sel.evidence_snapshot if isinstance(sel.evidence_snapshot, dict) else {}
+            if str(ev_s.get("source") or "").lower() == "manual" or ev_s.get("manually_edited"):
+                continue
             sel.label_override = None
             sel.typed_value_override = None
             if sel.state == ReviewedBenefitState.REMOVED.value and sel.catalog_offering_id:
                 sel.state = ReviewedBenefitState.CURRENT.value
+
+
+def _apply_bundle_tier_fields(
+    db,
+    draft: QuotationDraft,
+    selection: DraftBenefitSelection,
+    operation: dict,
+    *,
+    offering: Any = None,
+) -> bool:
+    """Apply explicit bundle_tier_id / confirm_plan_tier or auto-bind default tier for bundle selections."""
+    from app.models.tables import CompanyBenefitBundleTier
+    from app.services.bundle_plan_matcher import match_bundle_for_selection, resolve_bundle_tier
+    from app.services.company_benefit_bundle_service import load_active_company_bundles
+
+    changed = False
+    ev = dict(selection.evidence_snapshot or {}) if isinstance(selection.evidence_snapshot, dict) else {}
+
+    if "bundle_tier_id" in operation:
+        raw_tid = operation.get("bundle_tier_id")
+        if raw_tid in (None, ""):
+            selection.bundle_tier_id = None
+            ev.pop("plan_tier", None)
+            ev.pop("plan_tier_uncertain", None)
+            ev.pop("needs_review_reason", None)
+            selection.evidence_snapshot = ev
+            return True
+        tier = db.get(CompanyBenefitBundleTier, str(raw_tid))
+        if tier is None:
+            raise AppError("Bundle plan tier was not found.", 404)
+        selection.bundle_tier_id = tier.id
+        ev["bundle_id"] = tier.bundle_id
+        ev["plan_tier"] = tier.label
+        ev["plan_tier_uncertain"] = False
+        ev.pop("needs_review_reason", None)
+        selection.evidence_snapshot = ev
+        return True
+
+    if operation.get("confirm_plan_tier"):
+        ev["plan_tier_uncertain"] = False
+        ev.pop("needs_review_reason", None)
+        selection.evidence_snapshot = ev
+        return True
+
+    if not selection.bundle_tier_id and selection.state == ReviewedBenefitState.CURRENT.value and getattr(draft, "company_id", None):
+        bundles = load_active_company_bundles(db, draft.company_id)
+        matched_b = match_bundle_for_selection(selection, offering, None, bundles)
+        if matched_b is not None:
+            tier, is_unc = resolve_bundle_tier(matched_b, selection=selection, offering=offering)
+            if tier is not None:
+                selection.bundle_tier_id = tier.id
+                ev["bundle_id"] = matched_b.id
+                ev["plan_tier"] = tier.label
+                ev["plan_tier_uncertain"] = is_unc
+                if is_unc:
+                    ev["needs_review_reason"] = f"Plan level not detected on {matched_b.name} — defaulted to {tier.label}. Please verify."
+                else:
+                    ev.pop("needs_review_reason", None)
+                selection.evidence_snapshot = ev
+                changed = True
+            if getattr(matched_b, "force_box2", True):
+                selection.cost_status = CostStatus.PAID.value
+                changed = True
+    return changed
 
 
 def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: dict) -> str:
@@ -792,13 +872,14 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             if "type" not in curr_typed:
                 curr_typed["type"] = "custom"
             selected.typed_value_override = curr_typed
+    tier_changed = _apply_bundle_tier_fields(db, draft, selected, operation, offering=offering)
     selected.selected_by = user.id
     if desired_state == ReviewedBenefitState.CURRENT.value and current and current[0].id != selected.id:
         current[0].state = ReviewedBenefitState.SUPERSEDED.value
         current[0].superseded_by_id = selected.id
     elif desired_state == ReviewedBenefitState.REMOVED.value and current and current[0].id != selected.id:
         current[0].state = ReviewedBenefitState.REMOVED.value
-    if any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override")):
+    if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
         _reset_conditional_targets_for_trigger(db, draft, selected.concept_id)
     return f"benefits.{selected.id}"
 
@@ -878,8 +959,9 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
                 selection.typed_value_override = validated
             except ValidationError as exc:
                 raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
+    tier_changed = _apply_bundle_tier_fields(db, draft, selection, operation)
     selection.selected_by = user.id
-    if any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override")):
+    if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
         _reset_conditional_targets_for_trigger(db, draft, selection.concept_id)
     return f"benefits.{selection.id}"
 

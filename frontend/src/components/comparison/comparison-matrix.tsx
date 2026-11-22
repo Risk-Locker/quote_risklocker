@@ -1403,6 +1403,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 notes: res.notes !== undefined ? res.notes : e.notes,
                 is_manual: res.is_manual ?? e.is_manual,
                 manual_overrides: res.manual_overrides ?? e.manual_overrides,
+                review_flags: res.review_flags !== undefined ? res.review_flags : e.review_flags,
                 version: res.version ?? (e.version || 1) + 1,
                 rank: res.rank ?? e.rank,
               }
@@ -1743,6 +1744,73 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </div>
           </div>
         )}
+
+        {/* Extraction Needs-Review Bar (across Vehicle Ledger & Underwriter Quote Cards) */}
+        {(() => {
+          const ledgerFlags = Object.entries(tenure.review_flags || {}).filter(([, v]) => Boolean(v));
+          const cardFlags = visibleDisplayEntries.flatMap((entry) =>
+            Object.entries(entry.review_flags || {})
+              .filter(([k, v]) => !k.startsWith("_") && Boolean(v))
+              .map(([fieldKey, reason]) => ({ entry, fieldKey, reason }))
+          );
+          const totalFlags = ledgerFlags.length + cardFlags.length;
+          if (totalFlags === 0) return null;
+          return (
+            <div
+              role="region"
+              aria-label="Comparison items needing verification"
+              className="rounded-xl border border-amber-300 bg-amber-50/90 px-3.5 py-2.5 shadow-2xs no-print print:hidden"
+            >
+              <div className="flex flex-wrap items-center gap-2 text-xs text-amber-950">
+                <span className="inline-flex items-center gap-1 rounded bg-amber-200/80 px-2 py-0.5 font-bold text-amber-950 shrink-0">
+                  <WarningCircle size={14} weight="fill" className="text-amber-700" />
+                  Needs Review ({totalFlags})
+                </span>
+                {ledgerFlags.map(([fieldKey, reason]) => (
+                  <button
+                    key={`ledger:${fieldKey}`}
+                    type="button"
+                    onClick={() => {
+                      setEditingFixedCosts(true);
+                      document.getElementById("tour-customer-ledger")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }}
+                    title={reason}
+                    className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-950 hover:bg-amber-100 cursor-pointer"
+                  >
+                    <span className="font-semibold">Vehicle {fieldKey.replace(/_/g, " ")}</span>
+                    <span className="text-amber-700 font-bold">Fix</span>
+                  </button>
+                ))}
+                {cardFlags.map(({ entry, fieldKey, reason }) => (
+                  <span
+                    key={`entry:${entry.id}:${fieldKey}`}
+                    title={reason}
+                    className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-950"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        document.getElementById(`comparison-entry-${entry.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+                      }}
+                      className="hover:underline text-left cursor-pointer"
+                    >
+                      <span className="font-semibold">{formatShortInsurerName(entry.company_name)}</span>
+                      <span className="text-neutral-500"> · {fieldKey.replace(/_/g, " ")}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleInlinePatchEntry(entry, { confirm_review_fields: [fieldKey] })}
+                      className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 cursor-pointer"
+                      title={`Confirm ${fieldKey} for ${entry.company_name}`}
+                    >
+                      ✓ Confirm
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Disqualified Documents Due to Plate Mismatch Banner */}
         {data.disqualified_documents && data.disqualified_documents.length > 0 && (

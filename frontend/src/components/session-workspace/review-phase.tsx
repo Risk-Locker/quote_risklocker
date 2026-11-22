@@ -31,6 +31,7 @@ import { PolicyFieldsCard } from "./review-components/policy-fields-card";
 import { ExtractedBenefitsCard } from "./review-components/extracted-benefits-card";
 import { BenefitsManagerPanel } from "./review-components/benefits-manager-panel";
 import { ReviewBanners } from "./review-components/review-banners";
+import { ReviewAttentionBar } from "./review-components/review-attention-bar";
 import { ReviewModals } from "./review-components/review-modals";
 import { UnsavedChangesBar } from "./review-components/UnsavedChangesBar";
 
@@ -179,6 +180,36 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
           setLearnPrompt={state.setLearnPrompt}
         />
 
+        <ReviewAttentionBar
+          workspace={workspace}
+          currentCards={benefits.currentCards}
+          addonCards={benefits.addonCards}
+          formValues={formValues}
+          onConfirmField={(fieldKey, val) => {
+            decideField(fieldKey, "confirm", val);
+            state.scheduleSave();
+          }}
+          onConfirmBundleTier={(selectionId) => {
+            queueOperation(
+              { op: "benefit_update", selection_id: selectionId, confirm_plan_tier: true },
+              `benefits.${selectionId}.plan_tier`
+            );
+            state.scheduleSave();
+          }}
+          onJumpToItem={(item) => {
+            const targetId = item.kind === "field" && item.fieldKey
+              ? `workspace-field-${item.fieldKey}`
+              : item.selectionId
+                ? `workspace-benefit-${item.selectionId}`
+                : "";
+            if (!targetId) return;
+            const el = document.getElementById(targetId);
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }}
+        />
+
         <div ref={resizer.containerRef} className={`flex flex-col lg:flex-row items-stretch min-h-[580px] w-full gap-0 relative ${resizer.isDragging ? "select-none" : ""}`}>
           {/* Column 1: Source PDF */}
           {resizer.pdfOpen ? (
@@ -303,6 +334,10 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
                 companyWorkspace={catalog.companyWorkspace}
                 categorizedProducts={catalog.categorizedProducts}
                 pinCatalog={catalog.pinCatalog}
+                onConfirmField={(fieldName, val) => {
+                  decideField(fieldName, "confirm", val);
+                  state.scheduleSave();
+                }}
               />
 
               <ExtractedBenefitsCard

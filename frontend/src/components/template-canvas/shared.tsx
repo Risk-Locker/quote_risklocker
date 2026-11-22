@@ -1814,7 +1814,15 @@ function EditableText({ initial, onCommit }: { initial: string; onCommit: (text:
 
 export function isPaidExtraBenefitCard(c?: BenefitItem | Record<string, unknown> | null): boolean {
   if (!c) return false;
-  if (c.is_extra || c.badge || c.cost_status === "paid") return true;
+  if (
+    c.is_extra ||
+    c.promoted_to_addon ||
+    c.is_bundle ||
+    c.is_bundle_effect ||
+    c.badge ||
+    c.cost_status === "paid" ||
+    c.cost_status === "bundle_included"
+  ) return true;
   const p = c.price ?? c.optional_price;
   if (p !== null && p !== undefined) {
     if (typeof p === "object") {

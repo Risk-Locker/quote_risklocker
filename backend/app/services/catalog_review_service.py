@@ -812,6 +812,25 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 if len(n_p) >= 3:
                     alias_norm_to_concept[n_p] = c_obj
 
+    from app.services.company_benefit_bundle_service import load_active_company_bundles
+    from app.services.bundle_plan_matcher import (
+        extract_plan_tier_token,
+        is_base_auto365_policy_label,
+        match_bundle_for_text,
+        resolve_bundle_tier,
+    )
+
+    catalog_name = None
+    try:
+        cat_rev = db.get(BenefitCatalogRevision, draft.catalog_revision_id)
+        if cat_rev and getattr(cat_rev, "catalog_id", None):
+            cat_obj = db.get(BenefitCatalog, cat_rev.catalog_id)
+            catalog_name = getattr(cat_obj, "name", None) if cat_obj else None
+    except Exception:
+        catalog_name = None
+
+    company_bundles = load_active_company_bundles(db, getattr(draft, "company_id", None))
+
     real_quotation_phrase_map: tuple[tuple[tuple[str, ...], str], ...] = (
         (("windscreen", "wndscrn", "w screen", "cermin", "cermin berlapis", "endorsement 89", "endt 89", "endorsement 97"), "windscreen"),
         (("any authorised driver", "any authorized driver", "all rider", "semua penunggang", "authorised driver", "pemandu yang diberi kuasa", "all driver", "endorsement 108"), "all-drivers"),
@@ -826,7 +845,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
         (("ncd relief", "ncd protector", "endorsement 111", "endt 111"), "ncd-relief"),
         (("drive less save more", "pay as you drive"), "payd-telematics"),
         (("motor pa plus", "smart driver pa"), "motor-pa-plus"),
-        (("private car 365", "auto365"), "private-car-365"),
+        (("private car 365", "pc365", "pc 365", "365 plan"), "private-car-365"),
         (("oto 360",), "oto-360"),
     )
 
@@ -843,6 +862,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
         target_concept_id = None
         premium_cost = None
         cov_limit = None
+        plan_tier_raw = None
         for mapping in list(line.candidate_mappings or []):
             m_cid = str(mapping.get("concept_id") or "").strip()
             if m_cid:
@@ -854,6 +874,8 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     target_concept_id = concepts_by_key[c_k].id
             if mapping.get("premium_cost"):
                 premium_cost = mapping.get("premium_cost")
+            if mapping.get("plan_tier"):
+                plan_tier_raw = str(mapping.get("plan_tier")).strip()
             if mapping.get("coverage_limit"):
                 raw_cl = str(mapping.get("coverage_limit")).strip()
                 if any(c.isdigit() for c in raw_cl) or raw_cl.lower() == "unlimited":
@@ -861,6 +883,13 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
 
         if all_concepts and target_concept_id and str(target_concept_id) not in all_concepts:
             target_concept_id = None
+
+        # Never treat AmAssurance's base policy header (auto365 Comprehensive Lite/Plus/Premier) as Private Car 365 add-on
+        raw_lbl_str = str(line.raw_label or "")
+        if is_base_auto365_policy_label(raw_lbl_str):
+            if decision.disposition == "unresolved":
+                decision.disposition = "omitted"
+            continue
 
         if not premium_cost:
             premium_cost = getattr(line, "premium_cost", None)
@@ -919,10 +948,38 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         target_concept_id = c_obj.id
                         break
 
+        line_full_text = f"{line.raw_label or ''} {ev_text} {plan_tier_raw or ''} {cov_limit or ''}".strip()
+        if not plan_tier_raw:
+            plan_tier_raw = extract_plan_tier_token(line_full_text)
+        matched_bundle = match_bundle_for_text(
+            line_full_text,
+            company_bundles,
+            catalog_name=catalog_name,
+            concept_id=target_concept_id,
+        )
+        if not target_concept_id and matched_bundle is not None:
+            target_concept_id = matched_bundle.primary_concept_id
+
         if not target_concept_id:
             if decision.disposition == "unresolved":
                 decision.disposition = "source_only"
             continue
+
+        if matched_bundle is None and target_concept_id:
+            matched_bundle = match_bundle_for_text(
+                line_full_text,
+                company_bundles,
+                catalog_name=catalog_name,
+                concept_id=target_concept_id,
+            )
+
+        resolved_bundle_tier = None
+        bundle_tier_uncertain = False
+        if matched_bundle is not None:
+            resolved_bundle_tier, bundle_tier_uncertain = resolve_bundle_tier(
+                matched_bundle,
+                extra_text=line_full_text,
+            )
 
         extracted = line.extracted_value if isinstance(line.extracted_value, dict) else None
         if isinstance(extracted, dict):
@@ -960,6 +1017,18 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
         )
         if current is not None and current.catalog_offering_id in offering_by_id:
             current_offering = offering_by_id[current.catalog_offering_id]
+            if matched_bundle is not None and resolved_bundle_tier is not None:
+                current.bundle_tier_id = resolved_bundle_tier.id
+                if getattr(matched_bundle, "force_box2", True):
+                    current.cost_status = "paid"
+                curr_ev = dict(current.evidence_snapshot or {})
+                curr_ev["extracted_label"] = line.raw_label
+                curr_ev["bundle_id"] = matched_bundle.id
+                curr_ev["plan_tier"] = resolved_bundle_tier.label
+                curr_ev["plan_tier_uncertain"] = bundle_tier_uncertain
+                if bundle_tier_uncertain:
+                    curr_ev["needs_review_reason"] = f"Plan level not detected on {matched_bundle.name} — defaulted to {resolved_bundle_tier.label}. Please verify."
+                current.evidence_snapshot = curr_ev
             if _value_matches(current_offering.typed_value, extracted):
                 decision.disposition = "mapped"
                 decision.selection_id = current.id
@@ -1004,14 +1073,20 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     concept_id=target_concept_id,
                     item_kind="catalog",
                     state="current",
-                    cost_status="paid" if has_pos_cost else (current.cost_status or "included"),
+                    cost_status="paid" if (has_pos_cost or (matched_bundle and getattr(matched_bundle, "force_box2", True))) else (current.cost_status or "included"),
                     label_override=matched.label_override if (matched and matched.label_override) else None,
                     typed_value_override=extracted if not _value_matches(matched.typed_value, extracted) else None,
+                    bundle_tier_id=resolved_bundle_tier.id if resolved_bundle_tier else None,
                     evidence_snapshot={
                         "source_line_id": line.id,
                         "source": "extracted_upgrade",
                         "is_detected": True,
                         "extracted_label": line.raw_label,
+                        "raw_text": ev_text or line.raw_label,
+                        "plan_tier": resolved_bundle_tier.label if resolved_bundle_tier else plan_tier_raw,
+                        "plan_tier_uncertain": bundle_tier_uncertain,
+                        **({"bundle_id": matched_bundle.id} if matched_bundle else {}),
+                        **({"needs_review_reason": f"Plan level not detected on {matched_bundle.name} — defaulted to {resolved_bundle_tier.label}. Please verify."} if (matched_bundle and resolved_bundle_tier and bundle_tier_uncertain) else {}),
                         "applied_to_premium": _applied_str,
                     },
                     sort_order=int(matched.sort_order or 0),
@@ -1102,7 +1177,7 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 if is_line_optional is None and isinstance(line, dict):
                     is_line_optional = line.get("is_optional_cover")
 
-                if has_pos_cost:
+                if has_pos_cost or (matched_bundle and getattr(matched_bundle, "force_box2", True)):
                     cost_status = "paid"
                 elif is_explicitly_included:
                     cost_status = "included"
@@ -1128,7 +1203,21 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     cost_status=cost_status,
                     label_override=matched.label_override if (matched and matched.label_override) else None,
                     typed_value_override=typed_val if (typed_val and not _value_matches(matched.typed_value, typed_val)) else None,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_addon", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost, "applied_to_premium": _applied_addon_str},
+                    bundle_tier_id=resolved_bundle_tier.id if resolved_bundle_tier else None,
+                    evidence_snapshot={
+                        "source_line_id": line.id,
+                        "source": "extracted_addon",
+                        "is_detected": True,
+                        "extracted_label": line.raw_label,
+                        "raw_text": ev_text or line.raw_label,
+                        "coverage_limit": cov_limit,
+                        "premium_cost": premium_cost,
+                        "plan_tier": resolved_bundle_tier.label if resolved_bundle_tier else plan_tier_raw,
+                        "plan_tier_uncertain": bundle_tier_uncertain,
+                        **({"bundle_id": matched_bundle.id} if matched_bundle else {}),
+                        **({"needs_review_reason": f"Plan level not detected on {matched_bundle.name} — defaulted to {resolved_bundle_tier.label}. Please verify."} if (matched_bundle and resolved_bundle_tier and bundle_tier_uncertain) else {}),
+                        "applied_to_premium": _applied_addon_str,
+                    },
                     sort_order=int(matched.sort_order or 0),
                     selected_by=draft.owner_id,
                     price=price_dict,
@@ -1180,10 +1269,24 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                     concept_id=target_concept_id,
                     item_kind="custom",
                     state="current",
-                    cost_status="paid" if has_pos_cost else "included",
+                    cost_status="paid" if (has_pos_cost or (matched_bundle and getattr(matched_bundle, "force_box2", True))) else "included",
                     label_override=custom_label,
                     typed_value_override=typed_val,
-                    evidence_snapshot={"source_line_id": line.id, "source": "extracted_custom", "is_detected": True, "extracted_label": line.raw_label, "coverage_limit": cov_limit, "premium_cost": premium_cost, "applied_to_premium": _applied_custom_str},
+                    bundle_tier_id=resolved_bundle_tier.id if resolved_bundle_tier else None,
+                    evidence_snapshot={
+                        "source_line_id": line.id,
+                        "source": "extracted_custom",
+                        "is_detected": True,
+                        "extracted_label": line.raw_label,
+                        "raw_text": ev_text or line.raw_label,
+                        "coverage_limit": cov_limit,
+                        "premium_cost": premium_cost,
+                        "plan_tier": resolved_bundle_tier.label if resolved_bundle_tier else plan_tier_raw,
+                        "plan_tier_uncertain": bundle_tier_uncertain,
+                        **({"bundle_id": matched_bundle.id} if matched_bundle else {}),
+                        **({"needs_review_reason": f"Plan level not detected on {matched_bundle.name} — defaulted to {resolved_bundle_tier.label}. Please verify."} if (matched_bundle and resolved_bundle_tier and bundle_tier_uncertain) else {}),
+                        "applied_to_premium": _applied_custom_str,
+                    },
                     sort_order=50 + applied,
                     selected_by=draft.owner_id,
                     price=price_dict,

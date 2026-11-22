@@ -417,6 +417,8 @@ def _card(
     active_conditional_values: dict[str, str] | None = None,
     active_conditional_empty_values: set[str] | None = None,
     promoted_addon_concept_ids: set[str] | None = None,
+    bundle_card_meta_by_sel_id: dict[str, dict[str, Any]] | None = None,
+    bundle_promoted_overrides: dict[str, dict[str, Any]] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
@@ -629,6 +631,24 @@ def _card(
     ev_snap = getattr(selection, "evidence_snapshot", None)
     ev_source = str(ev_snap.get("source") or "").strip().lower() if isinstance(ev_snap, dict) else ""
     has_line_provenance = isinstance(ev_snap, dict) and bool(ev_snap.get("source_line_id"))
+    sel_id_str = str(getattr(selection, "id", None) or getattr(selection, "selection_key", "") or "") if selection is not None else ""
+    bundle_meta = (bundle_card_meta_by_sel_id or {}).get(sel_id_str)
+    bundle_eff = (
+        (bundle_promoted_overrides or {}).get(concept_id_key)
+        if (selection is not None and getattr(selection, "state", None) == "current")
+        else None
+    )
+    is_manual_target_edit = bool(
+        ev_source == "manual"
+        or (isinstance(ev_snap, dict) and ev_snap.get("manually_edited"))
+    )
+
+    if bundle_meta and bundle_meta.get("force_box2") and getattr(selection, "state", None) == "current":
+        cost_status = "paid"
+    if bundle_eff is not None and not getattr(selection, "state", None) == "available_addon":
+        cost_status = "bundle_included"
+        price = None
+
     is_detected = (
         getattr(selection, "source_kind", None) == "extracted"
         or getattr(selection, "source", None) == "extracted"
@@ -639,7 +659,9 @@ def _card(
     is_purchased_extra = (cost_status == "paid" and price is not None) or is_detected
     is_pure_default = catalog_def.get("category") == "default" and not is_detected and not is_purchased_extra if catalog_def else False
     is_addon = bool(
-        getattr(selection, "state", None) == "available_addon"
+        bundle_eff is not None
+        or (bundle_meta and bundle_meta.get("force_box2"))
+        or getattr(selection, "state", None) == "available_addon"
         or getattr(offering, "role", None) in {"addon_option", "bundle_component"}
         or getattr(offering, "offering_kind", None) in {"optional", "upgrade"}
         or (catalog_def and catalog_def.get("category") == "addon")
@@ -686,7 +708,38 @@ def _card(
 
     effective_asset_id = (visual_profile_assets.get(str(concept.id)) if visual_profile_assets and concept else None) or asset_id or getattr(concept, "default_asset_id", None)
 
-    return {
+    resolved_label = (
+        getattr(selection, "label_override", None)
+        or (active_conditional_titles or {}).get(concept_id_key)
+        or label
+        or getattr(offering, "label_override", None)
+        or concept.label
+    )
+    resolved_value = card_val
+    resolved_desc = final_desc
+    resolved_sort_order = int(getattr(offering, "sort_order", 0) or 0)
+    resolved_effect_order = 0
+    resolved_icon_hint = None
+
+    if bundle_eff is not None:
+        is_promoted_addon = True
+        is_pure_default = False
+        cost_status = "bundle_included"
+        price = None
+        resolved_sort_order = int(bundle_eff.get("parent_sort_order", resolved_sort_order) or 0)
+        resolved_effect_order = int(bundle_eff.get("effect_sort_order", 0) or 0) + 1
+        if bundle_eff.get("icon_hint"):
+            resolved_icon_hint = str(bundle_eff["icon_hint"])
+        if not is_manual_target_edit:
+            if bundle_eff.get("display_title"):
+                resolved_label = str(bundle_eff["display_title"]).strip()
+            eff_val = bundle_eff.get("display_value")
+            resolved_value = str(eff_val).strip() if eff_val is not None else ""
+            if bundle_eff.get("display_description"):
+                resolved_desc = str(bundle_eff["display_description"]).strip()
+
+    is_bundle_effect_card = bundle_eff is not None
+    card_payload = {
         "card_key": f"{getattr(selection, 'id', 'offer')}:{offering.id}:{facet_id or 'parent'}",
         "entitlement_key": str(getattr(selection, "id", f"offer:{offering.id}")),
         "selection_id": getattr(selection, "id", None),
@@ -696,37 +749,62 @@ def _card(
         "concept_key": concept.concept_key,
         "facet_id": facet_id,
         "branch_key": branch_key,
-        # Precedence for title/label: Manual Selection override -> Conditional title -> Offering/Concept default
-        "label": getattr(selection, "label_override", None) or (active_conditional_titles or {}).get(concept_id_key) or label or getattr(offering, "label_override", None) or concept.label,
+        # Precedence for title/label: Manual Selection override -> Conditional/Bundle title -> Offering/Concept default
+        "label": resolved_label,
         "has_manual_override": bool(has_selection_typed or getattr(selection, "label_override", None)),
         "has_manual_value_override": has_selection_value_override,
-        "hide_coverage": is_limit_hidden,
-        "description": final_desc,
-        "is_custom_description": is_custom_desc,
+        "hide_coverage": False if (is_bundle_effect_card and not is_manual_target_edit) else is_limit_hidden,
+        "description": resolved_desc,
+        "is_custom_description": is_custom_desc or is_bundle_effect_card,
         "description_override": offering_desc,
         "conditional_description": cond_desc if cond_desc else None,
-        "value": card_val,
+        "value": resolved_value,
         "typed_value": (
-            {**(typed_value if isinstance(typed_value, dict) else {"type": "custom", "display_text": card_val}), "hide_limit": True}
-            if is_limit_hidden
+            {**(typed_value if isinstance(typed_value, dict) else {"type": "custom", "display_text": resolved_value}), "hide_limit": True}
+            if (is_limit_hidden and not (is_bundle_effect_card and not is_manual_target_edit))
             else typed_value
         ),
-        "price": price,
-        "optional_price": getattr(offering, "optional_price", None),
-        "initial_price": getattr(offering, "optional_price", None),
-        "detected_cost": (getattr(selection, "evidence_snapshot", None) or {}).get("premium_cost"),
+        "price": None if is_bundle_effect_card else price,
+        "optional_price": None if is_bundle_effect_card else getattr(offering, "optional_price", None),
+        "initial_price": None if is_bundle_effect_card else getattr(offering, "optional_price", None),
+        "detected_cost": None if is_bundle_effect_card else (getattr(selection, "evidence_snapshot", None) or {}).get("premium_cost"),
         "detected_limit": (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit"),
         "asset_id": effective_asset_id,
         "cost_status": cost_status,
-        "sort_order": int(getattr(offering, "sort_order", 0) or 0),
+        "sort_order": resolved_sort_order,
+        "bundle_effect_order": resolved_effect_order,
         "is_detected": is_detected,
         "is_pure_default": is_pure_default,
         "is_addon": is_addon,
         "promoted_to_addon": is_promoted_addon,
-        "is_extra": bool(is_promoted_addon or cost_status == "paid" or getattr(selection, "item_kind", None) == "extra" or (isinstance(price, dict) and float(price.get("amount") or price.get("value") or 0) > 0)),
+        "is_bundle_effect": is_bundle_effect_card,
+        "is_extra": bool(
+            is_promoted_addon
+            or is_bundle_effect_card
+            or (bundle_meta and bundle_meta.get("force_box2"))
+            or cost_status in {"paid", "bundle_included"}
+            or getattr(selection, "item_kind", None) == "extra"
+            or (isinstance(price, dict) and float(price.get("amount") or price.get("value") or 0) > 0)
+        ),
         "group_id": getattr(selection, "package_plan_id", None),
         "display_overrides": getattr(concept, "display_overrides", {}) or {},
     }
+    if resolved_icon_hint:
+        card_payload["icon_hint"] = resolved_icon_hint
+    if bundle_meta:
+        card_payload.update(
+            {
+                "is_bundle": True,
+                "bundle_id": bundle_meta.get("bundle_id"),
+                "bundle_name": bundle_meta.get("bundle_name"),
+                "selected_bundle_tier_id": bundle_meta.get("selected_bundle_tier_id"),
+                "selected_bundle_tier_label": bundle_meta.get("selected_bundle_tier_label"),
+                "plan_tier_uncertain": bool(bundle_meta.get("plan_tier_uncertain")),
+                "needs_review_reason": bundle_meta.get("needs_review_reason"),
+                "available_bundle_tiers": bundle_meta.get("available_bundle_tiers") or [],
+            }
+        )
+    return card_payload
 
 
 
@@ -742,6 +820,8 @@ def _expanded_cards(
     active_conditional_values: dict[str, str] | None = None,
     active_conditional_empty_values: set[str] | None = None,
     promoted_addon_concept_ids: set[str] | None = None,
+    bundle_card_meta_by_sel_id: dict[str, dict[str, Any]] | None = None,
+    bundle_promoted_overrides: dict[str, dict[str, Any]] | None = None,
     company_baseline_descriptions: dict[str, str] | None = None,
     company_baseline_costs: dict[str, str] | None = None,
     visual_profile_assets: dict[str, str] | None = None,
@@ -772,6 +852,8 @@ def _expanded_cards(
             active_conditional_values=active_conditional_values,
             active_conditional_empty_values=active_conditional_empty_values,
             promoted_addon_concept_ids=promoted_addon_concept_ids,
+            bundle_card_meta_by_sel_id=bundle_card_meta_by_sel_id,
+            bundle_promoted_overrides=bundle_promoted_overrides,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -796,6 +878,8 @@ def _expanded_cards(
             active_conditional_values=active_conditional_values,
             active_conditional_empty_values=active_conditional_empty_values,
             promoted_addon_concept_ids=promoted_addon_concept_ids,
+            bundle_card_meta_by_sel_id=bundle_card_meta_by_sel_id,
+            bundle_promoted_overrides=bundle_promoted_overrides,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -815,6 +899,8 @@ def resolve_benefit_cards(
     insurer_catalog: list[dict] | None = None,
     company_conditions: list[Any] | None = None,
     company_configs: list[Any] | None = None,
+    company_bundles: list[Any] | None = None,
+    catalog_name: str | None = None,
     visual_profile_assets: dict[str, str] | None = None,
 ) -> dict[str, list[dict]]:
     """Resolve current and available cards solely from pinned rows and decisions."""
@@ -847,6 +933,93 @@ def resolve_benefit_cards(
     promoted_addon_concept_ids: set[str] = set()
     hidden_concept_ids: set[str] = set()
 
+    # Bundled Benefits ("Mystery Box") evaluation takes precedence over legacy 1-to-1 conditions
+    from app.services.bundle_plan_matcher import match_bundle_for_selection, resolve_bundle_tier
+
+    bundle_card_meta_by_sel_id: dict[str, dict[str, Any]] = {}
+    bundle_promoted_overrides: dict[str, dict[str, Any]] = {}
+    bundle_handled_target_ids: set[str] = set()
+    if company_bundles:
+        for sel in current:
+            off_obj = offerings_by_id.get(str(getattr(sel, "catalog_offering_id", "") or ""))
+            conc_obj = concepts_by_id.get(str(getattr(sel, "concept_id", "") or ""))
+            matched_bundle = match_bundle_for_selection(
+                sel,
+                off_obj,
+                conc_obj,
+                company_bundles,
+                catalog_name=catalog_name,
+            )
+            if matched_bundle is None:
+                continue
+            tier, is_uncertain = resolve_bundle_tier(matched_bundle, selection=sel, offering=off_obj)
+            sorted_tiers = sorted(
+                list(getattr(matched_bundle, "tiers", None) or []),
+                key=lambda t: (int(getattr(t, "sort_order", 0) or 0), str(getattr(t, "tier_key", "") or "")),
+            )
+            tiers_summary = [
+                {
+                    "id": str(t.id),
+                    "tier_key": str(t.tier_key),
+                    "label": str(t.label),
+                    "is_default_fallback": bool(getattr(t, "is_default_fallback", False)),
+                }
+                for t in sorted_tiers
+            ]
+            ev_snap = getattr(sel, "evidence_snapshot", None)
+            if not isinstance(ev_snap, dict):
+                ev_snap = {}
+            sel_key_id = str(getattr(sel, "id", None) or getattr(sel, "selection_key", "") or "")
+            if sel_key_id:
+                bundle_card_meta_by_sel_id[sel_key_id] = {
+                    "is_bundle": True,
+                    "force_box2": bool(getattr(matched_bundle, "force_box2", True)),
+                    "bundle_id": str(matched_bundle.id),
+                    "bundle_name": str(matched_bundle.name),
+                    "selected_bundle_tier_id": str(tier.id) if tier else None,
+                    "selected_bundle_tier_label": str(tier.label) if tier else None,
+                    "plan_tier_uncertain": bool(is_uncertain),
+                    "needs_review_reason": ev_snap.get("needs_review_reason")
+                    or (
+                        f"Plan level not detected on {matched_bundle.name} — defaulted to {tier.label}. Please verify."
+                        if (is_uncertain and tier)
+                        else None
+                    ),
+                    "available_bundle_tiers": tiers_summary,
+                }
+            parent_sort_order = int(
+                getattr(off_obj, "sort_order", None)
+                if getattr(off_obj, "sort_order", None) is not None
+                else (getattr(sel, "sort_order", 0) or 0)
+            )
+            if tier is not None:
+                sorted_effects = sorted(
+                    list(getattr(tier, "effects", None) or []),
+                    key=lambda eff: (int(getattr(eff, "sort_order", 0) or 0), str(getattr(eff, "id", ""))),
+                )
+                for eff in sorted_effects:
+                    t_cid = str(getattr(eff, "target_concept_id", "") or "")
+                    if not t_cid:
+                        continue
+                    bundle_handled_target_ids.add(t_cid)
+                    eff_type = str(getattr(eff, "effect_type", "upgrade_to_box2") or "upgrade_to_box2")
+                    if eff_type == "hide_from_box1":
+                        hidden_concept_ids.add(t_cid)
+                    else:
+                        promoted_addon_concept_ids.add(t_cid)
+                        bundle_promoted_overrides[t_cid] = {
+                            "effect_type": eff_type,
+                            "target_concept_id": t_cid,
+                            "display_title": getattr(eff, "display_title", None),
+                            "display_value": getattr(eff, "display_value", None),
+                            "display_description": getattr(eff, "display_description", None),
+                            "icon_hint": getattr(eff, "icon_hint", None),
+                            "parent_bundle_id": str(matched_bundle.id),
+                            "parent_bundle_name": str(matched_bundle.name),
+                            "parent_sort_order": parent_sort_order,
+                            "effect_sort_order": int(getattr(eff, "sort_order", 0) or 0),
+                        }
+
     def _plan_filter_matches(plan_filter_raw: str, trig_sels: list[Any]) -> bool:
         filter_term = str(plan_filter_raw).strip().lower()
         norm_filter = re.sub(r"[-_]+", " ", filter_term).strip()
@@ -856,13 +1029,16 @@ def resolve_benefit_cards(
             plan_obj = plans_by_id.get(str(getattr(s, "package_plan_id", "") or ""))
             ev_snap = getattr(s, "evidence_snapshot", None) if isinstance(getattr(s, "evidence_snapshot", None), dict) else {}
             cov = str(getattr(s, "coverage_limit", "") or ev_snap.get("coverage_limit") or "").lower()
+            ext_lbl = str(ev_snap.get("extracted_label") or "").lower()
+            ext_plan = str(ev_snap.get("plan_tier") or "").lower()
+            ext_raw = str(ev_snap.get("raw_text") or "").lower()
             lbl = str(getattr(s, "label_override", "") or getattr(off_obj, "label_override", "") or "").lower()
             off_k = str(getattr(off_obj, "offering_key", "") or getattr(s, "selection_key", "") or "").lower()
             plan = str(getattr(s, "package_plan_id", "") or getattr(plan_obj, "name", "") or getattr(plan_obj, "plan_key", "") or "").lower()
             tv = getattr(s, "typed_value_override", None) or getattr(off_obj, "typed_value", None) or {}
             plan_k = str(tv.get("plan_key", "") if isinstance(tv, dict) else "").lower()
             disp = str((tv.get("display_text") or tv.get("value") or "") if isinstance(tv, dict) else "").lower()
-            raw_combined = f"{cov} {lbl} {off_k} {plan} {plan_k} {disp}"
+            raw_combined = f"{cov} {ext_lbl} {ext_plan} {ext_raw} {lbl} {off_k} {plan} {plan_k} {disp}"
             # Strip range strings like "1-4" or "1 - 4" so unpicked ranges never false-match a specific plan
             range_free = re.sub(r"\b\d+\s*[-–/]\s*\d+\b", " ", raw_combined)
             combined_haystack = re.sub(r"\s+", " ", range_free.replace("_", " ").replace("-", " ")).strip()
@@ -894,6 +1070,8 @@ def resolve_benefit_cards(
             if matched:
                 raw_target = str(getattr(cond, "target_concept_id", "") or "")
                 target_id = concept_id_by_key.get(raw_target, raw_target)
+                if target_id in bundle_handled_target_ids:
+                    continue
                 action = getattr(cond, "action_type", "replace_description") or "replace_description"
                 if action == "hide_target" or getattr(cond, "replacement_description", "") == "__HIDE__":
                     hidden_concept_ids.add(target_id)
@@ -939,6 +1117,8 @@ def resolve_benefit_cards(
         kwargs["active_conditional_values"] = active_conditional_values
         kwargs["active_conditional_empty_values"] = active_conditional_empty_values
         kwargs["promoted_addon_concept_ids"] = promoted_addon_concept_ids
+        kwargs["bundle_card_meta_by_sel_id"] = bundle_card_meta_by_sel_id
+        kwargs["bundle_promoted_overrides"] = bundle_promoted_overrides
         kwargs["company_baseline_descriptions"] = company_baseline_descriptions
         kwargs["company_baseline_costs"] = company_baseline_costs
         if "visual_profile_assets" not in kwargs:
@@ -960,6 +1140,8 @@ def resolve_benefit_cards(
             active_conditional_values=active_conditional_values,
             active_conditional_empty_values=active_conditional_empty_values,
             promoted_addon_concept_ids=promoted_addon_concept_ids,
+            bundle_card_meta_by_sel_id=bundle_card_meta_by_sel_id,
+            bundle_promoted_overrides=bundle_promoted_overrides,
             company_baseline_descriptions=company_baseline_descriptions,
             company_baseline_costs=company_baseline_costs,
             visual_profile_assets=visual_profile_assets,
@@ -1148,6 +1330,60 @@ def resolve_benefit_cards(
         current_cards = [card for card in current_cards if str(card.get("concept_id") or "") not in hidden_concept_ids]
         available_cards = [card for card in available_cards if str(card.get("concept_id") or "") not in hidden_concept_ids]
 
+    # Emit any unlocked bundle Box 2 cards whose target concept wasn't already present in current selections
+    # (e.g. `add_to_box2` extras like Key Replacement, or Towing if base Towing wasn't seeded)
+    emitted_current_cids = {str(card.get("concept_id") or "") for card in current_cards}
+    for t_cid, eff_spec in bundle_promoted_overrides.items():
+        if t_cid in emitted_current_cids or t_cid in hidden_concept_ids:
+            continue
+        t_concept = concepts_by_id.get(t_cid)
+        if not t_concept:
+            continue
+        eff_asset = (visual_profile_assets.get(t_cid) if visual_profile_assets else None) or getattr(t_concept, "default_asset_id", None)
+        eff_val = str(eff_spec.get("display_value") or "").strip() if eff_spec.get("display_value") is not None else ""
+        synth_card = {
+            "card_key": f"bundle_eff:{eff_spec['parent_bundle_id']}:{t_cid}",
+            "entitlement_key": f"bundle_eff:{eff_spec['parent_bundle_id']}:{t_cid}",
+            "selection_id": None,
+            "offering_id": f"bundle_eff:{t_cid}",
+            "offering_key": f"bundle_eff:{t_cid}",
+            "concept_id": t_concept.id,
+            "concept_key": t_concept.concept_key,
+            "facet_id": None,
+            "branch_key": None,
+            "label": str(eff_spec.get("display_title") or t_concept.label).strip(),
+            "has_manual_override": False,
+            "has_manual_value_override": False,
+            "hide_coverage": False,
+            "description": str(eff_spec.get("display_description") or getattr(t_concept, "description", None) or "").strip(),
+            "is_custom_description": True,
+            "description_override": None,
+            "conditional_description": None,
+            "value": eff_val,
+            "typed_value": None,
+            "price": None,
+            "optional_price": None,
+            "initial_price": None,
+            "detected_cost": None,
+            "detected_limit": None,
+            "asset_id": eff_asset,
+            "cost_status": "bundle_included",
+            "sort_order": int(eff_spec.get("parent_sort_order", 0) or 0),
+            "bundle_effect_order": int(eff_spec.get("effect_sort_order", 0) or 0) + 1,
+            "is_detected": True,
+            "is_pure_default": False,
+            "is_addon": True,
+            "promoted_to_addon": True,
+            "is_bundle_effect": True,
+            "is_extra": True,
+            "group_id": None,
+            "display_overrides": getattr(t_concept, "display_overrides", {}) or {},
+        }
+        if eff_spec.get("icon_hint"):
+            synth_card["icon_hint"] = str(eff_spec["icon_hint"])
+        current_cards.append(synth_card)
+        emitted_current_cids.add(t_cid)
+
     # Strictly guarantee no duplicate benefits between current_benefits and available_addons
     current_concept_ids = {str(card.get("concept_id")) for card in current_cards if card.get("concept_id")}
     current_concept_keys = {str(card.get("concept_key")) for card in current_cards if card.get("concept_key")}
@@ -1159,6 +1395,8 @@ def resolve_benefit_cards(
         cid = str(card.get("concept_id") or "")
         ckey = str(card.get("concept_key") or "")
         lbl_norm = re.sub(r"[^a-z0-9]+", " ", str(card.get("label") or "").lower()).strip()
+        if cid and cid in bundle_handled_target_ids:
+            continue
         is_upgrade = bool(card.get("is_upgrade_edge") or card.get("branch_key"))
         if not is_upgrade:
             if cid and cid in current_concept_ids:
@@ -1173,7 +1411,7 @@ def resolve_benefit_cards(
         seen_addon_keys.add(dedup_key)
         deduped_available_cards.append(card)
 
-    order = lambda card: (card["sort_order"], card["label"].casefold(), card["card_key"])
+    order = lambda card: (card["sort_order"], int(card.get("bundle_effect_order", 0) or 0), card["label"].casefold(), card["card_key"])
     current_sorted = sorted(current_cards, key=order)
     addons_sorted = sorted(deduped_available_cards, key=order)
     plan_rows = {str(item.id): item for item in (plans or [])}

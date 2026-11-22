@@ -134,6 +134,12 @@ from app.services.company_benefit_condition_service import (
     list_company_conditions,
     save_company_condition,
 )
+from app.services.company_benefit_bundle_service import (
+    delete_company_bundle,
+    list_company_bundles,
+    load_active_company_bundles,
+    save_company_bundle,
+)
 
 from app.services import (
     business_setup_common,
@@ -143,6 +149,7 @@ from app.services import (
     catalog_lifecycle_service,
     benefit_profile_service,
     company_benefit_condition_service,
+    company_benefit_bundle_service,
 )
 
 _all_submodules = [
@@ -153,6 +160,7 @@ _all_submodules = [
     catalog_lifecycle_service,
     benefit_profile_service,
     company_benefit_condition_service,
+    company_benefit_bundle_service,
 ]
 
 # Expose any remaining symbols dynamically

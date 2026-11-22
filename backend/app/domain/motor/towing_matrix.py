@@ -109,6 +109,10 @@ def resolve_towing_entitlement(
 
     # 7. AmAssurance (Amgen)
     if "AMASSURANCE" in comp or "AMGEN" in comp or "AMGENERAL" in comp:
+        if any(k in combined for k in ("private car 365", "pc 365", "pc365", "365 plan")):
+            if any(k in combined for k in ("plan 2", "plan2", "p2", "plan 3", "plan3", "p3", "plan 4", "plan4", "p4")):
+                return TowingEntitlement.unlimited()
+            return TowingEntitlement.from_km(600)
         if "lite" in combined:
             if "breakdown" in combined or "150" in combined:
                 return TowingEntitlement.from_km(150)

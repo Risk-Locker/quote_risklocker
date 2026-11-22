@@ -128,6 +128,10 @@ def resolve_insurer_towing_limit(
         sdpa_plan1 = str(rule.get("sdpa_plan1_limit") or "").strip()
         if sdpa_plan1 and any(p in text for p in ("plan 1", "pelan 1", "plan a", "rm 600", "rm600", "600")):
             return sdpa_plan1
+        if "unlimited" in text or any(p in text for p in ("plan 2", "plan2", "pelan 2", "ev plan", "plan 3", "plan3", "pelan 3", "plan 4", "plan4", "pelan 4")):
+            return str(rule.get("unlimited_label") or "Unlimited")
+        if sdpa_plan1 and ("amassurance" in comp or "amgen" in comp or "private car 365" in text):
+            return sdpa_plan1
         return str(rule.get("unlimited_label") or "Unlimited")
 
     # 2. Plan-tiered KM upgrade riders (e.g., Takaful Malaysia Motor PA Plus)

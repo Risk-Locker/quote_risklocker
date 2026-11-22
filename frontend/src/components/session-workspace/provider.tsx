@@ -426,15 +426,27 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       }
     } else {
       // Update in-place
+      const nextTierId = "bundle_tier_id" in operation ? (operation.bundle_tier_id as string | null) : undefined;
+      const clearUncertain = "bundle_tier_id" in operation || Boolean((operation as any).confirm_plan_tier);
       const updateCard = (item: BenefitCardSummary): BenefitCardSummary => {
         if (item.selection_id !== selectionId && item.card_key !== selectionId) return item;
         const baseLbl = labelVal || item.label;
         const nextLbl = !labelVal && (hideCov || hasTyped) ? (stripTrailingMetric(baseLbl) || baseLbl) : baseLbl;
+        const matchedTierOpt = nextTierId && item.available_bundle_tiers
+          ? item.available_bundle_tiers.find((t) => t.id === nextTierId)
+          : null;
         return {
           ...item,
           ...(costStatus ? { cost_status: costStatus } : {}),
           label: nextLbl,
           ...(descVal !== undefined ? { description: descVal } : {}),
+          ...(nextTierId !== undefined
+            ? {
+                selected_bundle_tier_id: nextTierId,
+                ...(matchedTierOpt ? { selected_bundle_tier_label: matchedTierOpt.label } : {}),
+              }
+            : {}),
+          ...(clearUncertain ? { plan_tier_uncertain: false, needs_review_reason: null } : {}),
           ...(hasTyped
             ? {
                 value: String(typed.display_text ?? typed.value ?? ""),
@@ -585,6 +597,9 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                 if (operation.op === "scalar_decision") {
                   const fieldName = String(operation.field || "");
                   const baseField = base.fields?.[fieldName];
+                  if (operation.decision === "confirm" && baseField?.status === "check_needed") {
+                    return false;
+                  }
                   const baseVal = normalizeComparableScalar(baseField?.value);
                   const nextVal =
                     operation.decision === "clear"
@@ -608,6 +623,9 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                   });
                 }
                 if (operation.op === "benefit_update") {
+                  if ("bundle_tier_id" in operation || "confirm_plan_tier" in operation) {
+                    return false;
+                  }
                   const selId = String(operation.selection_id || "");
                   const inBaseCurrent = base.benefit_cards.current_benefits.some(
                     (c) => c.selection_id === selId || c.card_key === selId
