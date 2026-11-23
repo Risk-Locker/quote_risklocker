@@ -31,7 +31,11 @@ from app.db.session import get_db
 from app.models.enums import AccountStatus, RecordStatus, Role
 from app.models.tables import (
     Batch,
+    BenefitCatalog,
+    BenefitCatalogRevision,
     BenefitConcept,
+    CatalogOffering,
+    CompanyBenefitCondition,
     DraftBenefitSelection,
     InsuranceCompany,
     QuotationDraft,
@@ -316,3 +320,326 @@ def test_polish_benefit_description_auth_fallback_and_gemini(monkeypatch):
     assert gem_body["source"] == "gemini"
     assert gem_body["description"] == "Covers full cost of new repair parts with zero wear-and-tear deductions for up to 5 years."
     assert mock_pool.recorded == 1
+
+
+def _assert_pg_check_invariants(sel: DraftBenefitSelection) -> None:
+    assert sel.item_kind in ("catalog", "custom")
+    assert sel.cost_status in ("included", "paid", "foc", "unknown")
+    if sel.item_kind == "catalog":
+        assert sel.catalog_offering_id is not None
+    if sel.item_kind == "custom":
+        assert sel.label_override is not None and str(sel.label_override).strip() != ""
+
+
+def test_box1_and_box2_hide_and_remove_coverage_respect_unique_constraints(db_session):
+    user, _sess, draft = _seed_draft(db_session)
+
+    concept_towing = BenefitConcept(
+        id=new_id(),
+        concept_key="towing-service",
+        label="24-Hour Towing",
+        description="Roadside towing assistance",
+    )
+    catalog = BenefitCatalog(
+        id=new_id(),
+        company_id=draft.company_id,
+        name="Liberty Motor Catalog",
+        revision=1,
+        status="published",
+    )
+    revision = BenefitCatalogRevision(
+        id=new_id(),
+        catalog_id=catalog.id,
+        revision_number=1,
+        state="published",
+        content_hash="hash-rev-1",
+    )
+    base_offering = CatalogOffering(
+        id=new_id(),
+        catalog_revision_id=revision.id,
+        offering_key="towing-base-50km",
+        concept_id=concept_towing.id,
+        offering_kind="base",
+        role="included",
+        status="active",
+        label_override="24-Hour Towing",
+        typed_value={"type": "distance", "value": "50", "unit": "km"},
+        sort_order=1,
+    )
+    upgrade_offering = CatalogOffering(
+        id=new_id(),
+        catalog_revision_id=revision.id,
+        offering_key="towing-unlimited",
+        concept_id=concept_towing.id,
+        offering_kind="optional",
+        role="addon_option",
+        status="active",
+        label_override="Unlimited Towing",
+        typed_value={"type": "distance", "unlimited": True, "unit": "km"},
+        optional_price={"amount": "68.00", "currency": "MYR"},
+        sort_order=2,
+    )
+    stale_key_row = CatalogOffering(
+        id=new_id(),
+        catalog_revision_id=revision.id,
+        offering_key="windscreen-addon",
+        concept_id=new_id(),
+        offering_kind="optional",
+        role="addon_option",
+        status="active",
+        label_override="Windscreen",
+        sort_order=3,
+    )
+    windscreen_concept = BenefitConcept(
+        id=stale_key_row.concept_id,
+        concept_key="windscreen-cover",
+        label="Windscreen Cover",
+        description="Windscreen glass cover",
+    )
+    db_session.add_all([concept_towing, windscreen_concept, catalog, revision, base_offering, upgrade_offering, stale_key_row])
+    db_session.flush()
+
+    draft.catalog_revision_id = revision.id
+    box1_sel = DraftBenefitSelection(
+        id=new_id(),
+        draft_id=draft.id,
+        selection_key=f"catalog:{base_offering.offering_key}",
+        catalog_offering_id=base_offering.id,
+        concept_id=concept_towing.id,
+        item_kind="catalog",
+        state="current",
+        cost_status="included",
+        label_override="24-Hour Towing",
+        typed_value_override={"type": "distance", "value": "50", "unit": "km"},
+        evidence_snapshot={},
+        sort_order=1,
+    )
+    # Row sharing expected selection_key with catalog_offering_id=None must be reused instead of duplicating selection_key.
+    legacy_key_sel = DraftBenefitSelection(
+        id=new_id(),
+        draft_id=draft.id,
+        selection_key=f"catalog:{stale_key_row.offering_key}",
+        catalog_offering_id=None,
+        concept_id=None,
+        item_kind="custom",
+        state="removed",
+        cost_status="paid",
+        label_override="Old Windscreen",
+        evidence_snapshot={},
+        sort_order=3,
+    )
+    db_session.add_all([box1_sel, legacy_key_sel])
+    db_session.commit()
+
+    # 1. Box 1 Hide coverage & Remove coverage via benefit_update
+    apply_workspace_patch(
+        db_session,
+        user,
+        draft.id,
+        base_revision=draft.revision,
+        operations=[
+            {
+                "op": "benefit_update",
+                "selection_id": box1_sel.id,
+                "typed_value": {"type": "custom", "display_text": "50 km", "hide_limit": True},
+            }
+        ],
+    )
+    db_session.refresh(box1_sel)
+    assert box1_sel.typed_value_override["hide_limit"] is True
+    _assert_pg_check_invariants(box1_sel)
+
+    apply_workspace_patch(
+        db_session,
+        user,
+        draft.id,
+        base_revision=draft.revision,
+        operations=[
+            {
+                "op": "benefit_update",
+                "selection_id": box1_sel.id,
+                "typed_value": {"type": "text", "display_text": "", "hide_limit": True},
+            }
+        ],
+    )
+    db_session.refresh(box1_sel)
+    assert box1_sel.typed_value_override["display_text"] == ""
+    assert box1_sel.typed_value_override["hide_limit"] is True
+
+    # 2. Unticked Box 2 optional card Hide/Remove coverage (state='available_addon') must NOT conflict with Box 1 current concept_id
+    apply_workspace_patch(
+        db_session,
+        user,
+        draft.id,
+        base_revision=draft.revision,
+        operations=[
+            {
+                "op": "select_catalog_offering",
+                "offering_id": upgrade_offering.id,
+                "state": "available_addon",
+                "typed_value": {"type": "text", "display_text": "", "hide_limit": True},
+            }
+        ],
+    )
+    db_session.refresh(box1_sel)
+    assert box1_sel.state == "current"
+    upgrade_sel = db_session.query(DraftBenefitSelection).filter_by(catalog_offering_id=upgrade_offering.id).one()
+    assert upgrade_sel.state == "available_addon"
+    assert upgrade_sel.typed_value_override["hide_limit"] is True
+    _assert_pg_check_invariants(upgrade_sel)
+
+    # 3. Promoting Box 2 upgrade to state='current' over Box 1 current (same concept_id) flushes superseded first under partial unique index
+    apply_workspace_patch(
+        db_session,
+        user,
+        draft.id,
+        base_revision=draft.revision,
+        operations=[
+            {
+                "op": "select_catalog_offering",
+                "offering_id": upgrade_offering.id,
+                "state": "current",
+                "cost_status": "paid",
+                "price": {"amount": "68.00", "currency": "MYR"},
+            }
+        ],
+    )
+    db_session.refresh(box1_sel)
+    db_session.refresh(upgrade_sel)
+    assert box1_sel.state == "superseded"
+    assert box1_sel.superseded_by_id == upgrade_sel.id
+    assert upgrade_sel.state == "current"
+    _assert_pg_check_invariants(box1_sel)
+    _assert_pg_check_invariants(upgrade_sel)
+
+    # 4. Re-selecting offering whose selection_key already existed on a custom/removed row reuses that row cleanly
+    apply_workspace_patch(
+        db_session,
+        user,
+        draft.id,
+        base_revision=draft.revision,
+        operations=[
+            {
+                "op": "select_catalog_offering",
+                "offering_id": stale_key_row.id,
+                "state": "available_addon",
+                "typed_value": {"type": "text", "display_text": "", "hide_limit": True},
+            }
+        ],
+    )
+    db_session.refresh(legacy_key_sel)
+    assert legacy_key_sel.catalog_offering_id == stale_key_row.id
+    assert legacy_key_sel.item_kind == "catalog"
+    assert legacy_key_sel.state == "available_addon"
+    _assert_pg_check_invariants(legacy_key_sel)
+
+
+def test_selection_check_invariants_and_conditional_reset_safety(db_session):
+    user, _sess, draft = _seed_draft(db_session)
+
+    trig_concept = BenefitConcept(
+        id=new_id(),
+        concept_key="bundle-trigger",
+        label="Bundle Trigger",
+        description="Trigger",
+    )
+    target_concept = BenefitConcept(
+        id=new_id(),
+        concept_key="bundle-target",
+        label="Roadside Assistance",
+        description="Target",
+    )
+    catalog = BenefitCatalog(id=new_id(), company_id=draft.company_id, name="Cat", revision=1, status="published")
+    revision = BenefitCatalogRevision(id=new_id(), catalog_id=catalog.id, revision_number=1, state="published", content_hash="h2")
+    removed_cat_offering = CatalogOffering(
+        id=new_id(),
+        catalog_revision_id=revision.id,
+        offering_key="target-removed-cat",
+        concept_id=target_concept.id,
+        offering_kind="base",
+        status="active",
+        label_override="Roadside Assistance",
+        sort_order=1,
+    )
+    cond = CompanyBenefitCondition(
+        id=new_id(),
+        company_id=draft.company_id,
+        name="Trigger resets target",
+        trigger_concept_id=trig_concept.id,
+        target_concept_id=target_concept.id,
+        action_type="replace_description",
+        is_active=True,
+    )
+    db_session.add_all([trig_concept, target_concept, catalog, revision, removed_cat_offering, cond])
+    db_session.flush()
+    draft.catalog_revision_id = revision.id
+
+    # Corrupted catalog row missing catalog_offering_id + custom row + current target + removed catalog target
+    trigger_sel = DraftBenefitSelection(
+        id=new_id(),
+        draft_id=draft.id,
+        selection_key="catalog:trigger-broken",
+        catalog_offering_id=None,
+        concept_id=trig_concept.id,
+        item_kind="catalog",
+        state="current",
+        cost_status="paid",
+        label_override="",
+        evidence_snapshot={},
+        sort_order=1,
+    )
+    custom_target = DraftBenefitSelection(
+        id=new_id(),
+        draft_id=draft.id,
+        selection_key="custom:target-note",
+        concept_id=target_concept.id,
+        item_kind="custom",
+        state="current",
+        cost_status="included",
+        label_override="Custom Roadside Note",
+        evidence_snapshot={},
+        sort_order=2,
+    )
+    removed_target = DraftBenefitSelection(
+        id=new_id(),
+        draft_id=draft.id,
+        selection_key="catalog:target-removed-cat",
+        catalog_offering_id=removed_cat_offering.id,
+        concept_id=target_concept.id,
+        item_kind="catalog",
+        state="removed",
+        cost_status="included",
+        label_override="Old Removed Title",
+        evidence_snapshot={},
+        sort_order=3,
+    )
+    db_session.add_all([trigger_sel, custom_target, removed_target])
+    db_session.commit()
+
+    # Empty label on custom_target must NOT NULL label_override, and broken catalog row auto-heals
+    apply_workspace_patch(
+        db_session,
+        user,
+        draft.id,
+        base_revision=draft.revision,
+        operations=[
+            {"op": "benefit_update", "selection_id": custom_target.id, "label": ""},
+            {
+                "op": "benefit_update",
+                "selection_id": trigger_sel.id,
+                "typed_value": {"type": "text", "display_text": "", "hide_limit": True},
+            },
+        ],
+    )
+    db_session.refresh(trigger_sel)
+    db_session.refresh(custom_target)
+    db_session.refresh(removed_target)
+
+    _assert_pg_check_invariants(trigger_sel)
+    _assert_pg_check_invariants(custom_target)
+    _assert_pg_check_invariants(removed_target)
+    assert trigger_sel.item_kind == "custom"
+    assert custom_target.label_override == "Custom Roadside Note"
+    # removed_target must stay removed because custom_target already holds state='current' for target_concept
+    assert removed_target.state == "removed"
+

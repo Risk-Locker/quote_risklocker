@@ -639,6 +639,8 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
             if explicit_concept:
                 for conflict in conflicts:
                     conflict.state = ReviewedBenefitState.SUPERSEDED.value
+                if hasattr(db, "flush"):
+                    db.flush()
             else:
                 concept_id = None
 
@@ -709,6 +711,28 @@ def _resolve_selection(db, draft: QuotationDraft, selection_id: str) -> DraftBen
 
 
 
+def _ensure_selection_row_invariants(selection: DraftBenefitSelection) -> None:
+    """Enforce PostgreSQL CHECK constraints on draft_benefit_selections before flush/commit.
+
+    DB constraints (migrations/025_v7_review_state.sql):
+      - item_kind IN ('catalog', 'custom')
+      - cost_status IN ('included', 'paid', 'foc', 'unknown')
+      - CHECK ((item_kind = 'catalog' AND catalog_offering_id IS NOT NULL) OR item_kind = 'custom')
+      - CHECK ((item_kind = 'custom' AND label_override IS NOT NULL) OR item_kind = 'catalog')
+    """
+    if selection.item_kind == "catalog" and not selection.catalog_offering_id:
+        selection.item_kind = "custom"
+    if selection.item_kind == "custom":
+        clean_label = str(selection.label_override or "").strip()
+        if not clean_label:
+            fallback = str(selection.selection_key or "Custom benefit").strip()
+            selection.label_override = (fallback or "Custom benefit")[:255]
+    selection.cost_status = normalize_cost_status(
+        selection.cost_status,
+        default=CostStatus.INCLUDED if selection.state == ReviewedBenefitState.CURRENT.value else CostStatus.PAID,
+    ).value
+
+
 def _reset_conditional_targets_for_trigger(
     db,
     draft: QuotationDraft,
@@ -752,17 +776,29 @@ def _reset_conditional_targets_for_trigger(
         pass
     if not target_ids:
         return
-    for sel in _draft_selections_with_pending(db, draft.id):
+    all_sels = _draft_selections_with_pending(db, draft.id)
+    for sel in all_sels:
         if sel.concept_id and str(sel.concept_id) in target_ids:
             ev_s = sel.evidence_snapshot if isinstance(sel.evidence_snapshot, dict) else {}
             if str(ev_s.get("source") or "").lower() == "manual" or ev_s.get("manually_edited"):
                 continue
-            sel.label_override = None
+            if sel.item_kind == "catalog":
+                sel.label_override = None
             sel.typed_value_override = None
             if sel.cost_status == "bundle_included" or (sel.cost_status == CostStatus.PAID.value and not sel.price):
                 sel.cost_status = CostStatus.INCLUDED.value
             if sel.state == ReviewedBenefitState.REMOVED.value and sel.catalog_offering_id:
-                sel.state = ReviewedBenefitState.CURRENT.value
+                has_other_current = any(
+                    other.id != sel.id
+                    and other.concept_id
+                    and other.concept_id == sel.concept_id
+                    and other.state == ReviewedBenefitState.CURRENT.value
+                    and other.superseded_by_id is None
+                    for other in all_sels
+                )
+                if not has_other_current:
+                    sel.state = ReviewedBenefitState.CURRENT.value
+            _ensure_selection_row_invariants(sel)
 
 
 def _clear_bundle_tier_metadata(selection: DraftBenefitSelection) -> None:
@@ -852,7 +888,11 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
         except ValueError as exc:
             raise AppError("Quotation benefit state is invalid.", 422) from exc
 
-    current = [item for item in selections if item.concept_id == offering.concept_id and item.state == ReviewedBenefitState.CURRENT.value]
+    current = (
+        [item for item in selections if item.concept_id == offering.concept_id and item.state == ReviewedBenefitState.CURRENT.value]
+        if offering.concept_id
+        else []
+    )
     if len(current) > 1:
         raise AppError("This benefit concept has conflicting current selections.", 409)
 
@@ -901,19 +941,40 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             price = None
 
     valid_concept_id = _safe_concept_id(db, offering.concept_id)
+    expected_key = f"catalog:{offering.offering_key}"[:160]
 
     selected = next((item for item in selections if item.catalog_offering_id == offering.id), None)
     if selected is None:
+        selected = next((item for item in selections if item.selection_key == expected_key), None)
+        if selected is not None:
+            selected.catalog_offering_id = offering.id
+            selected.item_kind = "catalog"
+            selected.concept_id = valid_concept_id
+    if selected is not None and "state" not in operation:
+        desired_state = selected.state
+
+    current_conflicts = [
+        item for item in current
+        if selected is None or item.id != selected.id
+    ]
+    if desired_state == ReviewedBenefitState.CURRENT.value and current_conflicts:
+        for conflict in current_conflicts:
+            conflict.state = ReviewedBenefitState.SUPERSEDED.value
+        if hasattr(db, "flush"):
+            db.flush()
+
+    created_new = selected is None
+    if selected is None:
         selected = DraftBenefitSelection(
-            id=new_id(), draft_id=draft.id, selection_key=f"catalog:{offering.offering_key}"[:160],
+            id=new_id(), draft_id=draft.id, selection_key=expected_key,
             catalog_offering_id=offering.id, concept_id=valid_concept_id, item_kind="catalog",
             label_override=offering.label_override, evidence_snapshot={"catalog_revision_id": draft.catalog_revision_id},
             sort_order=int(offering.sort_order or 0),
         )
         db.add(selected)
-    elif "state" not in operation:
-        desired_state = selected.state
     selected.state = desired_state
+    if desired_state != ReviewedBenefitState.SUPERSEDED.value:
+        selected.superseded_by_id = None
     if "cost_status" in operation or not selected.cost_status:
         selected.cost_status = cost_status
     if has_typed_op:
@@ -921,13 +982,15 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
         if isinstance(typed_override, dict):
             if "description" in prev_typed and "description" not in typed_override:
                 typed_override["description"] = prev_typed["description"]
+            if "icon_hint" in prev_typed and "icon_hint" not in typed_override:
+                typed_override["icon_hint"] = prev_typed["icon_hint"]
         selected.typed_value_override = typed_override
     if "price" in operation or selected.price is None:
         selected.price = price
     if "label" in operation or "label_override" in operation:
         raw_lbl = operation.get("label") if "label" in operation else operation.get("label_override")
         if raw_lbl:
-            selected.label_override = str(raw_lbl).strip()
+            selected.label_override = str(raw_lbl).strip()[:255]
     if "description" in operation or "description_override" in operation:
         raw_desc = operation.get("description") if "description" in operation else operation.get("description_override")
         if raw_desc:
@@ -935,7 +998,7 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             curr_typed = dict(selected.typed_value_override or {})
             curr_typed["description"] = clean_desc
             if "type" not in curr_typed:
-                curr_typed["type"] = "custom"
+                curr_typed["type"] = "text"
             selected.typed_value_override = curr_typed
     if selected.state != ReviewedBenefitState.CURRENT.value:
         _clear_bundle_tier_metadata(selected)
@@ -943,11 +1006,16 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
     else:
         tier_changed = _apply_bundle_tier_fields(db, draft, selected, operation, offering=offering)
     selected.selected_by = user.id
-    if desired_state == ReviewedBenefitState.CURRENT.value and current and current[0].id != selected.id:
-        current[0].state = ReviewedBenefitState.SUPERSEDED.value
-        current[0].superseded_by_id = selected.id
-    elif desired_state == ReviewedBenefitState.REMOVED.value and current and current[0].id != selected.id:
-        current[0].state = ReviewedBenefitState.REMOVED.value
+    _ensure_selection_row_invariants(selected)
+    if desired_state == ReviewedBenefitState.CURRENT.value and current_conflicts:
+        if created_new and hasattr(db, "flush"):
+            db.flush()
+        for conflict in current_conflicts:
+            conflict.state = ReviewedBenefitState.SUPERSEDED.value
+            conflict.superseded_by_id = selected.id
+    elif desired_state == ReviewedBenefitState.REMOVED.value and current_conflicts:
+        for conflict in current_conflicts:
+            conflict.state = ReviewedBenefitState.REMOVED.value
     if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
         _reset_conditional_targets_for_trigger(db, draft, selected.concept_id, trigger_selection=selected)
     return f"benefits.{selected.id}"
@@ -968,17 +1036,22 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
             state = ReviewedBenefitState(str(operation.get("state"))).value
         except ValueError as exc:
             raise AppError("Quotation benefit state is invalid.", 422) from exc
+        conflicts: list[DraftBenefitSelection] = []
         if state == ReviewedBenefitState.CURRENT.value and selection.concept_id:
             conflicts = [
                 item for item in _draft_selections_with_pending(db, draft.id)
                 if item.id != selection.id and item.concept_id and item.concept_id == selection.concept_id and item.state == ReviewedBenefitState.CURRENT.value
             ]
-            for conflict in conflicts:
-                conflict.state = ReviewedBenefitState.SUPERSEDED.value
-                conflict.superseded_by_id = selection.id
+            if conflicts:
+                for conflict in conflicts:
+                    conflict.state = ReviewedBenefitState.SUPERSEDED.value
+                if hasattr(db, "flush"):
+                    db.flush()
         selection.state = state
         if state != ReviewedBenefitState.SUPERSEDED.value:
             selection.superseded_by_id = None
+        for conflict in conflicts:
+            conflict.superseded_by_id = selection.id
     if "cost_status" in operation:
         selection.cost_status = normalize_cost_status(operation.get("cost_status"), default=CostStatus.PAID).value
     if "price" in operation:
@@ -993,7 +1066,10 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
     if "label" in operation or "label_override" in operation:
         raw_label = operation.get("label") if "label" in operation else operation.get("label_override")
         clean_lbl = str(raw_label or "").strip()
-        selection.label_override = clean_lbl or None
+        if clean_lbl:
+            selection.label_override = clean_lbl[:255]
+        elif selection.item_kind != "custom":
+            selection.label_override = None
     if "description" in operation or "description_override" in operation:
         raw_desc = operation.get("description") if "description" in operation else operation.get("description_override")
         clean_desc = str(raw_desc or "").strip()
@@ -1043,6 +1119,7 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
     else:
         tier_changed = _apply_bundle_tier_fields(db, draft, selection, operation)
     selection.selected_by = user.id
+    _ensure_selection_row_invariants(selection)
     if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
         _reset_conditional_targets_for_trigger(db, draft, selection.concept_id, trigger_selection=selection)
     return f"benefits.{selection.id}"
@@ -1063,6 +1140,8 @@ def _apply_revert_benefit(db, draft: QuotationDraft, user, operation: dict) -> s
     selection.state = ReviewedBenefitState.REMOVED.value
     selection.superseded_by_id = None
     selection.selected_by = user.id
+    if hasattr(db, "flush"):
+        db.flush()
     if predecessors:
         predecessors[0].state = ReviewedBenefitState.CURRENT.value
         predecessors[0].superseded_by_id = None
