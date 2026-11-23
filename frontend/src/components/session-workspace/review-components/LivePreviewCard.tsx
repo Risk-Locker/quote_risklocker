@@ -313,7 +313,6 @@ export function LivePreviewCard({
 
   const renderZoomControls = (inExpandedModal: boolean) => (
     <div className="flex items-center gap-1 bg-gray-100/90 rounded px-1.5 py-0.5 border border-gray-200 text-[10px]">
-      <span className="font-bold text-[var(--rl-text-muted)] text-[9px] uppercase tracking-wider">Zoom</span>
       <button
         type="button"
         onClick={() => setPreviewZoom((z) => clampZoom(z - 0.1))}
@@ -329,7 +328,7 @@ export function LivePreviewCard({
         step="0.05"
         value={previewZoom}
         onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
-        className="w-14 h-1 cursor-pointer accent-[var(--rl-red)]"
+        className="w-12 h-1 cursor-pointer accent-[var(--rl-red)]"
         title="Zoom slider (25% - 250%)"
       />
       <button
@@ -370,10 +369,10 @@ export function LivePreviewCard({
 
   return (
     <>
-      <Card className="rl-tour-preview flex flex-col gap-2 p-2.5 h-full min-h-[480px] overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-1.5 shrink-0">
+      <Card className="rl-tour-preview flex flex-col gap-1.5 p-1.5 h-full min-h-[480px] overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-1 shrink-0">
           <div className="flex items-center gap-1.5">
-            <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">Live Quotation Preview</h2>
+            <h2 className="text-xs font-bold text-[var(--rl-text-strong)] whitespace-nowrap" title="Live Quotation Preview">Preview</h2>
             <span className="flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
               Live
@@ -413,7 +412,7 @@ export function LivePreviewCard({
                     type="button"
                     onClick={handleOpenNewQuotationTab}
                     disabled={openingPreviewTab}
-                    className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold bg-[var(--rl-black)] text-white hover:bg-black transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold bg-[var(--rl-black)] text-white hover:bg-black transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
                     title="Open rendered quotation in a full browser tab"
                   >
                     <ArrowSquareOut size={12} weight="bold" />
@@ -423,7 +422,7 @@ export function LivePreviewCard({
                 <button
                   type="button"
                   onClick={handleToggleExpand}
-                  className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors border border-gray-200 shadow-2xs cursor-pointer"
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors border border-gray-200 shadow-2xs cursor-pointer"
                   title="Expand live preview full screen"
                 >
                   <ArrowsOutSimple size={12} weight="bold" />
@@ -434,7 +433,7 @@ export function LivePreviewCard({
             <button
               type="button"
               onClick={() => setPreviewCollapsed((v) => !v)}
-              className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors border border-gray-200 shadow-2xs cursor-pointer"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors border border-gray-200 shadow-2xs cursor-pointer"
               title={previewCollapsed ? "Expand live preview canvas" : "Collapse live preview canvas"}
             >
               {previewCollapsed ? <CaretDown size={12} weight="bold" /> : <CaretUp size={12} weight="bold" />}
@@ -476,7 +475,7 @@ export function LivePreviewCard({
               ref={previewScrollRef}
               onMouseDown={handleViewportMouseDown}
               onContextMenu={handleViewportContextMenu}
-              className={`relative flex-1 min-h-0 w-full overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-100/80 p-3 ${
+              className={`relative flex-1 min-h-0 w-full overflow-auto rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-100/80 p-2 ${
                 isPanning ? "cursor-grabbing select-none" : ""
               }`}
             >

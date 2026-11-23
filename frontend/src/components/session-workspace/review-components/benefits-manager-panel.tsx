@@ -193,19 +193,16 @@ export function BenefitsManagerPanel({
   };
 
   return (
-    <div className="rl-tour-benefits grid gap-3 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3 shadow-card transition-all">
+    <div className="rl-tour-benefits grid gap-2 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-2 shadow-card transition-all">
       {/* Top Header & Global Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-1.5">
         <div className="min-w-0">
-          <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">
+          <h2 className="text-xs font-bold text-[var(--rl-text-strong)] whitespace-nowrap">
             {companyName ? `${companyName} Benefits & Add-ons` : "Benefits & Add-ons"}
           </h2>
-          <p className="text-[11px] text-[var(--rl-text-muted)]">
-            Free Policy Inclusions (Box 1) and Matrix Add-on Covers (Box 2) synced live with Preview.
-          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1">
           {/* Layout Mode Selector (Stacked vs Side-by-Side) */}
           <div className="hidden 2xl:flex items-center rounded-md border border-[var(--rl-border)] bg-gray-100 p-0.5 text-[11px] font-semibold">
             <button
@@ -240,12 +237,12 @@ export function BenefitsManagerPanel({
           <Button
             size="sm"
             variant="primary"
-            icon={<Plus size={14} weight="bold" />}
+            icon={<Plus size={13} weight="bold" />}
             onClick={() => {
               setCustomModalPlacement("addon");
               setShowAddCustomModal(true);
             }}
-            className="text-xs font-bold bg-[var(--rl-red)] hover:bg-red-700 border-[var(--rl-red)] text-white shadow-xs"
+            className="!h-7 !min-h-[26px] !px-2 !text-[11px] font-bold bg-[var(--rl-red)] hover:bg-red-700 border-[var(--rl-red)] text-white shadow-xs"
             title="Add a custom benefit or add-on"
           >
             Add Custom Benefit
@@ -253,12 +250,12 @@ export function BenefitsManagerPanel({
           <Button
             size="sm"
             variant="secondary"
-            icon={<Plus size={14} weight="bold" />}
+            icon={<Plus size={13} weight="bold" />}
             onClick={() => {
               setModalTarget("available_addon");
               setShowGlobalModal(true);
             }}
-            className="text-xs"
+            className="!h-7 !min-h-[26px] !px-2 !text-[11px]"
             title="Browse global library of benefits and add-ons"
           >
             Global Library
@@ -267,9 +264,9 @@ export function BenefitsManagerPanel({
           <Button
             size="sm"
             variant="secondary"
-            icon={<ArrowCounterClockwise size={13} weight="bold" className="text-amber-600" />}
+            icon={<ArrowCounterClockwise size={12} weight="bold" className="text-amber-600" />}
             onClick={handleReset}
-            className="text-xs"
+            className="!h-7 !min-h-[26px] !px-2 !text-[11px]"
             title="Reset to initial insurance defaults and detections"
           >
             Reset
@@ -277,10 +274,10 @@ export function BenefitsManagerPanel({
           <Button
             size="sm"
             variant="secondary"
-            icon={<ArrowArcLeft size={13} weight="bold" />}
+            icon={<ArrowArcLeft size={12} weight="bold" />}
             onClick={handleUndo}
             disabled={undoStack.length === 0}
-            className="text-xs"
+            className="!h-7 !min-h-[26px] !px-2 !text-[11px]"
             title="Undo recent benefit change"
           >
             Undo
@@ -288,10 +285,10 @@ export function BenefitsManagerPanel({
           <Button
             size="sm"
             variant="secondary"
-            icon={<ArrowArcRight size={13} weight="bold" />}
+            icon={<ArrowArcRight size={12} weight="bold" />}
             onClick={handleRedo}
             disabled={redoStack.length === 0}
-            className="text-xs"
+            className="!h-7 !min-h-[26px] !px-2 !text-[11px]"
             title="Redo benefit change"
           >
             Redo
@@ -299,10 +296,10 @@ export function BenefitsManagerPanel({
           <button
             type="button"
             onClick={() => setBenefitsCollapsed((v) => !v)}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors cursor-pointer"
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors cursor-pointer"
             title={benefitsCollapsed ? "Expand Benefits & Add-ons" : "Collapse Benefits & Add-ons"}
           >
-            {benefitsCollapsed ? <CaretDown size={13} weight="bold" /> : <CaretUp size={13} weight="bold" />}
+            {benefitsCollapsed ? <CaretDown size={12} weight="bold" /> : <CaretUp size={12} weight="bold" />}
             <span>{benefitsCollapsed ? "Expand" : "Collapse"}</span>
           </button>
           {onClosePanel ? (
@@ -313,7 +310,7 @@ export function BenefitsManagerPanel({
               title="Close Benefit Edit Panel"
               aria-label="Close Benefit Edit Panel"
             >
-              <X size={14} weight="bold" />
+              <X size={13} weight="bold" />
             </button>
           ) : null}
         </div>
@@ -321,13 +318,13 @@ export function BenefitsManagerPanel({
 
       {/* Search and Quick Filters */}
       <div className="relative flex items-center">
-        <MagnifyingGlass size={15} className="absolute left-3 text-[var(--rl-text-muted)] pointer-events-none" />
+        <MagnifyingGlass size={14} className="absolute left-2.5 text-[var(--rl-text-muted)] pointer-events-none" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search benefits by name, description, or limit..."
-          className="h-8 w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white pl-8 pr-20 text-xs text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] focus:border-[var(--rl-red)] focus:ring-1 focus:ring-[var(--rl-red)] focus:outline-none transition-all shadow-2xs"
+          className="h-7 w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white pl-8 pr-20 text-[11px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] focus:border-[var(--rl-red)] focus:ring-1 focus:ring-[var(--rl-red)] focus:outline-none transition-all shadow-2xs"
         />
         {searchQuery ? (
           <button

@@ -400,7 +400,7 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
   };
 
   return (
-    <div className="flex flex-col lg:h-[calc(100dvh-57px)] lg:overflow-hidden">
+    <div className="flex flex-col lg:h-[calc(100dvh-45px)] lg:overflow-hidden">
       <ReviewHeaderCard
         workspace={workspace}
         companyName={companyName}
@@ -431,7 +431,7 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
         onStartRedetect={() => void deepRedetect.startSessionRedetect(workspace.session_id)}
       />
 
-      <section className="flex flex-col flex-1 min-h-0 gap-1.5 w-full px-2 py-1.5">
+      <section className="flex flex-col flex-1 min-h-0 gap-1 w-full px-1.5 py-1">
         <div className="shrink-0 flex flex-col gap-1.5 empty:hidden">
           <DeepRedetectProgressBanner
             job={deepRedetect.job}

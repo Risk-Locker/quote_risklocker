@@ -237,7 +237,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-[var(--rl-bg)]">
       {/* Header */}
       <header className="sticky top-0 z-40 w-full border-b border-[var(--rl-border)] bg-[var(--rl-surface)]/95 backdrop-blur-sm">
-        <div className="mx-auto flex w-full items-center justify-between px-4 sm:px-5 h-[56px]">
+        <div className={`mx-auto flex w-full items-center justify-between ${isSessionWorkspace ? "h-[44px] px-3" : "h-[56px] px-4 sm:px-5"}`}>
           <div className="flex items-center gap-3">
             {/* Mobile menu hamburger button */}
             <button
@@ -253,7 +253,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <img
                 src="/assets/brand/logo-black.png"
                 alt="Risklocker"
-                className="h-6 w-auto"
+                className={`${isSessionWorkspace ? "h-5" : "h-6"} w-auto`}
               />
             </Link>
 
@@ -296,7 +296,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {latestPolicyIssue && !(pathname?.startsWith("/workspace") || pathname?.startsWith("/builder") || pathname?.includes("/review")) && (
         <aside
           aria-label="Policy Issued Notification"
-          className="sticky top-[56px] z-30 w-full bg-emerald-900 border-b border-emerald-700 text-white px-4 py-2 shadow-md flex items-center justify-between gap-3 text-xs transition-all animate-fade-in"
+          className={`sticky ${isSessionWorkspace ? "top-[44px]" : "top-[56px]"} z-30 w-full bg-emerald-900 border-b border-emerald-700 text-white px-4 py-2 shadow-md flex items-center justify-between gap-3 text-xs transition-all animate-fade-in`}
         >
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-base select-none">🎉</span>
@@ -474,8 +474,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }`}
       >
         {/* Desktop Sidebar */}
-        <aside className={`hidden md:block ${isSessionWorkspace ? "py-3 pl-2 pr-1 border-r border-[var(--rl-border)] bg-[var(--rl-surface)]/50" : ""}`}>
-          <nav className="flex flex-col gap-3 sticky top-[80px]">
+        <aside className={`hidden md:block ${isSessionWorkspace ? "py-2 pl-1.5 pr-1 border-r border-[var(--rl-border)] bg-[var(--rl-surface)]/50" : ""}`}>
+          <nav className={`flex flex-col gap-3 sticky ${isSessionWorkspace ? "top-[52px]" : "top-[80px]"}`}>
             {filteredSections.map((section, sIdx) => {
               const isSectionLocked = isStaff && section.staffRestricted;
               return (
