@@ -753,5 +753,19 @@ class TemplateLivePreviewRequest(BaseModel):
     render_mode: Literal["quotation", "schedule", "combined"] = "quotation"
 
 
+class BenefitDescriptionPolishRequest(StrictRequest):
+    label: str = Field(min_length=1, max_length=200)
+    coverage_limit: str = Field(default="", max_length=120)
+    draft_description: str = Field(default="", max_length=500)
+    placement: Literal["foc", "addon"] = "addon"
+    insurer_name: str | None = Field(default=None, max_length=120)
+    vehicle_type: str | None = Field(default=None, max_length=60)
+
+
+class BenefitDescriptionPolishResponse(BaseModel):
+    description: str
+    source: Literal["gemini", "fallback"]
+
+
 
 

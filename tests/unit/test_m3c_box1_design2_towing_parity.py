@@ -37,10 +37,7 @@ from app.models.tables import (
     new_id,
 )
 from app.rendering.render_context import resolve_benefit_cards
-from app.rendering.unified_addon_engine import (
-    detect_towing_upgrade,
-    extract_free_coverage_items,
-)
+from app.rendering.unified_addon_engine import extract_free_coverage_items
 from app.services.benefit_evaluation_engine import (
     BenefitEvaluationEngine,
     EvaluatedBenefit,
@@ -185,13 +182,13 @@ def test_commercial_heavy_vehicle_pins_commercial_catalog_and_seeds_box1_perks(h
     assert c_towing.id not in seeded_concept_ids
 
 
-def test_detect_towing_upgrade_reads_typed_value_and_plan_4_and_updates_in_place():
-    """M3c-2: detect_towing_upgrade parses typed_value/value ('Plan 4') even when label is just 'Motor PA Plus'."""
+def test_box1_never_mutates_towing_via_legacy_string_scanning():
+    """M3c-2 (Restructured): extract_free_coverage_items NEVER mutates Box 1 towing in place when an unpromoted rider is present."""
     active_benefits = [
         {
             "id": "b-tow",
             "concept_key": "towing",
-            "label": "Emergency Towing Assistance (RM 200.00)",
+            "label": "Emergency Towing Assistance (50 km)",
             "description": "24/7 accidental towing service to nearest panel workshop.",
             "cost_status": "included",
             "is_extra": False,
@@ -207,14 +204,10 @@ def test_detect_towing_upgrade_reads_typed_value_and_plan_4_and_updates_in_place
             "price": {"amount": 90.0},
         },
     ]
-    upgrade = detect_towing_upgrade(active_benefits, "Takaful Malaysia")
-    assert upgrade is not None
-    assert upgrade["title"] == "Unlimited Towing Assistance"
-    assert upgrade["rider"] == "Motor PA Plus - Plan 4"
-
     free_items = extract_free_coverage_items(active_benefits, "Takaful Malaysia")
-    assert free_items[0]["title"] == "Unlimited Towing Assistance"
-    assert "Unlimited" in free_items[0]["title"]
+    assert free_items[0]["title"] == "Emergency Towing Assistance (50 km)"
+    assert "Unlimited" not in free_items[0]["title"]
+    assert "Upgraded via" not in free_items[0]["description"]
 
 
 def test_company_benefit_condition_plan_4_beats_wildcard_across_box1_and_comparison(hermetic_db: Session):

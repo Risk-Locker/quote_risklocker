@@ -1394,8 +1394,10 @@ def _resolve_comparison_benefits(
                             continue
                         disp_title = str(getattr(eff, "display_title", "") or "")
                         tc = str(getattr(eff, "target_concept_id", "") or "")
+                        target_concept = next((c for k, c in concepts.items() if str(k) == tc), None)
+                        target_key = str(getattr(target_concept, "concept_key", "") or "").lower()
                         if eff_type in ("upgrade_to_box2", "add_to_box2") and (
-                            tc == "47e25689-0ef1-4db5-ae8e-251e8cd94af1" or "towing" in disp_title.lower()
+                            target_key == "towing" or "towing" in disp_title.lower()
                         ):
                             eff_match = eff
                             break

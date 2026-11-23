@@ -97,6 +97,7 @@ class BenefitValue(BaseModel):
     plan_key: str | None = Field(default=None, max_length=120)
     display_text: str | None = Field(default=None, max_length=500)
     description: str | None = Field(default=None, max_length=1_000)
+    icon_hint: str | None = Field(default=None, max_length=80)
     label: str | None = Field(default=None, max_length=255)
     hideCoverage: bool | None = False
     hideCost: bool | None = False

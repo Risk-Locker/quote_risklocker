@@ -229,6 +229,58 @@ def _deterministic_fallback(
     }
 
 
+def _try_clear_deterministic_grounding(
+    *,
+    car_brand: str | None,
+    car_model: str | None,
+    engine_cc: str | None,
+    vehicle_class: str | None,
+    product_name: str | None,
+    extracted_vehicle_type: str | None,
+) -> dict[str, Any] | None:
+    """Fast-path deterministic classification when PDF specs are already unambiguous."""
+    spec_upper = _normalize_token(engine_cc)
+    vtype_norm = (extracted_vehicle_type or "").strip()
+    is_ev_hint = bool(re.search(r"\bKW\b|\bW\b", spec_upper) or re.search(r"\(\s*EV\s*\)", _normalize_token(product_name)))
+    is_weight = bool(re.search(r"\bKG\b|\bTON", spec_upper))
+    is_cc = bool(re.search(r"\b(\d{3,4}(?:\.\d+)?)\s*CC\b", spec_upper))
+
+    # Case A: Unambiguous Passenger Car (Private Car class + explicit CC/kW + non-commercial type)
+    if (
+        is_private_passenger_class(vehicle_class, engine_cc, f"{car_brand or ''} {car_model or ''}".strip())
+        and (is_cc or is_ev_hint)
+        and vtype_norm not in {"Lorry", "Truck", "Commercial", "EVCommercial"}
+    ):
+        vt = vtype_norm if vtype_norm in {"Car", "NonSaloonCar", "EVSaloonCar", "EVNonSaloonCar"} else "Car"
+        return {
+            "vehicle_type": vt,
+            "powertrain": "EV" if is_ev_hint else "ICE",
+            "tariff_class": "Private Car",
+            "product_tier_confirmed": product_name or "",
+            "confidence": 0.92,
+            "citations": [],
+            "reasoning": "Clear JPJ Private Car classification from unambiguous vehicle_class & capacity.",
+            "source": "deterministic_clear",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Case B: Unambiguous Heavy Commercial Vehicle (KG/TON capacity + Lorry/EVCommercial type)
+    if is_weight and not is_private_passenger_class(vehicle_class) and vtype_norm in {"Lorry", "EVCommercial"}:
+        return {
+            "vehicle_type": vtype_norm,
+            "powertrain": "EV" if (vtype_norm == "EVCommercial" or is_ev_hint) else "ICE",
+            "tariff_class": "Commercial Vehicle",
+            "product_tier_confirmed": product_name or "",
+            "confidence": 0.92,
+            "citations": [],
+            "reasoning": "Clear JPJ Commercial Vehicle classification from weight capacity (KG/TON).",
+            "source": "deterministic_clear",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return None
+
+
 def resolve_vehicle_level2_grounding(
     *,
     db: Session | None = None,
@@ -256,6 +308,18 @@ def resolve_vehicle_level2_grounding(
                 **cached,
                 "source": "vehicle_model_cache",
             }
+
+    if search_fn is None and not force_refresh:
+        clear_result = _try_clear_deterministic_grounding(
+            car_brand=car_brand,
+            car_model=car_model,
+            engine_cc=engine_cc,
+            vehicle_class=vehicle_class,
+            product_name=product_name,
+            extracted_vehicle_type=extracted_vehicle_type,
+        )
+        if clear_result is not None:
+            return clear_result
 
     caller = search_fn
     if caller is None:

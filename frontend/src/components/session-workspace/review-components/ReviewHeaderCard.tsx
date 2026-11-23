@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
+import type { Route } from "next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -9,14 +11,18 @@ import { StatusBadge } from "@/components/status-badge";
 import { GuidedTour } from "@/components/guided-tour";
 import {
   ArrowsClockwise,
+  ArrowSquareOut,
   CaretLeft,
+  Columns,
   Eye,
   FilePdf,
   FloppyDisk,
+  ListChecks,
   PencilSimple,
   Sparkle,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
+import { useOpenInNewTabPreference } from "@/hooks/useOpenInNewTabPreference";
 import type { WorkspaceSnapshot, MutationState } from "../types";
 import { ExportActionsBar } from "./ExportActionsBar";
 
@@ -33,6 +39,8 @@ export interface ReviewHeaderCardProps {
   setFormCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   previewColCollapsed: boolean;
   setPreviewColCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  benefitsColCollapsed: boolean;
+  setBenefitsColCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   saveAndCheckLearning: () => void;
   copiedPng: boolean;
   copyingPng: boolean;
@@ -44,6 +52,8 @@ export interface ReviewHeaderCardProps {
   pdfLoading: boolean;
   handleCopySummary?: () => void;
   copiedSummary?: boolean;
+  redetecting?: boolean;
+  onStartRedetect?: () => void;
 }
 
 export function ReviewHeaderCard({
@@ -59,6 +69,8 @@ export function ReviewHeaderCard({
   setFormCollapsed,
   previewColCollapsed,
   setPreviewColCollapsed,
+  benefitsColCollapsed,
+  setBenefitsColCollapsed,
   saveAndCheckLearning,
   copiedPng,
   copyingPng,
@@ -70,9 +82,13 @@ export function ReviewHeaderCard({
   pdfLoading,
   handleCopySummary,
   copiedSummary,
+  redetecting: externalRedetecting = false,
+  onStartRedetect,
 }: ReviewHeaderCardProps) {
   const { toast } = useToast();
-  const [redetecting, setRedetecting] = useState(false);
+  const { openInNewTab } = useOpenInNewTabPreference();
+  const [internalRedetecting, setInternalRedetecting] = useState(false);
+  const redetecting = externalRedetecting || internalRedetecting;
   const [redetectDialogOpen, setRedetectDialogOpen] = useState(false);
   const [docType, setDocType] = useState<"quotation" | "covernote">(
     workspace.document_type === "covernote" ? "covernote" : "quotation"
@@ -119,12 +135,24 @@ export function ReviewHeaderCard({
   };
 
   const handleRedetect = () => {
+    if (onStartRedetect) {
+      if (mutation.dirty) {
+        setRedetectDialogOpen(true);
+      } else {
+        onStartRedetect();
+      }
+      return;
+    }
     setRedetectDialogOpen(true);
   };
 
   const confirmRedetect = async () => {
     setRedetectDialogOpen(false);
-    setRedetecting(true);
+    if (onStartRedetect) {
+      onStartRedetect();
+      return;
+    }
+    setInternalRedetecting(true);
     try {
       const res = await api<{ success: boolean; message?: string; changed_fields?: string[] }>(
         `/sessions/${workspace.session_id}/rescan`,
@@ -138,129 +166,129 @@ export function ReviewHeaderCard({
       window.location.reload();
     } catch (err: any) {
       toast("Failed to re-detect: " + (err?.message || "Server error"), "error");
-      setRedetecting(false);
+      setInternalRedetecting(false);
     }
   };
 
+  const metadataTitle = [
+    workspace.created_by_email || workspace.created_by
+      ? `Uploaded: ${workspace.created_by_email || workspace.created_by}`
+      : null,
+    workspace.last_edited_by_email || workspace.last_edited_by
+      ? `Last edited: ${workspace.last_edited_by_email || workspace.last_edited_by}`
+      : null,
+    mutation.lastSavedAt && !mutation.dirty && !mutation.saving
+      ? `Saved ${new Date(mutation.lastSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <header className="sticky top-[56px] z-20 w-full border-b border-[var(--rl-border)] bg-[var(--rl-surface)] px-4 py-3 shadow-xs">
-      <div className="mx-auto flex w-full max-w-[1800px] flex-wrap items-center justify-between gap-3">
-        {/* Left Section: Back Button, Session Header Status & Vehicle Quick Badge */}
-        <div className="flex items-start gap-3">
+    <header className="sticky top-[56px] z-20 shrink-0 w-full border-b border-[var(--rl-border)] bg-[var(--rl-surface)] px-3 py-1.5 shadow-xs">
+      <div className="flex w-full flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5">
+        {/* Left Section: Compact Single-Row Workspace Identity */}
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
           {onBack ? (
             <button
               type="button"
               onClick={onBack}
-              className="mt-0.5 flex items-center gap-1 rounded-md border border-[var(--rl-border)] bg-white px-2 py-1 text-xs font-semibold text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-gray-50 transition-colors cursor-pointer shadow-2xs"
+              className="flex items-center gap-1 rounded-md border border-[var(--rl-border)] bg-white px-2 py-1 text-xs font-semibold text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-gray-50 transition-colors cursor-pointer shadow-2xs"
               title="Return to previous screen"
             >
-              <CaretLeft size={14} weight="bold" />
+              <CaretLeft size={13} weight="bold" />
               <span>Back</span>
             </button>
           ) : null}
 
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-bold text-[var(--rl-text-strong)]">Quotation Workspace</h1>
-              
-              {/* 1-Click Document Type Toggle */}
-              <div className="inline-flex items-center rounded-md border border-[var(--rl-border)] bg-[var(--rl-surface-subtle)] p-0.5 text-xs font-semibold shadow-2xs">
-                <button
-                  type="button"
-                  onClick={() => handleToggleDocumentType("quotation")}
-                  disabled={togglingDocType}
-                  className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
-                    docType === "quotation"
-                      ? "bg-white text-[var(--rl-text-strong)] shadow-xs font-bold"
-                      : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                  }`}
-                  title="Categorize as Quotation (Comparison option)"
-                >
-                  Quotation
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleDocumentType("covernote")}
-                  disabled={togglingDocType}
-                  className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
-                    docType === "covernote"
-                      ? "bg-emerald-600 text-white shadow-xs font-bold"
-                      : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                  }`}
-                  title="Categorize as Official Cover Note (Issued Policy)"
-                >
-                  Cover Note
-                </button>
-              </div>
+          <h1 className="text-sm font-bold tracking-tight text-[var(--rl-text-strong)] whitespace-nowrap">
+            Quotation Workspace
+          </h1>
 
-              {workspace.is_test ? (
-                <span
-                  className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-900 border border-amber-500/30"
-                  title="Test upload: isolated from customer records and hit & miss tracking"
-                >
-                  <Sparkle size={12} weight="fill" className="text-amber-600" />
-                  Test Upload (Sandbox)
-                </span>
-              ) : null}
-              {companyName ? <Badge variant="default">{companyName}</Badge> : null}
-            </div>
-
-            {/* Vehicle Quick Badge & Status Line */}
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <StatusBadge status={workspace.status} />
-              {mutation.dirty ? (
-                <Badge variant="warning">
-                  {mutation.dirtyPaths.length} unsaved change{mutation.dirtyPaths.length === 1 ? "" : "s"}
-                </Badge>
-              ) : mutation.saveError ? (
-                <Badge variant="danger">Save failed</Badge>
-              ) : (
-                <Badge variant="success">All changes saved</Badge>
-              )}
-              
-              {/* Vehicle Quick Badge */}
-              <span className="inline-flex items-center gap-1 rounded bg-neutral-100 border border-neutral-200 px-2 py-0.5 text-xs text-[var(--rl-text-strong)] font-mono font-medium shadow-2xs">
-                <strong className="font-bold text-neutral-900">{formValues.vehicle_no || "Draft"}</strong>
-                <span className="text-neutral-400">·</span>
-                <span>{formValues.customer_name || "Client"}</span>
-              </span>
-
-              {workspace.created_by_email || workspace.created_by ? (
-                <span className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-700 border border-neutral-200">
-                  <span className="text-neutral-400">Uploaded:</span>
-                  <span className="font-semibold text-neutral-900">{workspace.created_by_email || workspace.created_by}</span>
-                </span>
-              ) : null}
-              {workspace.last_edited_by_email || workspace.last_edited_by ? (
-                <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900 border border-amber-200">
-                  <span className="text-amber-600">Last edited:</span>
-                  <span className="font-bold text-amber-950">{workspace.last_edited_by_email || workspace.last_edited_by}</span>
-                </span>
-              ) : null}
-            </div>
+          {/* 1-Click Document Type Toggle */}
+          <div className="inline-flex items-center rounded-md border border-[var(--rl-border)] bg-[var(--rl-surface-subtle)] p-0.5 text-[11px] font-semibold shadow-2xs">
+            <button
+              type="button"
+              onClick={() => handleToggleDocumentType("quotation")}
+              disabled={togglingDocType}
+              className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                docType === "quotation"
+                  ? "bg-white text-[var(--rl-text-strong)] shadow-xs font-bold"
+                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+              }`}
+              title="Categorize as Quotation (Comparison option)"
+            >
+              Quotation
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleDocumentType("covernote")}
+              disabled={togglingDocType}
+              className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                docType === "covernote"
+                  ? "bg-emerald-600 text-white shadow-xs font-bold"
+                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+              }`}
+              title="Categorize as Official Cover Note (Issued Policy)"
+            >
+              Cover Note
+            </button>
           </div>
+
+          {workspace.is_test ? (
+            <span
+              className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-900 border border-amber-500/30"
+              title="Test upload: isolated from customer records and hit & miss tracking"
+            >
+              <Sparkle size={11} weight="fill" className="text-amber-600" />
+              Test
+            </span>
+          ) : null}
+
+          {companyName ? <Badge variant="default">{companyName}</Badge> : null}
+          <StatusBadge status={workspace.status} />
+
+          {mutation.dirty ? (
+            <Badge variant="warning">
+              {mutation.dirtyPaths.length} unsaved
+            </Badge>
+          ) : mutation.saveError ? (
+            <Badge variant="danger">Save failed</Badge>
+          ) : (
+            <Badge variant="success">Saved</Badge>
+          )}
+
+          {/* Compact Vehicle & Customer Badge (with audit hover tooltip) */}
+          <span
+            title={metadataTitle || undefined}
+            className="inline-flex items-center gap-1 rounded bg-neutral-100 border border-neutral-200 px-2 py-0.5 text-[11px] text-[var(--rl-text-strong)] font-mono font-medium shadow-2xs max-w-[260px]"
+          >
+            <strong className="font-bold text-neutral-900 shrink-0">{formValues.vehicle_no || "Draft"}</strong>
+            <span className="text-neutral-400">·</span>
+            <span className="truncate">{formValues.customer_name || "Client"}</span>
+          </span>
         </div>
 
-        {/* Right Section: Layout Toggles, Save Button & Export Actions */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Right Section: 4-Panel Layout Switcher, Save & Export Actions */}
+        <div className="flex flex-wrap items-center gap-1.5">
           <GuidedTour
             storageKey="tour:session-workspace"
             title="Quotation Workspace"
-            description="Review the AI-extracted values, pin the insurer catalog (and package tier), customize benefits, and generate the final PDF."
+            description="Review the AI-extracted values, pin the insurer catalog (and package tier), preview in real time, and customize benefits."
             steps={[
               { target: ".rl-tour-template", title: "Master template & catalog", body: "Pin the published insurer catalog and template profile here." },
               { target: ".rl-tour-fields", title: "Extracted values", body: "AI-extracted policy and vehicle details. Edit anything here directly." },
-              { target: ".rl-tour-benefits", title: "Benefits & add-ons", body: "Defaults are the included benefits. Add-ons are payable extras." },
               { target: ".rl-tour-preview", title: "Live preview", body: "Real-time preview of the quotation PDF. Updates instantly as you edit." },
+              { target: ".rl-tour-benefits", title: "Benefit Edit", body: "Edit Free Added Coverage (Box 1) and Add-on Matrix (Box 2) side-by-side with the live preview." },
             ]}
           />
 
-          {/* Unified 3-Panel Layout Switcher */}
+          {/* Unified 4-Panel Switcher: Source PDF | Form | Preview | Benefit Edit */}
           <div className="flex items-center gap-0.5 rounded-lg border border-[var(--rl-border)] bg-gray-100 p-0.5 shadow-2xs">
             <button
               type="button"
               onClick={() => setPdfOpen((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition-all cursor-pointer ${
                 pdfOpen
                   ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
                   : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/50"
@@ -268,34 +296,47 @@ export function ReviewHeaderCard({
               title={pdfOpen ? "Hide PDF" : "Show source PDF"}
               aria-label={pdfOpen ? "Hide PDF" : "Show source PDF"}
             >
-              <FilePdf size={14} weight={pdfOpen ? "fill" : "bold"} className={pdfOpen ? "text-[var(--rl-red)]" : ""} />
+              <FilePdf size={13} weight={pdfOpen ? "fill" : "bold"} className={pdfOpen ? "text-[var(--rl-red)]" : ""} />
               <span>Source PDF</span>
             </button>
             <button
               type="button"
               onClick={() => setFormCollapsed((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition-all cursor-pointer ${
                 !formCollapsed
                   ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
                   : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/50"
               }`}
               title={!formCollapsed ? "Hide Form & Extracted Values panel" : "Show Form & Extracted Values panel"}
             >
-              <PencilSimple size={14} weight={!formCollapsed ? "fill" : "bold"} className={!formCollapsed ? "text-[var(--rl-black)]" : ""} />
+              <PencilSimple size={13} weight={!formCollapsed ? "fill" : "bold"} className={!formCollapsed ? "text-[var(--rl-black)]" : ""} />
               <span>Form</span>
             </button>
             <button
               type="button"
               onClick={() => setPreviewColCollapsed((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition-all cursor-pointer ${
                 !previewColCollapsed
                   ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
                   : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/50"
               }`}
-              title={!previewColCollapsed ? "Hide Live Preview & Benefits panel" : "Show Live Preview & Benefits panel"}
+              title={!previewColCollapsed ? "Hide Live Preview panel" : "Show Live Preview panel"}
             >
-              <Eye size={14} weight={!previewColCollapsed ? "fill" : "bold"} className={!previewColCollapsed ? "text-[var(--rl-black)]" : ""} />
+              <Eye size={13} weight={!previewColCollapsed ? "fill" : "bold"} className={!previewColCollapsed ? "text-[var(--rl-black)]" : ""} />
               <span>Preview</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setBenefitsColCollapsed((v) => !v)}
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                !benefitsColCollapsed
+                  ? "bg-white text-[var(--rl-text-strong)] shadow-xs"
+                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] hover:bg-white/50"
+              }`}
+              title={!benefitsColCollapsed ? "Hide Benefit Edit panel" : "Show Benefit Edit panel"}
+            >
+              <ListChecks size={13} weight={!benefitsColCollapsed ? "fill" : "bold"} className={!benefitsColCollapsed ? "text-[var(--rl-red)]" : ""} />
+              <span>Benefit Edit</span>
             </button>
           </div>
 
@@ -305,27 +346,36 @@ export function ReviewHeaderCard({
             icon={<ArrowsClockwise className={redetecting ? "animate-spin text-amber-600" : ""} weight="bold" />}
             onClick={handleRedetect}
             disabled={redetecting}
-            className="cursor-pointer bg-white"
-            title="Re-run AI & PDF detection to extract missing fields or benefits"
+            className="cursor-pointer bg-white text-xs"
+            title="Run multi-pass visual logo & deep AI verification from source PDF"
           >
             {redetecting ? "Re-detecting..." : "Re-detect"}
           </Button>
 
-          <div className="flex items-center gap-2">
-            {mutation.lastSavedAt && !mutation.dirty && !mutation.saving && (
-              <span className="hidden sm:inline-block text-[11px] text-[var(--rl-text-muted)] font-medium">
-                Saved {new Date(mutation.lastSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-              </span>
-            )}
-            <Button
-              variant={mutation.dirty ? "primary" : "secondary"}
-              loading={mutation.saving}
-              icon={<FloppyDisk weight="bold" />}
-              onClick={() => saveAndCheckLearning()}
+          {workspace.tenure_id && !workspace.is_test && (
+            <Link
+              href={`/comparison?tenure_id=${workspace.tenure_id}` as Route}
+              target={openInNewTab ? "_blank" : undefined}
+              rel={openInNewTab ? "noopener noreferrer" : undefined}
+              className="inline-flex items-center gap-1 min-h-[32px] px-2.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white hover:border-[var(--rl-black)] text-[var(--rl-text-strong)] text-xs font-semibold transition-colors shadow-2xs"
+              title="Open Marketing Comparison Matrix for this quotation"
             >
-              {mutation.saving ? "Saving..." : mutation.dirty ? "Save & Sync" : "Saved"}
-            </Button>
-          </div>
+              <Columns size={13} weight="bold" />
+              <span>Compare</span>
+              {openInNewTab && <ArrowSquareOut size={12} weight="bold" className="text-[var(--rl-text-muted)]" />}
+            </Link>
+          )}
+
+          <Button
+            size="sm"
+            variant={mutation.dirty ? "primary" : "secondary"}
+            loading={mutation.saving}
+            icon={<FloppyDisk weight="bold" />}
+            onClick={() => saveAndCheckLearning()}
+            title={metadataTitle || "Save workspace changes"}
+          >
+            {mutation.saving ? "Saving..." : mutation.dirty ? "Save & Sync" : "Saved"}
+          </Button>
 
           {/* Modular Export Actions Bar */}
           <ExportActionsBar

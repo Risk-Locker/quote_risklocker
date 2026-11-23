@@ -79,6 +79,13 @@ def _set_draft_field(fields: dict[str, Any], key: str, value: Any, status: str =
         fields[key] = value
 
 
+def _update_existing_aliases(fields: dict[str, Any], aliases: tuple[str, ...], value: Any) -> None:
+    """Update alias keys only when already present in fields (never bloat drafts with new mirror keys)."""
+    for alias in aliases:
+        if alias in fields:
+            _set_draft_field(fields, alias, value)
+
+
 def _apply_tenure_fees_and_ncd(
     tenure: InsuranceTenure,
     *,
@@ -104,28 +111,28 @@ def _apply_tenure_fees_and_ncd(
         tenure.include_runner_fee = False
 
     if road_tax is not None:
-        tenure.road_tax = max(Decimal("0.00"), _to_decimal(road_tax))
+        tenure.road_tax = float(max(Decimal("0.00"), _to_decimal(road_tax)))
 
     if runner_fee is not None and _to_decimal(runner_fee) > Decimal("0.00"):
-        tenure.runner_fee = _to_decimal(runner_fee)
+        tenure.runner_fee = float(_to_decimal(runner_fee))
     elif tenure.runner_fee is None or _to_decimal(tenure.runner_fee) == Decimal("0.00"):
-        tenure.runner_fee = UNIVERSAL_RUNNER_FEE
+        tenure.runner_fee = float(UNIVERSAL_RUNNER_FEE)
 
     if quotation_discount is not None:
-        tenure.quotation_discount = max(Decimal("0.00"), _to_decimal(quotation_discount))
+        tenure.quotation_discount = float(max(Decimal("0.00"), _to_decimal(quotation_discount)))
     if motor_discount_pct is not None:
         from app.domain.motor.discount_calculator import clamp_discount_pct
 
-        tenure.motor_discount_pct = clamp_discount_pct(motor_discount_pct)
+        tenure.motor_discount_pct = float(clamp_discount_pct(motor_discount_pct))
     if windscreen_target is not None:
-        tenure.windscreen_target = max(Decimal("0.00"), _to_decimal(windscreen_target))
+        tenure.windscreen_target = float(max(Decimal("0.00"), _to_decimal(windscreen_target)))
     if ncd_percentage is not None:
-        tenure.ncd_percentage = _to_decimal(ncd_percentage)
+        tenure.ncd_percentage = float(_to_decimal(ncd_percentage))
 
     if current_ncd is not None:
         c_ncd_val = _to_decimal(current_ncd)
         if tenure.previous_tenure:
-            tenure.previous_tenure.ncd_percentage = c_ncd_val
+            tenure.previous_tenure.ncd_percentage = float(c_ncd_val)
         cur_json = dict(tenure.recommended_sum_insured_json or {})
         cur_json["current_ncd"] = float(c_ncd_val)
         tenure.recommended_sum_insured_json = cur_json
@@ -235,7 +242,7 @@ def _sync_tenure_vehicle(
     if chassis_no and chassis_no.strip():
         tv.chassis_no = chassis_no.strip()
     if hasattr(tv, "powertrain") and powertrain and powertrain.strip():
-        tv.powertrain = powertrain.strip().upper()
+        setattr(tv, "powertrain", powertrain.strip().upper())
     return tv
 
 
@@ -256,32 +263,32 @@ def _update_single_draft_fields(
     f = dict(fields)
     canonical_name = cust.canonical_name if cust else tenure.customer_name
     if canonical_name:
-        for k in ("customer_name", "insured_name", "policyholder_name", "client_name"):
-            _set_draft_field(f, k, canonical_name)
+        _set_draft_field(f, "customer_name", canonical_name)
+        _update_existing_aliases(f, ("insured_name", "policyholder_name", "client_name"), canonical_name)
     if cust and cust.id_number:
-        for k in ("ic_or_brn", "customer_ic_no", "ic_no", "nric_no", "id_number"):
-            _set_draft_field(f, k, cust.id_number)
+        _set_draft_field(f, "ic_or_brn", cust.id_number)
+        _update_existing_aliases(f, ("customer_ic_no", "ic_no", "nric_no", "id_number"), cust.id_number)
     if tenure.vehicle_no:
-        for k in ("vehicle_no", "registration_no", "veh_reg_no"):
-            _set_draft_field(f, k, tenure.vehicle_no)
+        _set_draft_field(f, "vehicle_no", tenure.vehicle_no)
+        _update_existing_aliases(f, ("registration_no", "veh_reg_no"), tenure.vehicle_no)
 
     if tv:
         if tv.car_brand:
-            for k in ("car_brand", "make"):
-                _set_draft_field(f, k, tv.car_brand)
+            _set_draft_field(f, "car_brand", tv.car_brand)
+            _update_existing_aliases(f, ("make",), tv.car_brand)
         if tv.car_model:
-            for k in ("car_model", "vehicle_model"):
-                _set_draft_field(f, k, tv.car_model)
+            _set_draft_field(f, "car_model", tv.car_model)
+            _update_existing_aliases(f, ("vehicle_model",), tv.car_model)
         if tv.engine_cc:
             _set_draft_field(f, "engine_cc", tv.engine_cc)
         if tv.manufacture_year:
             _set_draft_field(f, "vehicle_year", str(tv.manufacture_year))
         if tv.chassis_no:
-            for k in ("chassis_no", "chassis_number"):
-                _set_draft_field(f, k, tv.chassis_no)
+            _set_draft_field(f, "chassis_no", tv.chassis_no)
+            _update_existing_aliases(f, ("chassis_number",), tv.chassis_no)
         if tv.engine_no:
-            for k in ("engine_no", "engine_number"):
-                _set_draft_field(f, k, tv.engine_no)
+            _set_draft_field(f, "engine_no", tv.engine_no)
+            _update_existing_aliases(f, ("engine_number",), tv.engine_no)
         pt_val = getattr(tv, "powertrain", None) or (powertrain.strip().upper() if powertrain and powertrain.strip() else None)
         if pt_val:
             _set_draft_field(f, "powertrain", pt_val)
@@ -291,8 +298,10 @@ def _update_single_draft_fields(
     if vehicle_type and vehicle_type.strip():
         _set_draft_field(f, "vehicle_type", vehicle_type.strip())
     if dt_start:
+        _set_draft_field(f, "cover_start_date", dt_start.strftime("%Y-%m-%d"))
         _set_draft_field(f, "coverage_start_date", dt_start.isoformat())
     if dt_end:
+        _set_draft_field(f, "cover_end_date", dt_end.strftime("%Y-%m-%d"))
         _set_draft_field(f, "coverage_end_date", dt_end.isoformat())
     if dt_start and dt_end:
         _set_draft_field(f, "cover_period", f"{dt_start.strftime('%d/%m/%Y')} - {dt_end.strftime('%d/%m/%Y')}")
@@ -319,6 +328,12 @@ def _update_single_draft_fields(
     _set_draft_field(f, "quotation_discount", f"{disc_bd.flat_discount_amount:.2f}", status="ready")
     if not isinstance(f.get("quotation_discount"), dict):
         f["quotation_discount"] = {"value": f"{disc_bd.flat_discount_amount:.2f}", "status": "ready"}
+    _set_draft_field(f, "effective_discount", f"{disc_bd.effective_discount:.2f}", status="ready")
+    if not isinstance(f.get("effective_discount"), dict):
+        f["effective_discount"] = {"value": f"{disc_bd.effective_discount:.2f}", "status": "ready"}
+    _set_draft_field(f, "net_motor_premium", f"{disc_bd.net_motor_premium:.2f}", status="ready")
+    if not isinstance(f.get("net_motor_premium"), dict):
+        f["net_motor_premium"] = {"value": f"{disc_bd.net_motor_premium:.2f}", "status": "ready"}
     tot_dec = disc_bd.net_total_payable(eff_rt, eff_rf)
     _set_draft_field(f, "total_amount", f"{tot_dec:.2f}")
     return f
@@ -411,7 +426,7 @@ def _propagate_to_session_drafts(
             continue
 
         same_tenure = s.tenure_id == tenure.id
-        same_vehicle = bool(tv is not None and s.tracked_vehicle_id == tv.id)
+        same_vehicle = tv is not None and s.tracked_vehicle_id == tv.id
 
         if same_tenure:
             if cust and s.customer_id != cust.id:
@@ -468,11 +483,11 @@ def _propagate_to_comparison_entries(
     )
     for ce in all_entries:
         prem_dec = _to_decimal(ce.motor_premium)
-        ce.road_tax = eff_rt
-        ce.runner_fee = eff_rf
+        ce.road_tax = float(eff_rt)
+        ce.runner_fee = float(eff_rf)
         ce.include_road_tax = tenure.include_road_tax is not False
         ce.include_runner_fee = tenure.include_runner_fee is not False
-        ce.total_payable = prem_dec + eff_rt + eff_rf
+        ce.total_payable = float(prem_dec + eff_rt + eff_rf)
         ce.version = (ce.version or 1) + 1
 
     from app.domain.motor.discount_calculator import calculate_motor_discount

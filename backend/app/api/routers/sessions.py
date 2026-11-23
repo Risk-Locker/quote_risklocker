@@ -132,6 +132,7 @@ from app.models.tables import (
     User,
     VehicleBrand,
     VehicleModel,
+    new_id,
 )
 from app.services.admin_service import (
     copy_template,
@@ -1137,6 +1138,40 @@ def session_extract_gemini(
 
 
 
+@router.post("/sessions/{session_id}/redetect")
+def session_redetect_start(
+    session_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.redetect_job_service import start_session_redetect_job
+
+    return start_session_redetect_job(db, session_id, user, settings)
+
+
+@router.get("/redetect-jobs/{job_id}")
+def redetect_job_status(
+    job_id: str,
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.redetect_job_service import get_redetect_job
+
+    return {"job": get_redetect_job(job_id, user)}
+
+
+@router.post("/redetect-jobs/{job_id}/cancel")
+def redetect_job_cancel(
+    job_id: str,
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.redetect_job_service import cancel_redetect_job
+
+    return cancel_redetect_job(job_id, user)
+
+
 @router.post("/sessions/{session_id}/rescan")
 def session_rescan_endpoint(
     session_id: str,
@@ -1145,6 +1180,7 @@ def session_rescan_endpoint(
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     from app.services.session_rescan_service import rescan_session
 
     mode = payload.mode if payload else "in_place"
@@ -1188,7 +1224,6 @@ def session_generate_version(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    from app.models.tables import new_id
     resolved_key = idempotency_key or new_id()
     result = request_version_generation(
         db,

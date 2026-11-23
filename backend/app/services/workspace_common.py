@@ -73,7 +73,8 @@ PIN_SENSITIVE_FIELDS = frozenset({"insurance_company", "product_name", "product"
 MONEY_FIELDS = frozenset({
     "coverage_amount", "sum_insured", "market_value", "agreed_value", "excess_amount", "basic_premium_vehicle",
     "premium", "coverage_premium", "ncd_amount", "loading_amount", "all_riders_amount", "optional_cover_amount",
-    "service_tax", "stamp_duty", "gross_premium", "roadtax", "road_tax_amount", "service_fee", "runner_fee", "total_amount",
+    "service_tax", "stamp_duty", "gross_premium", "roadtax", "road_tax_amount", "service_fee", "runner_fee",
+    "quotation_discount", "total_amount",
 })
 DATE_FIELDS = frozenset({"issue_date", "valid_until", "cover_start_date", "cover_end_date"})
 TOTAL_SOURCES = frozenset({
@@ -85,6 +86,8 @@ TOTAL_SOURCES = frozenset({
     "runner_fee",
     "include_road_tax",
     "include_runner_fee",
+    "motor_discount_pct",
+    "quotation_discount",
 })
 
 
@@ -211,14 +214,16 @@ def _template_for_draft(db, draft: QuotationDraft) -> TemplateRevision | None:
 
 
 
-def _field_summary(draft: QuotationDraft, session_ref: str | None = None) -> dict[str, dict]:
+def _field_summary(draft: QuotationDraft, session_ref: str | None = None, *, rec_candidates: dict | None = None) -> dict[str, dict]:
     output: dict[str, dict] = {}
-    rec_candidates: dict = {}
-    if draft.uploaded_file and getattr(draft.uploaded_file, "extraction_record", None):
-        rec_candidates = getattr(draft.uploaded_file.extraction_record, "candidates", {}) or {}
+    if rec_candidates is None:
+        rec_candidates = {}
+        if draft.uploaded_file and getattr(draft.uploaded_file, "extraction_record", None):
+            rec_candidates = getattr(draft.uploaded_file.extraction_record, "candidates", {}) or {}
 
     for name, value in (draft.fields or {}).items():
-        field = value if isinstance(value, dict) else {"value": value}
+        is_dict_field = isinstance(value, dict)
+        field = value if is_dict_field else {"value": value, "status": "ready"}
         det_val = field.get("detected_value")
         if det_val is None:
             cands = rec_candidates.get(name) or []
@@ -229,7 +234,7 @@ def _field_summary(draft: QuotationDraft, session_ref: str | None = None) -> dic
         output[name] = {
             "value": field.get("value"),
             "detected_value": det_val,
-            "status": field.get("status", "check_needed"),
+            "status": field.get("status", "check_needed" if is_dict_field else "ready"),
             "message": field.get("message", ""),
             "decision": (draft.scalar_decisions or {}).get(name),
         }

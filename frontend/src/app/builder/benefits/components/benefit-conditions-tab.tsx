@@ -41,7 +41,6 @@ interface BenefitConditionsTabProps {
   concepts: Concept[];
   onOpenAddConditionDialog: () => void;
   onEditCondition: (cond: CompanyBenefitCondition) => void;
-  onQuickCreateUnlimitedTowingRule: () => void;
   onDeleteCondition: (condId: string) => void;
   onRefreshConcepts?: () => void;
 }
@@ -60,7 +59,6 @@ export function BenefitConditionsTab({
   concepts,
   onOpenAddConditionDialog,
   onEditCondition,
-  onQuickCreateUnlimitedTowingRule,
   onDeleteCondition,
   onRefreshConcepts,
 }: BenefitConditionsTabProps) {
@@ -293,17 +291,9 @@ export function BenefitConditionsTab({
               <PageLoading />
             ) : companyConditions.length === 0 ? (
               <div className="p-6 text-center">
-                <p className="text-xs text-[var(--rl-text-muted)]">No simple conditional rules configured.</p>
-                <div className="mt-3 flex justify-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={onQuickCreateUnlimitedTowingRule}
-                    className="gap-1.5 bg-[var(--rl-black)] text-white shadow-sm font-semibold"
-                  >
-                    <Plus size={14} weight="bold" />
-                    <span>Create Driver Passenger → Unlimited Towing Rule</span>
-                  </Button>
-                </div>
+                <p className="text-xs text-[var(--rl-text-muted)]">
+                  No simple conditional rules configured. Manage Box 1 → Box 2 towing promotions via Bundled Benefits above.
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">

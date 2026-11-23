@@ -41,10 +41,15 @@ _PLAN_PATTERNS: tuple[tuple[str, str], ...] = (
 
 
 def _is_non_comprehensive(text: str) -> bool:
+    cleaned = re.sub(
+        r"\bcomprehensive\b(?=\s+(?:lite|plus)\s*\(\s*(?:tpft|tpo|third\s+party))",
+        "",
+        text,
+    )
     return (
         any(k in text for k in ("third party only", "third party fire", "tpft"))
         or text.strip() in {"third party", "tp", "tpo"}
-    ) and "comprehensive" not in text
+    ) and "comprehensive" not in cleaned
 
 
 def _is_statutory_tariff(text: str, exclude_brand_keywords: list[str] | tuple[str, ...]) -> bool:
@@ -99,7 +104,10 @@ def resolve_insurer_towing_limit(
     if _is_explicit_no_towing(raw_ext):
         return "No towing"
 
-    if _is_non_comprehensive(text):
+    is_tpft_premier = (
+        any(tok in comp for tok in ("amassurance", "amgen", "kurnia", "liberty")) or "auto365" in text
+    ) and ("tpft" in text or "third party fire" in text) and "premier" in text
+    if _is_non_comprehensive(text) and not is_tpft_premier:
         return "-"
 
     rule = resolve_company_towing_rule(company_name=company_name, company_obj=company_obj)
@@ -130,7 +138,7 @@ def resolve_insurer_towing_limit(
             return sdpa_plan1
         if "unlimited" in text or any(p in text for p in ("plan 2", "plan2", "pelan 2", "ev plan", "plan 3", "plan3", "pelan 3", "plan 4", "plan4", "pelan 4")):
             return str(rule.get("unlimited_label") or "Unlimited")
-        if sdpa_plan1 and ("amassurance" in comp or "amgen" in comp or "private car 365" in text):
+        if sdpa_plan1 and (any(tok in comp for tok in ("amassurance", "amgen", "kurnia", "liberty")) or "private car 365" in text):
             return sdpa_plan1
         return str(rule.get("unlimited_label") or "Unlimited")
 
@@ -163,15 +171,14 @@ def resolve_insurer_towing_limit(
     if tariff_limit and _is_statutory_tariff(text, exclude_brands):
         return tariff_limit
 
-    # 5. Tiered KM package variants (Premier / Lite / Liberty)
+    # 5. Tiered KM package variants (TPFT Premier / Premier / Lite / Liberty)
+    tpft_premier_limit = str(rule.get("tpft_premier_limit") or "").strip()
     premier_limit = str(rule.get("premier_limit") or "").strip()
     lite_limit = str(rule.get("lite_limit") or "").strip()
+    if tpft_premier_limit and ("tpft" in text or "third party fire" in text) and "premier" in text:
+        return tpft_premier_limit
     if premier_limit and ("premier" in text or "365 km" in text or "365km" in text or "365-km" in text):
         return premier_limit
-    if "liberty" in comp or "liberty" in text:
-        if "amdrive plus" in text or "unlimited" in text:
-            return "Unlimited"
-        return "150 km"
     if lite_limit and "lite" in text:
         return lite_limit
 

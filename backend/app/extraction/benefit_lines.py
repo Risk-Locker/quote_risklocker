@@ -6,6 +6,8 @@ import hashlib
 import re
 from decimal import Decimal, InvalidOperation
 
+from app.services.bundle_plan_matcher import is_base_auto365_policy_label
+
 
 CHECKED_PREFIXES = ("☑", "☒", "✓", "✔", "[x]", "[X]")
 UNCHECKED_PREFIXES = ("☐", "□", "[ ]")
@@ -195,6 +197,13 @@ NON_BENEFIT_PREFIXES = (
     "i agree that the information",
     "so may result in avoidance",
     "contract of insurance in accordance",
+    "any authorised driver",
+    "any authorized driver",
+    "replacing cover note",
+    "provisional (p) or learner (l)",
+    "provisional (p)",
+    "learner (l) driver",
+    "unnamed driver",
 )
 NARRATIVE_PREFIXES = ("example:", "example ", "note:", "important:", "disclaimer :", "disclaimer:")
 NARRATIVE_INDICATORS = (
@@ -212,6 +221,11 @@ NARRATIVE_INDICATORS = (
     "based upon information",
     "current policy has already",
     "compulsory excess",
+    "ekses wajib",
+    "driver's licence",
+    "drivers licence",
+    "unnamed driver",
+    "named driver under 21",
 )
 
 PHONE_RE = re.compile(r"(?:\+?6?0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{3,4}|\b\d{2,4}[-\s]\d{6,8}\b|\b03[-\s]?\d{4}[-\s]?\d{4}\b)")
@@ -264,11 +278,19 @@ def is_spurious_benefit_line(raw: str) -> bool:
     if not raw or not raw.strip():
         return True
     s = raw.strip()
+    if is_base_auto365_policy_label(s):
+        return True
     norm = re.sub(r"\s+", " ", s).lower()
     norm = re.sub(r"[’‘`´\u2018\u2019\u201b\ufffd]", "'", norm)
-    # Reject strings with no alphabetic letters (e.g. pure numbers, dates, math subtotals like '750.00 + 1,049.35 +')
-    cleaned_alpha = re.sub(r"\b(?:rm|myr)\b", "", norm, flags=re.IGNORECASE)
-    if not re.search(r"[a-z]", cleaned_alpha):
+    # Private Car 365 Plan 1..4 is a genuine bundled add-on benefit (must not be tripped by NON_BENEFIT_PREFIXES "private car").
+    if re.search(r"\b(?:private\s*car\s*365|pc\s*365|pc365)\b", norm) and not any(
+        w in norm for w in ("quotation", "vehicle class", "private car ex goods", "what is")
+    ):
+        return False
+    # Reject strings with no alphabetic letters or only currency/tariff codes (e.g. '15,000.00T', '750.00 + 1,049.35 +')
+    cleaned_alpha = re.sub(r"\b(?:rm|myr|t|nt|st|ex)\b", "", norm, flags=re.IGNORECASE)
+    cleaned_alpha = re.sub(r"\d(?:\.\d{1,2})?\s*[a-z]{1,2}\b", "", cleaned_alpha, flags=re.IGNORECASE)
+    if not re.search(r"[a-z]{2,}", cleaned_alpha):
         return True
     if PHONE_RE.search(s):
         return True
@@ -287,6 +309,8 @@ def is_spurious_benefit_line(raw: str) -> bool:
     if DISCLAIMER_AND_DISCLOSURE_RE.search(norm):
         return True
     if norm.startswith(NON_BENEFIT_PREFIXES):
+        return True
+    if any(ind in norm for ind in ("ekses wajib", "compulsory excess", "provisional (p)", "learner (l)", "unnamed driver", "driver's licence", "drivers licence", "any authorised driver", "any authorized driver")):
         return True
     if "?" in s:
         return True
@@ -310,7 +334,7 @@ MONEY_RE = re.compile(
     r"(?:(?:RM|MYR)\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?|(?<!\d)(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d))",
     re.IGNORECASE,
 )
-PURE_AMOUNT_RE = re.compile(r"^[:\-•*+~]?\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?\s*%?\s*$", re.IGNORECASE)
+PURE_AMOUNT_RE = re.compile(r"^[:\-•*+~]?\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?\s*(?:[TtNn]{1,2}|%)?\s*$", re.IGNORECASE)
 BENEFIT_KEYWORDS = (
     "cover", "benefit", "liability", "damage", "perils", "waiver", "towing", "rider",
     "protection", "windscreen", "passenger", "driver", "accident", "pillion", "cart",

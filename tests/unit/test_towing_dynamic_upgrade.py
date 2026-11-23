@@ -6,10 +6,13 @@ from app.rendering.unified_addon_engine import (
 
 
 def test_towing_upgrade_etiqa_oto_360():
-    """Given Etiqa + Box 1 Towing + OTO 360 rider: Top-Right Towing card upgrades in-place to UNLIMITED TOWING ASSISTANCE,
-    while bottom matrix contains [✔] OTO 360 without duplicate generic towing card.
-    Without a Box 1 Towing card, Top-Right must NEVER synthesize phantom towing."""
-    active_benefits = [
+    """New Box 1 -> Box 2 architecture:
+    1. Raw paid OTO 360 rider WITHOUT bundle promotion does NOT mutate Box 1 towing in place.
+    2. When OTO 360 is promoted via DB Bundled Benefits (bundle_included towing in Box 2 + parent bundle),
+       Box 1 removes towing completely and Box 2 contains [check] OTO 360 (with price) and
+       [check] Unlimited Towing Assistance (with price=None).
+    """
+    raw_without_bundle_flags = [
         {
             "id": "tow_base",
             "concept_key": "towing",
@@ -28,44 +31,65 @@ def test_towing_upgrade_etiqa_oto_360():
         },
     ]
 
-    free_items = extract_free_coverage_items(active_benefits, insurer_name="Etiqa")
+    free_items = extract_free_coverage_items(raw_without_bundle_flags, insurer_name="Etiqa")
     towing_item = next(
         (item for item in free_items if "towing" in item["title"].lower()), None
     )
-
     assert towing_item is not None
-    assert towing_item["title"] == "Unlimited Towing Assistance (Unlimited - Driver Plan 1)"
-    assert "Upgraded via OTO 360" in towing_item["description"]
+    assert towing_item["title"] == "Emergency Towing Assistance (200 km)"
+    assert "Upgraded via" not in towing_item["description"]
 
     # Strictly 1:1 Box 1 rule: removing Box 1 towing leaves zero towing in Top-Right
-    free_without_box1_tow = extract_free_coverage_items([active_benefits[1]], insurer_name="Etiqa")
+    free_without_box1_tow = extract_free_coverage_items([raw_without_bundle_flags[1]], insurer_name="Etiqa")
     assert not any("towing" in i["title"].lower() for i in free_without_box1_tow)
 
-    # In bottom matrix cards:
-    matrix_cards = build_unified_matrix_cards(active_benefits)
-    # The selected rider must be present and ticked
-    rider_card = next(
-        (c for c in matrix_cards if "oto 360" in c["title"].lower()), None
-    )
-    assert rider_card is not None
-    assert rider_card["is_selected"] is True
+    # New Box 1 -> Box 2 bundle behavior
+    bundled_active_benefits = [
+        {
+            "id": "tow_bundle",
+            "concept_key": "towing",
+            "title": "Unlimited Towing Assistance",
+            "value": "",
+            "is_extra": True,
+            "promoted_to_addon": True,
+            "is_bundle_effect": True,
+            "cost_status": "bundle_included",
+            "price": None,
+            "icon_hint": "unlimited_towing",
+            "is_selected": True,
+        },
+        {
+            "id": "oto_360_rider",
+            "concept_key": "oto-360",
+            "title": "OTO 360",
+            "value": "",
+            "is_extra": True,
+            "is_bundle": True,
+            "cost_status": "paid",
+            "price": {"amount": "120.00", "currency": "MYR"},
+            "is_selected": True,
+        },
+    ]
+    free_bundled = extract_free_coverage_items(bundled_active_benefits, insurer_name="Etiqa")
+    assert not any("towing" in i["title"].lower() for i in free_bundled)
+    assert not any("oto 360" in i["title"].lower() for i in free_bundled)
 
-    # Generic unselected Unlimited Towing card must be suppressed from bottom matrix
-    duplicate_towing_card = next(
-        (
-            c
-            for c in matrix_cards
-            if c["id"] == "towing" and c.get("is_selected") is not True
-        ),
-        None,
-    )
-    assert duplicate_towing_card is None
+    matrix_cards = build_unified_matrix_cards(bundled_active_benefits)
+    rider_card = next((c for c in matrix_cards if "oto 360" in c["title"].lower()), None)
+    tow_card = next((c for c in matrix_cards if c["id"] == "towing"), None)
+    assert rider_card is not None and rider_card["is_selected"] is True and rider_card["price"] is not None
+    assert tow_card is not None and tow_card["is_selected"] is True
+    assert tow_card["title"] == "Unlimited Towing Assistance"
+    assert tow_card["price"] is None
+    assert tow_card["cost_status"] == "bundle_included"
 
 
 def test_towing_upgrade_takaful_motor_pa_plus_plans():
-    """Given Takaful Malaysia + Box 1 Towing: Plan 4 gives Unlimited Towing; Plan 3 gives 300 km Towing."""
-    # Plan 4 -> Unlimited
-    benefits_plan4 = [
+    """Given Takaful Malaysia: without bundle promotion Box 1 keeps standard 50 km;
+    when Motor PA Plus bundle promotes towing to Box 2, Box 1 removes towing and Box 2 shows
+    exact plan title without duplicate plan value + no-price connected towing card."""
+    # Unpromoted raw cards leave Box 1 standard 50 km untouched (no legacy detect_towing_upgrade mutation)
+    raw_unpromoted = [
         {
             "id": "tow_base",
             "concept_key": "towing",
@@ -81,42 +105,47 @@ def test_towing_upgrade_takaful_motor_pa_plus_plans():
             "is_selected": True,
         },
     ]
-    free_items_p4 = extract_free_coverage_items(
-        benefits_plan4, insurer_name="Takaful Malaysia"
-    )
-    towing_p4 = next(
-        (i for i in free_items_p4 if "towing" in i["title"].lower()), None
-    )
-    assert towing_p4 is not None
-    assert towing_p4["title"] == "Unlimited Towing Assistance"
-    assert "Upgraded via Motor PA Plus" in towing_p4["description"]
+    free_items_raw = extract_free_coverage_items(raw_unpromoted, insurer_name="Takaful Malaysia")
+    towing_raw = next((i for i in free_items_raw if "towing" in i["title"].lower()), None)
+    assert towing_raw is not None
+    assert towing_raw["title"] == "Emergency Towing Assistance (50 km)"
 
-    # Plan 3 -> 300 km
-    benefits_plan3 = [
+    # Promoted bundle -> Plan 3 in Box 2 with 300 km connected towing (no price) and zero towing in Box 1
+    promoted_p3 = [
         {
-            "id": "tow_base",
+            "id": "tow_p3",
             "concept_key": "towing",
-            "title": "Emergency Towing Assistance",
-            "value": "50 km",
-            "is_extra": False,
-            "cost_status": "included",
+            "title": "Towing Assistance (300 km)",
+            "value": "",
+            "is_extra": True,
+            "promoted_to_addon": True,
+            "is_bundle_effect": True,
+            "cost_status": "bundle_included",
+            "price": None,
+            "is_selected": True,
         },
         {
+            "id": "pa_p3",
+            "concept_key": "motor-pa-plus",
             "title": "Motor PA Plus - Plan 3",
+            "value": "Plan 3",
             "is_extra": True,
+            "is_bundle": True,
+            "selected_bundle_tier_label": "Plan 3",
             "cost_status": "paid",
+            "price": {"amount": "150.00", "currency": "MYR"},
             "is_selected": True,
         },
     ]
-    free_items_p3 = extract_free_coverage_items(
-        benefits_plan3, insurer_name="Takaful Malaysia"
-    )
-    towing_p3 = next(
-        (i for i in free_items_p3 if "towing" in i["title"].lower()), None
-    )
-    assert towing_p3 is not None
-    assert towing_p3["title"] == "Extended Towing Assistance (300 km)"
-    assert "Upgraded via Motor PA Plus" in towing_p3["description"]
+    assert not any("towing" in i["title"].lower() for i in extract_free_coverage_items(promoted_p3, insurer_name="Takaful Malaysia"))
+    box2_p3 = build_unified_matrix_cards(promoted_p3)
+    bundle_card = next(c for c in box2_p3 if "motor pa plus" in c["title"].lower())
+    tow_card = next(c for c in box2_p3 if c["id"] == "towing")
+    assert bundle_card["title"] == "Motor PA Plus - Plan 3"
+    assert bundle_card["value"] == ""
+    assert bundle_card["price"] is not None
+    assert tow_card["title"] == "Towing Assistance (300 km)"
+    assert tow_card["price"] is None
 
 
 def test_towing_standard_without_rider():

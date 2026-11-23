@@ -1398,9 +1398,10 @@ def test_underwriter_towing_evaluator_rm_and_conditional_upgrades():
     assert resolve_insurer_towing_limit("STMB", "motor pa plus plan 3") == "300 km"
     assert resolve_insurer_towing_limit("STMB", "motor pa plus plan 4") == "Unlimited"
 
-    # 7. AmAssurance & Liberty Underwriter Rules
+    # 7. AmAssurance / Kurnia / Liberty Underwriter Rules (identical auto365 schedule)
     assert resolve_insurer_towing_limit("AmAssurance", "private car comprehensive") == "100 km"
-    assert resolve_insurer_towing_limit("Liberty", "private car comprehensive") == "150 km"
+    assert resolve_insurer_towing_limit("Kurnia", "private car comprehensive") == "100 km"
+    assert resolve_insurer_towing_limit("Liberty", "private car comprehensive") == "100 km"
     assert resolve_insurer_towing_limit("AmAssurance", "comprehensive with amdrive plus") == "Unlimited"
 
 

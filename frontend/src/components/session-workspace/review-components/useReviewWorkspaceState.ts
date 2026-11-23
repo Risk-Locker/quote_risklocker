@@ -77,6 +77,7 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
   );
   const [actionError, setActionError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [savingDiscount, setSavingDiscount] = useState(false);
 
   // Sync highlight tracking
   const [syncHighlight, setSyncHighlight] = useState<{
@@ -614,6 +615,22 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
     setLearnPrompt(null);
   }
 
+  async function handleApplyMotorDiscountPct(pct: number) {
+    setSavingDiscount(true);
+    setActionError(null);
+    try {
+      const clamped = Math.min(100, Math.max(0, Number.isFinite(pct) ? pct : 0));
+      decideField("motor_discount_pct", "edit", clamped.toFixed(2));
+      decideField("total_amount", "clear", "");
+      await save();
+      setToastMessage(clamped > 0 ? `Applied ${clamped}% motor discount.` : "Motor discount cleared (0%).");
+    } catch (error) {
+      setActionError(apiErrorMessage(error));
+    } finally {
+      setSavingDiscount(false);
+    }
+  }
+
   return {
     formValues,
     setFormValues,
@@ -640,6 +657,8 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
     setLearnPrompt,
     learnValue,
     saveAndCheckLearning,
+    savingDiscount,
+    handleApplyMotorDiscountPct,
     actionError,
     setActionError,
     toastMessage,

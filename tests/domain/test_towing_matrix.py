@@ -7,8 +7,7 @@ Validates exact entitlements for:
   - Lonpac (RM400 base; E-Assist Smart Driver P1=RM600, P2/EV=Unlimited)
   - Berjaya Sompo (Unlimited by default — no upgrade required)
   - Tune Protect (RM300 base vs Unlimited with Motor Easy Bundle / AutoBuddy / Motor Shield)
-  - AmAssurance / Amgen (auto365 Lite=50km or 150km with breakdown, Plus=100km, Premier=365km)
-  - Kurnia (RM200 base vs Unlimited with Auto Assist Plus/Premier)
+  - AmAssurance / Kurnia / Liberty (auto365 Lite=50km or 150km with breakdown, Plus=100km, Premier=365km, TPFT Premier=200km; Auto Assist Plus/Premier=Unlimited)
 """
 
 from __future__ import annotations
@@ -60,16 +59,31 @@ from app.domain.motor.towing_matrix import resolve_towing_entitlement, TowingEnt
         ("Tune Protect", None, "Motor Shield", "", "Unlimited"),
 
         # AmAssurance (Amgen)
+        ("AmAssurance", "auto365 Comprehensive Lite", None, "", "50km"),
         ("AmAssurance", "auto365 Lite", None, "", "50km"),
         ("AmAssurance", "auto365 Lite", "Breakdown Towing Assistance", "", "150km"),
+        ("AmAssurance", "auto365 Comprehensive Plus", None, "", "100km"),
         ("AmAssurance", "auto365 Plus", None, "", "100km"),
+        ("AmAssurance", "auto365 Comprehensive Premier", None, "", "365km"),
         ("AmAssurance", "auto365 Premier", None, "", "365km"),
         ("Amgen", "Auto365 Comprehensive Premier", None, "", "365km"),
+        ("AmAssurance", "auto365 TPFT Premier", None, "", "200km"),
+        ("AmAssurance", "auto365 TPFT Premier", "Private Car 365 Plan 1", "", "600km"),
+        ("AmAssurance", "auto365 TPFT Premier", "Private Car 365 Plan 3", "", "Unlimited"),
 
-        # Kurnia
-        ("Kurnia", None, None, "", "RM200"),
+        # Kurnia & Liberty (carbon-copy auto365 catalog schedule of AmAssurance)
+        ("Kurnia", None, None, "", "100km"),
+        ("Kurnia", "auto365 Comprehensive Lite", None, "", "50km"),
+        ("Kurnia", "auto365 Comprehensive Premier", None, "", "365km"),
         ("Kurnia Insurans", None, "Kurnia Auto Assist Plus", "", "Unlimited"),
         ("Kurnia Insurans", None, "Auto Assist Premier", "", "Unlimited"),
+        ("Liberty", None, None, "", "100km"),
+        ("Liberty", "auto365 Comprehensive Lite", None, "", "50km"),
+        ("Liberty", "auto365 Comprehensive Plus", None, "", "100km"),
+        ("Liberty", "auto365 Comprehensive Premier", None, "", "365km"),
+        ("Liberty", "auto365 TPFT Premier", None, "", "200km"),
+        ("Liberty", "auto365 TPFT Premier", "Private Car 365 Plan 1", "", "600km"),
+        ("Liberty", "auto365 TPFT Premier", "Private Car 365 Plan 2", "", "Unlimited"),
     ],
 )
 def test_resolve_towing_entitlement_canonical_matrix(company, product, rider, text, expected):

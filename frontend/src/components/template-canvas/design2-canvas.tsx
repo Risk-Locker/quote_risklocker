@@ -335,9 +335,19 @@ export function Design2CanvasView({
   const runner = getVal(fields, "runner_fee", "0.00");
   const totalPayable = getVal(fields, "total_amount", "5447.30");
   const motorDiscountPct = parseFloat(String(getVal(fields, "motor_discount_pct", "0")).replace(/[^0-9.]/g, "") || "0");
-  const motorDiscountAmt = parseFloat(String(getVal(fields, "motor_discount_amount", "0")).replace(/[^0-9.]/g, "") || "0");
+  const effectiveDiscountAmt = parseFloat(String(getVal(fields, "effective_discount", "0")).replace(/[^0-9.]/g, "") || "0");
   const flatDiscountAmt = parseFloat(String(getVal(fields, "quotation_discount", "0")).replace(/[^0-9.]/g, "") || "0");
-  const totalDiscountAmt = motorDiscountAmt + flatDiscountAmt;
+  const netMotorPrem = getVal(fields, "net_motor_premium", "");
+  const hasDiscount = effectiveDiscountAmt > 0 || motorDiscountPct > 0 || flatDiscountAmt > 0;
+  const premLabelWidth = hasDiscount ? "214px" : "186px";
+  const pctStr = `${motorDiscountPct % 1 === 0 ? motorDiscountPct.toFixed(0) : motorDiscountPct}%`;
+  const discountDisplay =
+    motorDiscountPct > 0 && flatDiscountAmt > 0
+      ? `${pctStr} + ${formatMoney(flatDiscountAmt.toFixed(2))}`
+      : motorDiscountPct > 0
+        ? pctStr
+        : formatMoney(flatDiscountAmt.toFixed(2));
+  const displayedPremium = hasDiscount && netMotorPrem ? netMotorPrem : premium;
 
   const rtCombined = useMemo(() => {
     try {
@@ -361,6 +371,13 @@ export function Design2CanvasView({
     setRawLogoSrc(effectiveInsurerLogo);
   }, [effectiveInsurerLogo]);
   const logoSrc = useTrimmedLogoSrc(rawLogoSrc);
+
+  const rlFallbackAssetUrl = useMemo(() => {
+    const foundRl = assets.find((a) => a.label === "risklocker_logo" || a.label === "company_logo");
+    if (foundRl?.url) return foundRl.url.startsWith("/assets/") ? foundRl.url : fileUrl(foundRl.url);
+    return fileUrl("/business/assets/e9685e1f-ac95-410c-a2e9-eccb7ca35d5f/content?profile=print");
+  }, [assets]);
+  const [rlLogoSrc, setRlLogoSrc] = useState("/assets/brand/logo-horizontal-black.png");
 
   const addonCards = useMemo(() => {
     return buildUnifiedMatrixCards(currentBenefits, availableAddons, selSet, 0, 24, insurer, vehicleType, carModel, fields);
@@ -424,11 +441,24 @@ export function Design2CanvasView({
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center" }}>
-              <img
-                src="/assets/brand/logo-horizontal-black.png"
-                alt="RISK LOCKER"
-                style={{ height: "46px", maxWidth: "215px", objectFit: "contain", display: "block" }}
-              />
+              {rlLogoSrc ? (
+                <img
+                  src={rlLogoSrc}
+                  alt="RISK LOCKER"
+                  onError={() => {
+                    if (rlLogoSrc === "/assets/brand/logo-horizontal-black.png" && rlFallbackAssetUrl) {
+                      setRlLogoSrc(rlFallbackAssetUrl);
+                    } else {
+                      setRlLogoSrc("");
+                    }
+                  }}
+                  style={{ height: "46px", maxWidth: "215px", objectFit: "contain", display: "block" }}
+                />
+              ) : (
+                <div style={{ fontSize: "16px", fontWeight: 900, letterSpacing: "0.06em", color: "#0F172A" }}>
+                  RISK<span style={{ color: "#E52320" }}>LOCKER</span>
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
               <div style={{ textAlign: "right" }}>
@@ -538,30 +568,34 @@ export function Design2CanvasView({
                 <div style={{ fontSize: "15.0px", fontWeight: 700, color: "#E52320", marginBottom: "4px", lineHeight: 1.2 }}>
                   Premium Summary{!isEnglishOnly && <>{" "}<span style={{ fontSize: "14.0px", fontWeight: 600, color: "#544F4E" }}>保费</span></>}
                 </div>
-                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
-                  <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
-                    {isEnglishOnly ? "Insurance Premium" : "Insurance Premium / 保费"}
-                  </div>
-                  <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
-                  <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
-                    {formatMoney(premium)}
-                  </div>
-                </div>
-                {totalDiscountAmt > 0 && (
+                {hasDiscount && (
                   <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
-                    <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
-                      {motorDiscountPct > 0
-                        ? `Motor Discount (${motorDiscountPct % 1 === 0 ? motorDiscountPct.toFixed(0) : motorDiscountPct}%)${isEnglishOnly ? "" : " / 保费折扣"}`
-                        : isEnglishOnly ? "Motor Discount" : "Motor Discount / 保费折扣"}
+                    <div style={{ width: premLabelWidth, whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
+                      {isEnglishOnly ? "Discount" : "Discount / 折扣"}
                     </div>
                     <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
-                    <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#059669", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
-                      - {formatMoney(totalDiscountAmt.toFixed(2))}
+                    <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
+                      {discountDisplay}
                     </div>
                   </div>
                 )}
                 <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
-                  <div style={{ width: "186px", whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
+                  <div style={{ width: premLabelWidth, whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
+                    {hasDiscount
+                      ? isEnglishOnly
+                        ? "Insurance Premium (after discount)"
+                        : "Insurance Premium / 保费 (after discount)"
+                      : isEnglishOnly
+                        ? "Insurance Premium"
+                        : "Insurance Premium / 保费"}
+                  </div>
+                  <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
+                  <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
+                    {formatMoney(displayedPremium)}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-end", fontSize: "10.6px", padding: "4px 0 2.5px 0", minHeight: "22.5px", boxSizing: "border-box" }}>
+                  <div style={{ width: premLabelWidth, whiteSpace: "nowrap", fontWeight: 400, color: "#334155", flexShrink: 0, paddingBottom: "2px" }}>
                     {isEnglishOnly ? "Roadtax and Runner Fee" : "Roadtax and Runner Fee / 路税及服务费"}
                   </div>
                   <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>

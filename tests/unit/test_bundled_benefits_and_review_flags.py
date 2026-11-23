@@ -256,7 +256,7 @@ def _create_company_catalog(
     )
 
 
-def _create_draft(db: Session, core, ctx, *, select_bundle: bool = False, raw_text: str = "", plan_tier: str | None = None, bundle_tier_id: str | None = None, plan_uncertain: bool = False, price_amount: str = "250.00"):
+def _create_draft(db: Session, core, ctx, *, select_bundle: bool = False, raw_text: str = "", plan_tier: str | None = None, bundle_tier_id: str | None = None, plan_uncertain: bool = False, price_amount: str = "250.00", bundle_label_override: str | None = None, bundle_typed_override: dict | None = None):
     draft = QuotationDraft(
         id=new_id(),
         uploaded_file_id=new_id(),
@@ -295,6 +295,8 @@ def _create_draft(db: Session, core, ctx, *, select_bundle: bool = False, raw_te
             item_kind="catalog",
             state="current",
             cost_status="paid",
+            label_override=bundle_label_override,
+            typed_value_override=bundle_typed_override,
             price={"amount": price_amount, "currency": "MYR"},
             bundle_tier_id=bundle_tier_id,
             evidence_snapshot={
@@ -563,62 +565,52 @@ def test_all_7_insurers_box1_suppression_box2_layout_and_key_replacement(hermeti
                    "effects": [{"target_concept_id": core.towing_c.id, "effect_type": "upgrade_to_box2", "display_title": "Unlimited Towing Assistance", "display_value": "", "icon_hint": "unlimited_towing", "comparison_value": "Unlimited"}]}],
     }, profile_id=core.prof.id)
 
-    # 7. AmAssurance Lite (+ Breakdown Towing scoped) + Plus (Private Car 365 Plan 1 & Plan 2 + Key Replacement)
+    # 7. AmAssurance 4 auto365 packages (Lite=50 km, Plus=100 km, Premier=365 km, TPFT Premier=200 km) + Private Car 365 Plan 1-4
     amgen_lite = _create_company_catalog(
-        db, core, slug="amassurance", name="AmAssurance", catalog_name="auto365 Lite Comprehensive",
-        base_towing_value="RM 200", bundle_concept_key="breakdown-towing", bundle_concept_label="Breakdown Towing Assistance",
-        price_amount="45.00",
+        db, core, slug="amassurance", name="AmAssurance", catalog_name="auto365 Comprehensive Lite",
+        base_towing_value="50 km", bundle_concept_key="private-car-365", bundle_concept_label="Private Car 365",
+        price_amount="250.00",
     )
-    save_company_bundle(db, core.admin, amgen_lite.comp.id, {
-        "name": "Breakdown Towing Assistance",
-        "primary_concept_id": amgen_lite.bundle_c.id,
-        "match_aliases": ["breakdown towing assistance"],
-        "catalog_scope": "auto365 Lite",
-        "force_box2": True,
-        "has_plan_tiers": False,
-        "tiers": [{"tier_key": "default", "label": "150 km", "is_default_fallback": True,
-                   "effects": [{"target_concept_id": core.towing_c.id, "effect_type": "upgrade_to_box2", "display_title": "Towing Assistance (150 km)", "display_value": "", "comparison_value": "150 km"}]}],
-    }, profile_id=core.prof.id)
 
-    amgen_plus_c = BenefitConcept(
-        id=new_id(), concept_key="private-car-365", label="Private Car 365",
-        description="Private Car 365 bundle.",
-        status="active", created_at=utcnow(), updated_at=utcnow(),
-    )
-    db.add(amgen_plus_c)
-    db.flush()
-    amgen_plus_cat = BenefitCatalog(
-        id=new_id(), company_id=amgen_lite.comp.id, product_id=amgen_lite.prod.id, segment_id=core.seg.id,
-        vehicle_category_id=core.veh.id, coverage_type_id=core.cov.id, name="auto365 Plus Comprehensive",
-        status="published", created_at=utcnow(), updated_at=utcnow(),
-    )
-    amgen_plus_rev = BenefitCatalogRevision(
-        id=new_id(),
-        catalog_id=amgen_plus_cat.id,
-        revision_number=1,
-        state="published",
-        content_hash="h-amgen-plus",
-        created_at=utcnow(),
-    )
-    amgen_plus_tow = CatalogOffering(
-        id=new_id(), catalog_revision_id=amgen_plus_rev.id, concept_id=core.towing_c.id,
-        offering_key="amgen-plus-tow", offering_kind="base", role="included", display_value="100 km", status="active", sort_order=10,
-    )
-    amgen_plus_pc365_off = CatalogOffering(
-        id=new_id(), catalog_revision_id=amgen_plus_rev.id, concept_id=amgen_plus_c.id,
-        offering_key="amgen-plus-pc365", offering_kind="optional", role="addon_option",
-        optional_price={"amount": "250.00", "currency": "MYR"}, status="active", sort_order=20,
-    )
-    db.add_all([amgen_plus_cat, amgen_plus_rev, amgen_plus_tow, amgen_plus_pc365_off])
-    db.flush()
-    amgen_plus = SimpleNamespace(
-        comp=amgen_lite.comp, prod=amgen_lite.prod, cat=amgen_plus_cat, rev=amgen_plus_rev,
-        towing_off=amgen_plus_tow, bundle_c=amgen_plus_c, bundle_off=amgen_plus_pc365_off,
-        concepts=[core.towing_c, core.key_c, amgen_plus_c], offerings=[amgen_plus_tow, amgen_plus_pc365_off],
-    )
+    def _add_amgen_pkg(cat_name: str, prod_key: str, base_km: str):
+        p = InsuranceProduct(
+            id=new_id(), company_id=amgen_lite.comp.id, product_key=prod_key, name=cat_name,
+            status="active", created_at=utcnow(), updated_at=utcnow(),
+        )
+        cat = BenefitCatalog(
+            id=new_id(), company_id=amgen_lite.comp.id, product_id=p.id, segment_id=core.seg.id,
+            vehicle_category_id=core.veh.id, coverage_type_id=core.cov.id, name=cat_name,
+            status="published", created_at=utcnow(), updated_at=utcnow(),
+        )
+        rev = BenefitCatalogRevision(
+            id=new_id(), catalog_id=cat.id, revision_number=1, state="published",
+            content_hash=f"h-{prod_key}", created_at=utcnow(),
+        )
+        tow = CatalogOffering(
+            id=new_id(), catalog_revision_id=rev.id, concept_id=core.towing_c.id,
+            offering_key=f"{prod_key}-tow", offering_kind="base", role="included",
+            display_value=base_km, status="active", sort_order=10,
+        )
+        pc_off = CatalogOffering(
+            id=new_id(), catalog_revision_id=rev.id, concept_id=amgen_lite.bundle_c.id,
+            offering_key=f"{prod_key}-pc365", offering_kind="optional", role="addon_option",
+            optional_price={"amount": "250.00", "currency": "MYR"}, status="active", sort_order=20,
+        )
+        db.add_all([p, cat, rev, tow, pc_off])
+        db.flush()
+        return SimpleNamespace(
+            comp=amgen_lite.comp, prod=p, cat=cat, rev=rev,
+            towing_off=tow, bundle_c=amgen_lite.bundle_c, bundle_off=pc_off,
+            concepts=[core.towing_c, core.key_c, amgen_lite.bundle_c], offerings=[tow, pc_off],
+        )
+
+    amgen_plus = _add_amgen_pkg("auto365 Comprehensive Plus", "amgen-plus", "100 km")
+    amgen_premier = _add_amgen_pkg("auto365 Comprehensive Premier", "amgen-premier", "365 km")
+    amgen_tpft_premier = _add_amgen_pkg("auto365 TPFT Premier", "amgen-tpft-premier", "200 km")
+
     save_company_bundle(db, core.admin, amgen_lite.comp.id, {
         "name": "Private Car 365",
-        "primary_concept_id": amgen_plus_c.id,
+        "primary_concept_id": amgen_lite.bundle_c.id,
         "match_aliases": ["private car 365", "pc 365"],
         "force_box2": True,
         "has_plan_tiers": True,
@@ -630,6 +622,10 @@ def test_all_7_insurers_box1_suppression_box2_layout_and_key_replacement(hermeti
                  {"target_concept_id": core.towing_c.id, "effect_type": "upgrade_to_box2", "display_title": "Unlimited Towing Assistance", "display_value": "", "icon_hint": "unlimited_towing", "comparison_value": "Unlimited", "sort_order": 10},
                  {"target_concept_id": core.key_c.id, "effect_type": "add_to_box2", "display_title": "Key Replacement", "display_value": "RM 1,000", "sort_order": 20},
              ]},
+            {"tier_key": "plan_3", "label": "Plan 3", "match_tokens": ["plan 3"],
+             "effects": [{"target_concept_id": core.towing_c.id, "effect_type": "upgrade_to_box2", "display_title": "Unlimited Towing Assistance", "display_value": "", "icon_hint": "unlimited_towing", "comparison_value": "Unlimited"}]},
+            {"tier_key": "plan_4", "label": "Plan 4", "match_tokens": ["plan 4"],
+             "effects": [{"target_concept_id": core.towing_c.id, "effect_type": "upgrade_to_box2", "display_title": "Unlimited Towing Assistance", "display_value": "", "icon_hint": "unlimited_towing", "comparison_value": "Unlimited"}]},
         ],
     }, profile_id=core.prof.id)
 
@@ -641,8 +637,10 @@ def test_all_7_insurers_box1_suppression_box2_layout_and_key_replacement(hermeti
         (lonpac, "RM 400"),
         (sompo, "Unlimited"),
         (tune, "RM 300"),
-        (amgen_lite, "RM 200"),
+        (amgen_lite, "50 km"),
         (amgen_plus, "100 km"),
+        (amgen_premier, "365 km"),
+        (amgen_tpft_premier, "200 km"),
     ]:
         d_base = _create_draft(db, core, ctx, select_bundle=False)
         cards_base = resolve_benefit_cards(
@@ -658,23 +656,27 @@ def test_all_7_insurers_box1_suppression_box2_layout_and_key_replacement(hermeti
         assert any(
             expected_base in f"{it.get('title', '')} {it.get('value', '')} {it.get('description', '')}"
             for it in free_items
-        ), f"Expected base {expected_base} in Box 1 for {ctx.comp.name}"
+        ), f"Expected base {expected_base} in Box 1 for {ctx.cat.name}"
 
-    # Check Bundle Active across all bundled insurers
+    # Check Bundle Active across all bundled insurers + exact tier title + no duplicate Plan value
     cases = [
-        (qbe, None, "Unlimited Towing Assistance", "unlimited_towing"),
-        (stmb, "Motor PA Plan 2", "Towing Assistance (200 km)", None),
-        (stmb, "Motor PA Plan 4", "Unlimited Towing Assistance", "unlimited_towing"),
-        (etiqa, None, "Unlimited Towing Assistance", "unlimited_towing"),
-        (lonpac, "Smart Driver Plan 1", "Towing Assistance (RM 600)", None),
-        (lonpac, "Smart Driver EV Plan", "Unlimited Towing Assistance", "unlimited_towing"),
-        (tune, "Motor Easy Bundle", "Unlimited Towing Assistance", "unlimited_towing"),
-        (amgen_lite, "Breakdown Towing Assistance", "Towing Assistance (150 km)", None),
-        (amgen_plus, "Private Car 365 Plan 1", "Towing Assistance (600 km)", None),
-        (amgen_plus, "Private Car 365 Plan 2", "Unlimited Towing Assistance", "unlimited_towing"),
+        (qbe, None, "Driver & Passenger Protector (N4)", "Unlimited Towing Assistance", "unlimited_towing", None, None),
+        (stmb, "Motor PA Plan 2", "Motor PA Plus - Plan 2", "Towing Assistance (200 km)", None, "Motor PA Plus Plan 1-4", {"type": "string", "display_text": "Plan 2"}),
+        (stmb, "Motor PA Plan 4", "Motor PA Plus - Plan 4", "Unlimited Towing Assistance", "unlimited_towing", None, None),
+        (etiqa, None, "OTO 360", "Unlimited Towing Assistance", "unlimited_towing", None, None),
+        (lonpac, "Smart Driver Plan 1", "E-Assist Smart Driver - Plan 1", "Towing Assistance (RM 600)", None, None, None),
+        (lonpac, "Smart Driver EV Plan", "E-Assist Smart Driver - EV Plan", "Unlimited Towing Assistance", "unlimited_towing", None, None),
+        (tune, "Motor Easy Bundle", "Motor Easy Bundle", "Unlimited Towing Assistance", "unlimited_towing", None, None),
+        (amgen_lite, "Private Car 365 Plan 1", "Private Car 365 - Plan 1", "Towing Assistance (600 km)", None, None, {"type": "string", "display_text": "Plan 1"}),
+        (amgen_plus, "Private Car 365 Plan 2", "Private Car 365 - Plan 2", "Unlimited Towing Assistance", "unlimited_towing", None, {"type": "string", "display_text": "Plan 2"}),
+        (amgen_premier, "Private Car 365 Plan 3", "Private Car 365 - Plan 3", "Unlimited Towing Assistance", "unlimited_towing", None, None),
+        (amgen_tpft_premier, "Private Car 365 Plan 4", "Private Car 365 - Plan 4", "Unlimited Towing Assistance", "unlimited_towing", None, None),
     ]
-    for ctx, plan_text, expected_tow_title, expected_icon in cases:
-        d_b = _create_draft(db, core, ctx, select_bundle=True, raw_text=plan_text or "", plan_tier=plan_text)
+    for ctx, plan_text, expected_parent_title, expected_tow_title, expected_icon, lbl_ovr, tv_ovr in cases:
+        d_b = _create_draft(
+            db, core, ctx, select_bundle=True, raw_text=plan_text or "", plan_tier=plan_text,
+            bundle_label_override=lbl_ovr, bundle_typed_override=tv_ovr,
+        )
         cards = resolve_benefit_cards(
             selections=d_b.selections,
             offerings=ctx.offerings,
@@ -686,13 +688,15 @@ def test_all_7_insurers_box1_suppression_box2_layout_and_key_replacement(hermeti
         )
         # Box 1 MUST NOT show base towing or bundle card
         free_items = extract_free_coverage_items(cards["current_benefits"])
-        assert not any("towing" in str(it.get("label") or "").lower() for it in free_items), f"Box 1 should remove Towing when bundle active ({plan_text})"
-        # Box 2 schedule: parent bundle has price, upgraded towing beside it has NO price and blank coverage
+        assert not any("towing" in str(it.get("title") or it.get("label") or "").lower() for it in free_items), f"Box 1 should remove Towing when bundle active ({plan_text})"
+        # Box 2 schedule: parent bundle has exact tier title + price + zero duplicate plan value;
+        # unlocked towing beside it has NO price and blank coverage
         box2 = build_unified_matrix_cards(cards["current_benefits"], cards["available_addons"])
         selected_box2 = [m for m in box2 if m["is_selected"]]
-        parent_m = next((m for m in selected_box2 if m["title"] == ctx.bundle_c.label), None)
+        parent_m = next((m for m in selected_box2 if m["title"] == expected_parent_title), None)
         tow_m = next((m for m in selected_box2 if m["title"] == expected_tow_title), None)
-        assert parent_m is not None and parent_m["price"] is not None, f"Parent bundle missing price for {plan_text}"
+        assert parent_m is not None and parent_m["price"] is not None, f"Parent bundle '{expected_parent_title}' missing for {plan_text}; got {[m['title'] for m in selected_box2]}"
+        assert parent_m["value"] == "", f"Duplicate tier value leaked on parent bundle '{expected_parent_title}': {parent_m['value']!r}"
         assert tow_m is not None, f"Unlocked towing '{expected_tow_title}' missing from Box 2 for {plan_text}"
         assert tow_m["price"] is None
         assert tow_m["cost_status"] == "bundle_included"
@@ -729,9 +733,13 @@ def test_workspace_patch_tier_switch_and_confirm_clears_uncertain(hermetic_db: S
     }, profile_id=core.prof.id)
     p1_id = saved["tiers"][0]["id"]
     p2_id = saved["tiers"][1]["id"]
-    d_obj = _create_draft(db, core, amgen, select_bundle=True, raw_text="Private Car 365", plan_tier="Plan 1", bundle_tier_id=p1_id, plan_uncertain=True)
+    d_obj = _create_draft(
+        db, core, amgen, select_bundle=True, raw_text="Private Car 365",
+        plan_tier="Plan 1", bundle_tier_id=p1_id, plan_uncertain=True,
+        bundle_typed_override={"type": "string", "display_text": "Plan 1"},
+    )
 
-    # Verify confirm_plan_tier clears uncertain flag without changing tier
+    # Verify confirm_plan_tier clears uncertain flag without changing tier and keeps exact Plan 1 title
     _apply_benefit_update(db, d_obj.draft, core.admin, {"selection_id": d_obj.bundle_sel.id, "confirm_plan_tier": True})
     db.flush()
     assert d_obj.bundle_sel.evidence_snapshot["plan_tier_uncertain"] is False
@@ -749,9 +757,48 @@ def test_workspace_patch_tier_switch_and_confirm_clears_uncertain(hermetic_db: S
         company_bundles=load_active_company_bundles(db, amgen.comp.id, core.prof.id),
         catalog_name=amgen.cat.name,
     )
+    parent_c = next(c for c in cards["current_benefits"] if c["concept_id"] == amgen.bundle_c.id)
+    assert parent_c["label"] == "Private Car 365 - Plan 2"
+    assert parent_c["value"] == ""
     tow_c = next(c for c in cards["current_benefits"] if c["concept_id"] == core.towing_c.id)
     assert tow_c["label"] == "Unlimited Towing Assistance"
     assert tow_c["icon_hint"] == "unlimited_towing"
+    assert not any("towing" in it["title"].lower() for it in extract_free_coverage_items(cards["current_benefits"]))
+
+    # Move bundle to available_addon (untick) -> clears bundle_tier_id, drops Box 2 towing, restores Box 1 default 100 km towing
+    _apply_benefit_update(db, d_obj.draft, core.admin, {"selection_id": d_obj.bundle_sel.id, "state": "available_addon"})
+    db.flush()
+    assert d_obj.bundle_sel.bundle_tier_id is None
+    cards_after_untick = resolve_benefit_cards(
+        selections=list(db.scalars(select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == d_obj.draft.id)).all()),
+        offerings=amgen.offerings,
+        concepts=amgen.concepts,
+        relations=[],
+        facets=[],
+        company_bundles=load_active_company_bundles(db, amgen.comp.id, core.prof.id),
+        catalog_name=amgen.cat.name,
+    )
+    free_after_untick = extract_free_coverage_items(cards_after_untick["current_benefits"])
+    assert any("100 km" in it["title"] for it in free_after_untick)
+    box2_after_untick = build_unified_matrix_cards(cards_after_untick["current_benefits"], cards_after_untick["available_addons"])
+    assert not any(c["is_selected"] and c["id"] == "towing" for c in box2_after_untick)
+
+    # Re-add with Plan 1, then remove completely -> Box 1 default 100 km towing must still reappear
+    _apply_benefit_update(db, d_obj.draft, core.admin, {"selection_id": d_obj.bundle_sel.id, "state": "current", "bundle_tier_id": p1_id})
+    _apply_benefit_update(db, d_obj.draft, core.admin, {"selection_id": d_obj.bundle_sel.id, "state": "removed"})
+    db.flush()
+    assert d_obj.bundle_sel.bundle_tier_id is None
+    cards_after_remove = resolve_benefit_cards(
+        selections=list(db.scalars(select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == d_obj.draft.id)).all()),
+        offerings=amgen.offerings,
+        concepts=amgen.concepts,
+        relations=[],
+        facets=[],
+        company_bundles=load_active_company_bundles(db, amgen.comp.id, core.prof.id),
+        catalog_name=amgen.cat.name,
+    )
+    free_after_remove = extract_free_coverage_items(cards_after_remove["current_benefits"])
+    assert any("100 km" in it["title"] for it in free_after_remove)
 
 
 def test_comparison_towing_resolution_and_review_flags_lifecycle(hermetic_db: Session):
@@ -849,7 +896,10 @@ def test_design2_html_and_pdf_rendering_with_unlimited_towing_bundle(hermetic_db
              "effects": [{"target_concept_id": core.towing_c.id, "effect_type": "upgrade_to_box2", "display_title": "Unlimited Towing Assistance", "display_value": "", "icon_hint": "unlimited_towing", "comparison_value": "Unlimited"}]},
         ],
     }, profile_id=core.prof.id)
-    d_b = _create_draft(db, core, amgen, select_bundle=True, raw_text="Private Car 365 Plan 2", plan_tier="Plan 2")
+    d_b = _create_draft(
+        db, core, amgen, select_bundle=True, raw_text="Private Car 365 Plan 2", plan_tier="Plan 2",
+        bundle_typed_override={"type": "string", "display_text": "Plan 2"},
+    )
     cards = resolve_benefit_cards(
         selections=d_b.selections,
         offerings=amgen.offerings,
@@ -860,6 +910,8 @@ def test_design2_html_and_pdf_rendering_with_unlimited_towing_bundle(hermetic_db
         catalog_name=amgen.cat.name,
     )
     matrix = build_unified_matrix_cards(cards["current_benefits"], cards["available_addons"])
+    parent_entry = next(m for m in matrix if m["title"] == "Private Car 365 - Plan 2")
+    assert parent_entry["value"] == ""
     tow_entry = next(m for m in matrix if m["title"] == "Unlimited Towing Assistance")
     assert tow_entry["is_selected"] is True
     assert tow_entry["price"] is None
@@ -891,7 +943,9 @@ def test_design2_html_and_pdf_rendering_with_unlimited_towing_bundle(hermetic_db
         },
         db=db,
     )
-    assert "Private Car 365" in html
+    assert "Private Car 365 - Plan 2" in html
+    assert ">Plan 2<" not in html
+    assert "RM 250.00" not in html
     assert "Unlimited Towing Assistance" in html
     assert "Included in Private Car 365" not in html
     assert "24-Hour Emergency Towing" not in html
@@ -913,7 +967,7 @@ def test_design2_html_and_pdf_rendering_with_unlimited_towing_bundle(hermetic_db
         },
         db=db,
     )
-    assert "Private Car 365" in sched_html
+    assert "Private Car 365 - Plan 2" in sched_html
     assert "RM 250.00" in sched_html
     assert "Unlimited Towing Assistance" in sched_html
     assert "INCLUDED FOC" not in sched_html

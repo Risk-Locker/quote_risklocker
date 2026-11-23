@@ -6,6 +6,12 @@ from pathlib import Path
 import re
 
 from app.core.errors import AIExtractionUnavailableException
+from app.extraction.brand_logo_scanner import (
+    extract_page1_primary_brand_signals,
+    is_liberty_group_document,
+    render_page1_logo_crop,
+    verify_brand_logo_with_vision,
+)
 from app.extraction.candidate_finder import find_candidates
 from app.extraction.benefit_lines import extract_benefit_lines, is_spurious_benefit_line
 from app.extraction.draft_mapper import build_draft
@@ -13,6 +19,75 @@ from app.extraction.layout import detect_layout
 from app.extraction.native_pdf import extract_native
 from app.extraction.ocr import run_enhanced_reading
 from app.extraction.types import CandidateValue
+
+
+def _augment_liberty_company_candidates(
+    *,
+    pdf_bytes: bytes,
+    page1_text: str,
+    combined_text: str,
+    source_filename: str,
+    db_companies: list[dict] | None,
+    candidates: dict[str, list[CandidateValue]],
+    gemini_res: dict | None,
+    logo_crop_png: bytes | None,
+    logo_color_meta: dict,
+) -> None:
+    """Run visual logo + Page 1 verification whenever Liberty-group brands compete."""
+    if not is_liberty_group_document(combined_text, page1_text, source_filename):
+        return
+    p1_sig = extract_page1_primary_brand_signals(page1_text)
+    if p1_sig.get("winning_brand"):
+        candidates.setdefault("insurance_company", []).append(
+            CandidateValue(
+                field="insurance_company",
+                value=str(p1_sig["winning_brand"]),
+                source_method="page1_brand_signal",
+                score=0.97,
+                page=1,
+                evidence=f"Page 1 primary brand signal: {', '.join(p1_sig.get('evidence') or [])}",
+            )
+        )
+
+    existing_vals = {
+        c.value.strip().lower()
+        for c in candidates.get("insurance_company", [])
+        if getattr(c, "value", None)
+    }
+    gemini_comp = str((gemini_res or {}).get("insurance_company") or "").strip()
+    needs_logo_verify = (
+        not gemini_comp
+        or "general insurance" in gemini_comp.lower()
+        or len(existing_vals) > 1
+        or (p1_sig.get("winning_brand") and gemini_comp.lower() != str(p1_sig["winning_brand"]).lower())
+    )
+    if not needs_logo_verify or not pdf_bytes:
+        return
+
+    verdict = verify_brand_logo_with_vision(
+        pdf_bytes,
+        page1_text=page1_text,
+        source_filename=source_filename,
+        db_companies=db_companies,
+        logo_crop_png=logo_crop_png,
+        color_meta=logo_color_meta,
+    )
+    canonical = str((verdict or {}).get("canonical_company") or (verdict or {}).get("insurance_company") or "").strip()
+    conf = float((verdict or {}).get("confidence") or 0.0)
+    if verdict is not None and canonical and conf >= 0.85:
+        candidates.setdefault("insurance_company", []).insert(
+            0,
+            CandidateValue(
+                field="insurance_company",
+                value=canonical,
+                source_method="logo_vision_verified",
+                score=min(0.995, max(0.92, conf)),
+                page=1,
+                evidence=f"Logo vision ({verdict.get('logo_color_observed', '')}): {verdict.get('reasoning', '')}",
+            ),
+        )
+        if gemini_res is not None:
+            gemini_res["insurance_company"] = canonical
 
 
 class ExtractionOrchestrator:
@@ -78,6 +153,11 @@ class ExtractionOrchestrator:
                     )
                 warnings.append("AI Notice: No GEMINI_API_KEY configured. Extracted via native PDF/OCR fallback.")
             elif len(pdf_bytes) > 500:
+                page1_text = str((combined_page_text[0] if combined_page_text else {}).get("text") or "")
+                logo_crop_png: bytes | None = None
+                logo_color_meta: dict = {}
+                if is_liberty_group_document(combined_text, page1_text, source_filename or file_path.name):
+                    logo_crop_png, logo_color_meta = render_page1_logo_crop(pdf_bytes)
                 item_idx = abs(hash(source_filename or file_path.name)) % 100
                 gemini_res = extract_with_gemini_sync(
                     pdf_bytes,
@@ -89,8 +169,20 @@ class ExtractionOrchestrator:
                     db_packs=db_packs,
                     correction_memory=db_corrections,
                     prompt_override=prompt_override,
+                    logo_crop_png=logo_crop_png,
                     batch_item_index=item_idx,
                     telemetry_log=gemini_telemetry,
+                )
+                _augment_liberty_company_candidates(
+                    pdf_bytes=pdf_bytes,
+                    page1_text=page1_text,
+                    combined_text=combined_text,
+                    source_filename=source_filename or file_path.name,
+                    db_companies=db_companies,
+                    candidates=candidates,
+                    gemini_res=gemini_res,
+                    logo_crop_png=logo_crop_png,
+                    logo_color_meta=logo_color_meta,
                 )
                 if not gemini_res:
                     if fail_closed:
@@ -120,7 +212,7 @@ class ExtractionOrchestrator:
                         existing = candidates.get(target_key, [])
                         norm_clean = re.sub(r"[\s,.-]", "", clean_val).lower()
                         has_agreement = any(
-                            re.sub(r"[\s,.-]", "", str(c.value)).lower() == norm_clean
+                            re.sub(r"[\s,.-]", "", c.value).lower() == norm_clean
                             for c in existing
                         )
                         calibrated_score = 0.98 if has_agreement else (0.88 if existing else 0.92)
@@ -152,7 +244,7 @@ class ExtractionOrchestrator:
                     candidates["tier_name"] = [pkg_candidate]
 
                 # Map Gemini detected benefits
-                from app.services.bundle_plan_matcher import extract_plan_tier_token
+                from app.services.bundle_plan_matcher import extract_plan_tier_token, is_base_auto365_policy_label
 
                 gemini_benefits = gemini_res.get("detected_benefits") or []
                 for b_item in gemini_benefits:
@@ -179,7 +271,7 @@ class ExtractionOrchestrator:
                     inferred_plan = b_plan or extract_plan_tier_token(f"{b_label} {b_val} {b_raw}") or ""
 
                     if b_label:
-                        if is_spurious_benefit_line(b_label) or is_spurious_benefit_line(b_raw):
+                        if is_base_auto365_policy_label(b_label) or is_spurious_benefit_line(b_label) or is_spurious_benefit_line(b_raw):
                             continue
                         # Find matching concept robustly across id/concept_id, key/concept_key, name/label
                         matched_concept = None
@@ -396,17 +488,34 @@ class ExtractionOrchestrator:
         if not benefit_lines:
             benefit_lines = fallback_lines
         elif fallback_lines:
-            # Merge deterministic lines that Gemini missed (e.g. Endorsement 57, LLOP, LLP)
+            from app.services.bundle_plan_matcher import is_base_auto365_policy_label
+
+            # Merge only mapped deterministic lines that Gemini genuinely missed (never unmapped scraps or duplicate concepts)
             existing_labels = {
                 (b.get("normalized_label") or b.get("raw_label") or "").lower().strip()
                 for b in benefit_lines
             }
+            existing_concept_keys = {
+                str(m.get("concept_key") or "").strip()
+                for b in benefit_lines
+                for m in (b.get("candidate_mappings") or [])
+                if isinstance(m, dict) and m.get("concept_key")
+            }
             for fl in fallback_lines:
                 fl_lbl = (fl.get("normalized_label") or fl.get("raw_label") or "").lower().strip()
-                if fl_lbl and not is_spurious_benefit_line(fl_lbl) and not any(fl_lbl in ex or ex in fl_lbl for ex in existing_labels):
+                if not fl_lbl or is_base_auto365_policy_label(fl_lbl) or is_spurious_benefit_line(fl_lbl):
+                    continue
+                fl_maps = [m for m in (fl.get("candidate_mappings") or []) if isinstance(m, dict) and m.get("concept_key")]
+                if not fl_maps:
+                    continue
+                fl_keys = {str(m.get("concept_key") or "").strip() for m in fl_maps}
+                if fl_keys & existing_concept_keys:
+                    continue
+                if not any(fl_lbl in ex or ex in fl_lbl for ex in existing_labels):
                     fl["line_id"] = f"det_{len(benefit_lines) + 1}"
                     benefit_lines.append(fl)
                     existing_labels.add(fl_lbl)
+                    existing_concept_keys.update(fl_keys)
 
         return {
             "full_record": {

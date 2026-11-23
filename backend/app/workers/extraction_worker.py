@@ -742,17 +742,17 @@ def process_extraction_job(
             if "car_brand" in draft.fields and isinstance(draft.fields["car_brand"], dict):
                 draft.fields["car_brand"]["value"] = effective_brand
             else:
-                draft.fields["car_brand"] = effective_brand
+                draft.fields["car_brand"] = {"value": effective_brand, "status": "ready", "message": ""}
         if effective_model:
             if "car_model" in draft.fields and isinstance(draft.fields["car_model"], dict):
                 draft.fields["car_model"]["value"] = effective_model
             else:
-                draft.fields["car_model"] = effective_model
-        if simp_combined:
-            if "vehicle_model" in draft.fields and isinstance(draft.fields["vehicle_model"], dict):
+                draft.fields["car_model"] = {"value": effective_model, "status": "ready", "message": ""}
+        if simp_combined and "vehicle_model" in draft.fields:
+            if isinstance(draft.fields["vehicle_model"], dict):
                 draft.fields["vehicle_model"]["value"] = simp_combined
             else:
-                draft.fields["vehicle_model"] = simp_combined
+                draft.fields.pop("vehicle_model", None)
 
     parsed_s_start = parse_date_safe(cover_start) if cover_start else None
     parsed_s_end = parse_date_safe(cover_end) if cover_end else None

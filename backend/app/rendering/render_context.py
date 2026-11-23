@@ -64,6 +64,53 @@ def format_money_amount(raw_price: dict | None) -> str:
             return ""
 
 
+_BUNDLE_TIER_SUFFIX_RE = re.compile(
+    r"(?:\s*[-–/:]\s*|\s*\(\s*|\s+)"
+    r"(?:(?:plans?|pelan|tier|pakej)\s*(?:no\.?\s*)?(?:(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))*|ev)|ev\s*plan)"
+    r"(?:\s*/\s*(?:ev\s*plan|(?:plans?|pelan)\s*(?:\d+|[a-d])))?\s*\)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _format_bundle_title_with_tier(base_label: str, tier_label: str) -> str:
+    """Format multi-tier bundle title with exact active plan tier and zero duplicate plan suffixes."""
+    clean_tier = (tier_label or "").strip()
+    raw_base = (base_label or "").strip()
+    if not clean_tier:
+        return raw_base
+    clean_base = raw_base
+    for _ in range(3):
+        stripped = _BUNDLE_TIER_SUFFIX_RE.sub("", clean_base).strip(" -–/:,")
+        if stripped == clean_base or not stripped:
+            break
+        clean_base = stripped
+    if not clean_base:
+        clean_base = raw_base
+    return f"{clean_base} - {clean_tier}"
+
+
+def _is_redundant_tier_value(val: str | None, tier_label: str | None, resolved_label: str = "") -> bool:
+    """True when coverage value only repeats a plan/tier token already conveyed by the bundle title."""
+    val_s = (val or "").strip()
+    if not val_s:
+        return False
+    val_l = val_s.lower()
+    tier_l = (tier_label or "").strip().lower()
+    if tier_l and val_l == tier_l:
+        return True
+    if re.fullmatch(
+        r"(?:(?:plans?|pelan|tier|pakej)\s*(?:no\.?\s*)?(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))*|"
+        r"(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))+|"
+        r"ev\s*plan|driver\s*plan\s*\d+|included)",
+        val_l,
+        re.IGNORECASE,
+    ):
+        return True
+    if resolved_label and val_l in resolved_label.lower() and not any(u in val_l for u in ("rm", "myr", "km", "%")):
+        return True
+    return False
+
+
 def _clean_extra_label(raw_label: str) -> str:
     """Normalize common legal liability acronyms without altering curated titles."""
     label = (raw_label or "").strip()
@@ -719,7 +766,21 @@ def _card(
     resolved_desc = final_desc
     resolved_sort_order = int(getattr(offering, "sort_order", 0) or 0)
     resolved_effect_order = 0
-    resolved_icon_hint = None
+    resolved_icon_hint = (
+        str(sel_typed.get("icon_hint")).strip()
+        if isinstance(sel_typed, dict) and sel_typed.get("icon_hint")
+        else None
+    )
+
+    if bundle_meta and bundle_meta.get("has_plan_tiers") and bundle_meta.get("selected_bundle_tier_label"):
+        tier_lbl = str(bundle_meta["selected_bundle_tier_label"]).strip()
+        resolved_label = _format_bundle_title_with_tier(resolved_label, tier_lbl)
+        if _is_redundant_tier_value(resolved_value, tier_lbl, resolved_label):
+            resolved_value = ""
+    elif bundle_meta and not bundle_meta.get("has_plan_tiers"):
+        tier_lbl = str(bundle_meta.get("selected_bundle_tier_label") or "").strip()
+        if _is_redundant_tier_value(resolved_value, tier_lbl, resolved_label):
+            resolved_value = ""
 
     if bundle_eff is not None:
         is_promoted_addon = True
@@ -795,6 +856,7 @@ def _card(
         card_payload.update(
             {
                 "is_bundle": True,
+                "has_plan_tiers": bool(bundle_meta.get("has_plan_tiers")),
                 "bundle_id": bundle_meta.get("bundle_id"),
                 "bundle_name": bundle_meta.get("bundle_name"),
                 "selected_bundle_tier_id": bundle_meta.get("selected_bundle_tier_id"),
@@ -973,8 +1035,10 @@ def resolve_benefit_cards(
             if sel_key_id:
                 bundle_card_meta_by_sel_id[sel_key_id] = {
                     "is_bundle": True,
+                    "has_plan_tiers": bool(getattr(matched_bundle, "has_plan_tiers", False)),
                     "force_box2": bool(getattr(matched_bundle, "force_box2", True)),
                     "bundle_id": str(matched_bundle.id),
+                    "bundle_key": str(getattr(matched_bundle, "bundle_key", "") or ""),
                     "bundle_name": str(matched_bundle.name),
                     "selected_bundle_tier_id": str(tier.id) if tier else None,
                     "selected_bundle_tier_label": str(tier.label) if tier else None,

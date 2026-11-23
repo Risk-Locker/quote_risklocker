@@ -10,6 +10,7 @@ import {
   MagnifyingGlass,
   Columns,
   ArrowsClockwise,
+  ArrowSquareOut,
   FilePdf,
   ArrowRight,
   ShieldCheck,
@@ -32,6 +33,9 @@ import { api } from "@/lib/api";
 import { getVehicleDisplayName } from "@/lib/vehicle-utils";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { RealtimePresenceBanner } from "@/components/realtime/RealtimePresenceBanner";
+import { OpenInNewTabToggle, useOpenInNewTabPreference } from "@/hooks/useOpenInNewTabPreference";
+import { DeepRedetectProgressBanner } from "@/components/redetect/DeepRedetectProgressBanner";
+import { useDeepRedetect } from "@/components/redetect/useDeepRedetect";
 
 interface SessionItem {
   id: string;
@@ -150,6 +154,7 @@ export default function SessionsPage() {
   const [redetectingId, setRedetectingId] = useState<string | null>(null);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [purgingSandbox, setPurgingSandbox] = useState(false);
+  const { openInNewTab, setOpenInNewTab } = useOpenInNewTabPreference();
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -202,24 +207,34 @@ export default function SessionsPage() {
     onRemoteUpdate: () => fetchSessions(),
   });
 
-  const handleRedetectSession = async (sessionId: string) => {
-    setRedetectingId(sessionId);
-    try {
-      const res = await api<{ success: boolean; fields_count?: number; changed_fields?: string[] }>(`/sessions/${sessionId}/rescan`, {
-        method: "POST",
-        body: JSON.stringify({ mode: "in_place", engine: "deep" }),
-      });
-      const updatedNote = res?.changed_fields?.length ? `, ${res.changed_fields.length} changed` : "";
+  const deepRedetect = useDeepRedetect({
+    onCompleted: async (completedJob) => {
+      setRedetectingId(null);
+      const changedCount = (completedJob.result_summary?.changed_fields as string[] | undefined)?.length || 0;
       toast(
-        res?.success
-          ? `Deep re-detected quotation (${res.fields_count || 0} fields refreshed${updatedNote}).`
-          : "Re-detection completed.",
+        changedCount > 0
+          ? `Deep re-detected quotation (${changedCount} field(s) updated).`
+          : "Deep re-detection completed and verified.",
         "success"
       );
       await fetchSessions();
+    },
+    onCancelled: () => {
+      setRedetectingId(null);
+      toast("Re-detection cancelled safely.", "info");
+    },
+    onFailed: (msg) => {
+      setRedetectingId(null);
+      toast("Re-detection failed: " + msg, "error");
+    },
+  });
+
+  const handleRedetectSession = async (sessionId: string) => {
+    setRedetectingId(sessionId);
+    try {
+      await deepRedetect.startSessionRedetect(sessionId);
     } catch (err: any) {
       toast("Re-detection failed: " + (err?.message || "Server error"), "error");
-    } finally {
       setRedetectingId(null);
     }
   };
@@ -300,6 +315,7 @@ export default function SessionsPage() {
                 Empty Sandbox ({tabCounts.test})
               </Button>
             ) : null}
+            <OpenInNewTabToggle checked={openInNewTab} onChange={setOpenInNewTab} />
             <Button
               type="button"
               variant="secondary"
@@ -351,6 +367,14 @@ export default function SessionsPage() {
             )}
           </Card>
         )}
+
+        <DeepRedetectProgressBanner
+          job={deepRedetect.job}
+          elapsedSeconds={deepRedetect.elapsedSeconds}
+          cancelling={deepRedetect.cancelling}
+          onCancel={() => void deepRedetect.cancelRedetect()}
+          onDismiss={deepRedetect.dismissBanner}
+        />
 
         {/* Filter Tabs & Search/Sort Controls */}
         <div className="flex flex-col gap-3">
@@ -618,31 +642,69 @@ export default function SessionsPage() {
                               variant="secondary"
                               size="sm"
                               loading={redetectingId === s.id}
+                              disabled={deepRedetect.isRunning}
                               icon={<ArrowsClockwise size={13} weight="bold" />}
                               onClick={() => handleRedetectSession(s.id)}
-                              title="Re-run AI extraction on this uploaded PDF"
+                              title="Run multi-pass visual logo & deep AI verification on this PDF"
                             >
-                              Re-detect
+                              {redetectingId === s.id ? "Re-detecting..." : "Re-detect"}
                             </Button>
 
-                            <Link
-                              href={`/sessions/${s.id}` as Route}
-                              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--rl-radius-sm)] bg-[var(--rl-black)] hover:bg-black text-white text-xs font-semibold transition-colors"
-                            >
-                              <FileText size={13} weight="bold" />
-                              <span>Workspace</span>
-                            </Link>
+                            <div className="inline-flex items-center">
+                              <Link
+                                href={`/sessions/${s.id}` as Route}
+                                target={openInNewTab ? "_blank" : undefined}
+                                rel={openInNewTab ? "noopener noreferrer" : undefined}
+                                className={`inline-flex items-center gap-1.5 h-8 px-3 bg-[var(--rl-black)] hover:bg-black text-white text-xs font-semibold transition-colors ${
+                                  openInNewTab ? "rounded-[var(--rl-radius-sm)]" : "rounded-l-[var(--rl-radius-sm)]"
+                                }`}
+                              >
+                                <FileText size={13} weight="bold" />
+                                <span>Workspace</span>
+                                {openInNewTab && <ArrowSquareOut size={11} weight="bold" />}
+                              </Link>
+                              {!openInNewTab && (
+                                <Link
+                                  href={`/sessions/${s.id}` as Route}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center justify-center h-8 px-1.5 rounded-r-[var(--rl-radius-sm)] border border-l-0 border-[var(--rl-black)] bg-neutral-800 hover:bg-black text-white transition-colors"
+                                  title="Open Workspace in new tab"
+                                  aria-label="Open Workspace in new tab"
+                                >
+                                  <ArrowSquareOut size={12} weight="bold" />
+                                </Link>
+                              )}
+                            </div>
 
                             {s.tenure_id && !s.is_test && (
-                              <Link
-                                href={`/comparison?tenure_id=${s.tenure_id}` as Route}
-                                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white hover:bg-neutral-50 text-[var(--rl-text-strong)] text-xs font-semibold transition-colors"
-                                title="Open multi-insurer comparison matrix for this vehicle"
-                              >
-                                <Columns size={13} weight="bold" />
-                                <span>Compare</span>
-                                <ArrowRight size={11} weight="bold" />
-                              </Link>
+                              <div className="inline-flex items-center">
+                                <Link
+                                  href={`/comparison?tenure_id=${s.tenure_id}` as Route}
+                                  target={openInNewTab ? "_blank" : undefined}
+                                  rel={openInNewTab ? "noopener noreferrer" : undefined}
+                                  className={`inline-flex items-center gap-1 h-8 px-2.5 border border-[var(--rl-border)] bg-white hover:bg-neutral-50 text-[var(--rl-text-strong)] text-xs font-semibold transition-colors ${
+                                    openInNewTab ? "rounded-[var(--rl-radius-sm)]" : "rounded-l-[var(--rl-radius-sm)]"
+                                  }`}
+                                  title="Open multi-insurer comparison matrix for this vehicle"
+                                >
+                                  <Columns size={13} weight="bold" />
+                                  <span>Compare</span>
+                                  {openInNewTab ? <ArrowSquareOut size={11} weight="bold" /> : <ArrowRight size={11} weight="bold" />}
+                                </Link>
+                                {!openInNewTab && (
+                                  <Link
+                                    href={`/comparison?tenure_id=${s.tenure_id}` as Route}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center justify-center h-8 px-1.5 rounded-r-[var(--rl-radius-sm)] border border-l-0 border-[var(--rl-border)] bg-white hover:bg-neutral-50 text-[var(--rl-text-strong)] transition-colors"
+                                    title="Open Comparison in new tab"
+                                    aria-label="Open Comparison in new tab"
+                                  >
+                                    <ArrowSquareOut size={12} weight="bold" />
+                                  </Link>
+                                )}
+                              </div>
                             )}
 
                             {s.uploaded_file_id && (

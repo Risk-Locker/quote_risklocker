@@ -7,7 +7,6 @@ import {
   CaretUp,
   Check,
   Copy,
-  Sparkle,
 } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +15,7 @@ import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quo
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import type { WorkspaceField, WorkspaceSnapshot } from "../types";
+import { WorkspaceDiscountControl } from "./WorkspaceDiscountControl";
 
 export type FieldKind = "text" | "date" | "percent" | "money" | "total" | "vehicle_type" | "valuation_type" | "coverage_type";
 
@@ -189,8 +189,6 @@ export interface PolicyFieldsCardProps {
   setExtractedValuesCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   copiedInfo: boolean;
   handleCopyExtractedInfo: () => void;
-  geminiExtracting: boolean;
-  triggerGeminiExtraction: () => void;
   geminiQuotaInfo: GeminiQuota | null;
   previewFields: Record<string, string>;
   companies: Array<{ id: string; name: string }>;
@@ -212,6 +210,8 @@ export interface PolicyFieldsCardProps {
     options?: { stageOnly?: boolean }
   ) => void;
   onConfirmField?: (fieldName: string, value: string) => void;
+  savingDiscount?: boolean;
+  onApplyMotorDiscountPct?: (pct: number) => Promise<void> | void;
 }
 
 export function PolicyFieldsCard({
@@ -223,8 +223,6 @@ export function PolicyFieldsCard({
   setExtractedValuesCollapsed,
   copiedInfo,
   handleCopyExtractedInfo,
-  geminiExtracting,
-  triggerGeminiExtraction,
   geminiQuotaInfo,
   previewFields,
   companies,
@@ -241,6 +239,8 @@ export function PolicyFieldsCard({
   categorizedProducts,
   pinCatalog,
   onConfirmField,
+  savingDiscount = false,
+  onApplyMotorDiscountPct,
 }: PolicyFieldsCardProps) {
   // Streamlined Canonical Layout: 3 focused sections without technical clutter
 
@@ -805,21 +805,6 @@ export function PolicyFieldsCard({
             {copiedInfo ? <Check size={13} weight="bold" className="text-emerald-600" /> : <Copy size={13} weight="bold" />}
             <span>{copiedInfo ? "Copied Info!" : "Copy Info"}</span>
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={geminiExtracting}
-            onClick={triggerGeminiExtraction}
-            className="h-7 text-xs font-semibold gap-1.5"
-            title="Run Gemini Multimodal AI extraction to auto-detect customer name, coverage, car model, and benefits"
-          >
-            <Sparkle
-              size={13}
-              weight="fill"
-              className={geminiExtracting ? "animate-spin text-[var(--rl-black)]" : "text-[var(--rl-text-strong)]"}
-            />
-            <span>{geminiExtracting ? "Extracting with AI..." : "Re-Extract with AI"}</span>
-          </Button>
           <GeminiQuotaInfoButton quota={geminiQuotaInfo} />
           <Badge variant="default">{PRIMARY_POLICY_FIELDS.length + PRICING_FIELDS.length} fields</Badge>
           <button
@@ -895,6 +880,30 @@ export function PolicyFieldsCard({
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {PRICING_FIELDS.map((field) => renderField(field, true))}
             </div>
+
+            {onApplyMotorDiscountPct && (
+              <WorkspaceDiscountControl
+                currentPct={
+                  parseFloat(
+                    String(
+                      workspace.discount_summary?.motor_discount_pct ||
+                        previewFields.motor_discount_pct ||
+                        (workspace.fields?.motor_discount_pct as WorkspaceField | undefined)?.value ||
+                        "0"
+                    )
+                  ) || 0
+                }
+                effectiveDiscount={
+                  workspace.discount_summary?.effective_discount || previewFields.effective_discount || null
+                }
+                netMotorPremium={
+                  workspace.discount_summary?.net_motor_premium || previewFields.net_motor_premium || null
+                }
+                isLinkedToComparison={Boolean(workspace.tenure_id)}
+                saving={savingDiscount}
+                onApplyDiscountPct={onApplyMotorDiscountPct}
+              />
+            )}
           </div>
 <datalist id="company-suggestions">
             {companies.map((c) => (

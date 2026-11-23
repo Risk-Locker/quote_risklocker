@@ -21,7 +21,7 @@ def _is_stmb(company_name: str | None) -> bool:
 
 def _is_amgen(company_name: str | None) -> bool:
     name = (company_name or "").upper()
-    return "AMASSURANCE" in name or "AMGEN" in name or "AMGENERAL" in name
+    return any(tok in name for tok in ("AMASSURANCE", "AMGEN", "AMGENERAL", "KURNIA", "LIBERTY"))
 
 
 def _has_365km_towing(entry: Any) -> bool:

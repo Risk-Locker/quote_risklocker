@@ -648,150 +648,6 @@ export function isBenefitSelected(
   return false;
 }
 
-export function detectTowingUpgrade(
-  activeBenefits: any[] = [],
-  insurerName: string = ""
-): { title: string; limit: string; description: string; rider: string } | null {
-  for (const raw of activeBenefits || []) {
-    if (
-      !raw?.is_extra &&
-      raw?.cost_status !== "paid" &&
-      raw?.is_selected !== true &&
-      raw?.selected !== true &&
-      !hasPositivePrice(raw)
-    ) {
-      continue;
-    }
-    const title = String(raw?.title || raw?.label || "").toLowerCase();
-    const concept = String(raw?.concept_key || "").toLowerCase();
-    const valStr = String(raw?.value || "").toLowerCase();
-    const descStr = String(raw?.description || "").toLowerCase();
-    const offKey = String(raw?.offering_key || raw?.card_key || "").toLowerCase();
-    const tv = raw?.typed_value;
-    const tvStr =
-      tv && typeof tv === "object"
-        ? `${tv.display_text || ""} ${tv.value || ""} ${tv.plan_key || ""} ${tv.enum_key || ""}`.toLowerCase()
-        : String(tv || "").toLowerCase();
-    if (/\b1\s*-\s*4\b/.test(`${valStr} ${tvStr}`)) continue;
-    const combined = `${title} ${concept} ${valStr} ${descStr} ${offKey} ${tvStr}`;
-
-    if (combined.includes("oto 360") || combined.includes("oto_360") || combined.includes("oto-360") || combined.includes("oto360")) {
-      return {
-        title: "Unlimited Towing Assistance (Unlimited - Driver Plan 1)",
-        limit: "Unlimited - Driver Plan 1",
-        description: "24/7 unlimited breakdown & accidental towing assistance (Driver Plan 1). Upgraded via OTO 360.",
-        rider: "OTO 360",
-      };
-    }
-    if (
-      combined.includes("motor pa plus") ||
-      combined.includes("motor_pa_plus") ||
-      combined.includes("motor-pa-plus") ||
-      combined.includes("motor pa plan") ||
-      combined.includes("pa plus") ||
-      combined.includes("pa-plus")
-    ) {
-      if (combined.includes("plan 4") || combined.includes("plan-4") || combined.includes("p4")) {
-        return {
-          title: "Unlimited Towing Assistance",
-          limit: "Unlimited",
-          description: "24/7 unlimited towing assistance nationwide. Upgraded via Motor PA Plus - Plan 4.",
-          rider: "Motor PA Plus - Plan 4",
-        };
-      }
-      if (combined.includes("plan 3") || combined.includes("plan-3") || combined.includes("p3")) {
-        return {
-          title: "Extended Towing Assistance (300 km)",
-          limit: "300 km",
-          description: "24/7 extended towing assistance up to 300 km. Upgraded via Motor PA Plus - Plan 3.",
-          rider: "Motor PA Plus - Plan 3",
-        };
-      }
-      if (combined.includes("plan 2") || combined.includes("plan-2") || combined.includes("p2")) {
-        return {
-          title: "Extended Towing Assistance (200 km)",
-          limit: "200 km",
-          description: "24/7 extended towing assistance up to 200 km. Upgraded via Motor PA Plus - Plan 2.",
-          rider: "Motor PA Plus - Plan 2",
-        };
-      }
-      if (combined.includes("plan 1") || combined.includes("plan-1") || combined.includes("p1")) {
-        return {
-          title: "Extended Towing Assistance (100 km)",
-          limit: "100 km",
-          description: "24/7 extended towing assistance up to 100 km. Upgraded via Motor PA Plus - Plan 1.",
-          rider: "Motor PA Plus - Plan 1",
-        };
-      }
-    }
-    if (
-      combined.includes("driver passenger protector") ||
-      combined.includes("driver-passenger-protector") ||
-      combined.includes("driver & passenger protector") ||
-      combined.includes("driver and passenger protector") ||
-      combined.includes("unlimited auto assistance") ||
-      combined.includes("dpp") ||
-      combined.includes("n4")
-    ) {
-      return {
-        title: "Unlimited Towing Assistance (Unlimited - Plan 1)",
-        limit: "Unlimited - Plan 1",
-        description: "24/7 unlimited auto towing assistance (Plan 1). Upgraded via Driver & Passenger Protector (N4).",
-        rider: "Driver & Passenger Protector (N4)",
-      };
-    }
-    if (combined.includes("e-assist") || combined.includes("smart driver") || combined.includes("smart-driver-pa")) {
-      if (
-        combined.includes("plan 2") ||
-        combined.includes("plan-2") ||
-        combined.includes("plan b") ||
-        combined.includes("ev plan") ||
-        combined.includes("ev-plan") ||
-        combined.includes("ev")
-      ) {
-        return {
-          title: "Unlimited Towing Assistance",
-          limit: "Unlimited",
-          description: "24/7 unlimited breakdown towing nationwide. Upgraded via E-Assist Smart Driver (Plan 2 / EV Plan).",
-          rider: "E-Assist Smart Driver - Plan 2 / EV Plan",
-        };
-      }
-      if (combined.includes("plan 1") || combined.includes("plan-1") || combined.includes("plan a")) {
-        return {
-          title: "Extended Towing Assistance (RM 600)",
-          limit: "RM 600",
-          description: "24/7 breakdown towing coverage up to RM 600. Upgraded via E-Assist Smart Driver (Plan 1).",
-          rider: "E-Assist Smart Driver - Plan 1",
-        };
-      }
-    }
-    if (
-      combined.includes("motor easy") ||
-      combined.includes("motor-easy") ||
-      combined.includes("autobuddy") ||
-      combined.includes("auto-buddy") ||
-      combined.includes("motor shield") ||
-      combined.includes("motorshield")
-    ) {
-      return {
-        title: "Unlimited Towing Assistance",
-        limit: "Unlimited",
-        description: "24/7 unlimited towing assistance nationwide. Upgraded via Motor Easy Bundle / AutoBuddy / Motor Shield.",
-        rider: "Motor Easy Bundle / AutoBuddy / Motor Shield",
-      };
-    }
-    if (combined.includes("breakdown towing")) {
-      return {
-        title: "Extended Towing Assistance (150 km)",
-        limit: "150 km",
-        description: "24/7 breakdown towing assistance up to 150 km. Upgraded via Breakdown Towing Assistance.",
-        rider: "Breakdown Towing Assistance",
-      };
-    }
-  }
-  return null;
-}
-
 export const COMMERCIAL_EXCLUDED_MATRIX_IDS = new Set([
   "towing",
   "international_towing",
@@ -964,31 +820,8 @@ export function extractFreeCoverageItems(
         cTitle = stripTrailingMetricParens(cTitle);
       }
       const cDesc = String(raw.description || raw.short_description || "").trim();
-      const hasManualOverride = Boolean(
-        raw.has_manual_override ||
-        hasManualValOvr ||
-        isHideCov ||
-        raw.is_manual ||
-        String(raw.source || "").toLowerCase() === "manual" ||
-        raw.label_override
-      );
-      const hasPromotedTowing = (activeBenefits || []).some(
-        (b: any) => Boolean(b?.promoted_to_addon)
-      );
-      let towingUpgrade: { title: string; description: string } | null = null;
-      if (!isComm && !isNonComp && !hasManualOverride && !hasPromotedTowing) {
-        const cardAlreadyUpgraded =
-          cVal.toLowerCase().includes("unlimited") ||
-          cTitle.toLowerCase().includes("unlimited") ||
-          cTitle.toLowerCase().includes("extended");
-        if (!cardAlreadyUpgraded) {
-          towingUpgrade = detectTowingUpgrade(activeBenefits, insNameStr);
-        }
-      }
-      const outTitle = towingUpgrade ? towingUpgrade.title : formatTowingTitle(cTitle, cVal, hasManualValOvr);
-      const outDesc = towingUpgrade
-        ? towingUpgrade.description
-        : cDesc || "24/7 accidental towing service to nearest panel workshop or approved repairer.";
+      const outTitle = formatTowingTitle(cTitle, cVal, hasManualValOvr);
+      const outDesc = cDesc || "24/7 accidental towing service to nearest panel workshop or approved repairer.";
       const normOut = normalizeCode(outTitle);
       if (!seen.has(normOut) && !seen.has("emergency_towing_assistance")) {
         seen.add(normOut);
@@ -1132,12 +965,24 @@ export function buildUnifiedMatrixCards(
       }
     } else {
       formattedVal = formatAddonValue(rawVal);
-      if (!formattedVal && matched?.default_value && !item.promoted_to_addon) {
+      if (!formattedVal && matched?.default_value && !item.promoted_to_addon && !item.is_bundle) {
         formattedVal = formatAddonValue(matched.default_value);
       }
     }
 
     const titleStr = String(item.title || item.label || matched?.title || catId);
+
+    if (Boolean(item?.is_bundle) && !Boolean(item?.is_bundle_effect) && formattedVal) {
+      const fvL = formattedVal.trim().toLowerCase();
+      const tierL = String(item?.selected_bundle_tier_label || "").trim().toLowerCase();
+      const isTierToken =
+        (Boolean(tierL) && fvL === tierL) ||
+        /^(?:(?:plans?|pelan|tier|pakej)\s*(?:no\.?\s*)?(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))*|(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))+|ev\s*plan|driver\s*plan\s*\d+|included)$/i.test(fvL) ||
+        (titleStr.toLowerCase().includes(fvL) && !/(?:rm|myr|km|%)/i.test(fvL));
+      if (isTierToken) {
+        formattedVal = "";
+      }
+    }
 
     // Check if coverage limit is explicitly hidden (Windscreen is strictly mandatory on Malaysian motor quotes)
     const isHideCov = Boolean(

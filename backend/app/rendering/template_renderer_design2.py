@@ -28,7 +28,6 @@ from app.rendering.benefit_schedule_renderer import (
 from app.rendering.unified_addon_engine import (
     build_unified_matrix_cards,
     extract_free_coverage_items,
-    is_commercial_vehicle,
 )
 
 
@@ -154,21 +153,31 @@ def render_design2_html(
     ctx_adjusted_total = str(render_context.get("total_premium_adjusted") or "").strip()
     total_payable = ctx_adjusted_total or _get_val(draft_fields, "total_amount", "RM 5,447.30")
 
+    from decimal import Decimal
     from app.domain.motor.discount_calculator import calculate_motor_discount
 
     disc_pct_raw = _get_val(draft_fields, "motor_discount_pct", "")
     disc_flat_raw = _get_val(draft_fields, "quotation_discount", "")
     disc_bd = calculate_motor_discount(premium, disc_pct_raw or 0, disc_flat_raw or 0)
+    has_discount = disc_bd.effective_discount > Decimal("0.00") or disc_bd.motor_discount_pct > Decimal("0.00")
+    prem_label_width = "214px" if has_discount else "186px"
     discount_row_html = ""
-    if disc_bd.effective_discount > 0:
+    if has_discount:
         pct_num = float(disc_bd.motor_discount_pct)
-        pct_str = f" ({int(pct_num) if pct_num.is_integer() else pct_num:g}%)" if pct_num > 0 else ""
-        discount_label = f"Motor Discount{pct_str}" if is_english_only else f"Motor Discount{pct_str} / 保费折扣"
+        pct_str = f"{int(pct_num) if pct_num.is_integer() else pct_num:g}%"
+        if pct_num > 0 and disc_bd.flat_discount_amount > Decimal("0.00"):
+            discount_display = f"{pct_str} + {_format_money(f'{disc_bd.flat_discount_amount:.2f}')}"
+        elif pct_num > 0:
+            discount_display = pct_str
+        else:
+            discount_display = _format_money(f"{disc_bd.flat_discount_amount:.2f}")
+        discount_label = "Discount" if is_english_only else "Discount / 折扣"
         discount_row_html = (
-            f'<div class="spec-row"><div class="spec-label">{escape(discount_label)}</div>'
+            f'<div class="spec-row"><div class="spec-label" style="width: {prem_label_width};">{escape(discount_label)}</div>'
             f'<div class="spec-colon">:</div>'
-            f'<div class="spec-value" style="color: #059669;">- {escape(_format_money(f"{disc_bd.effective_discount:.2f}"))}</div></div>'
+            f'<div class="spec-value">{escape(discount_display)}</div></div>'
         )
+    displayed_premium = f"{disc_bd.net_motor_premium:.2f}" if has_discount else premium
 
     try:
         rt_num = float(re.sub(r"[^0-9.]", "", roadtax or "0") or "0") if inc_rt else 0.0
@@ -188,7 +197,6 @@ def render_design2_html(
     available_addons = list(render_context.get("available_addons") or [])
 
     v_type = _get_val(draft_fields, "vehicle_type", "Car")
-    is_comm = is_commercial_vehicle(v_type, car_model, draft_fields)
 
     # Extract Box 1 Free Added Coverage items strictly 1:1 (zero hardcoded fallback perks)
     free_items = extract_free_coverage_items(
@@ -340,7 +348,10 @@ def render_design2_html(
     lbl_excess = "Policy Excess" if is_english_only else "Policy Excess / 自负额"
     lbl_sum_insured = "Vehicle Sum Insured" if is_english_only else "Vehicle Sum Insured / 车辆保额"
     lbl_prem_title = 'Premium Summary' if is_english_only else 'Premium Summary <span style="font-size: 14.0px; font-weight: 600; color: #544F4E;">保费</span>'
-    lbl_ins_prem = "Insurance Premium" if is_english_only else "Insurance Premium / 保费"
+    if has_discount:
+        lbl_ins_prem = "Insurance Premium (after discount)" if is_english_only else "Insurance Premium / 保费 (after discount)"
+    else:
+        lbl_ins_prem = "Insurance Premium" if is_english_only else "Insurance Premium / 保费"
     lbl_roadtax_runner = "Roadtax and Runner Fee" if is_english_only else "Roadtax and Runner Fee / 路税及服务费"
     lbl_total_payable = "TOTAL PAYABLE :" if is_english_only else "TOTAL PAYABLE 应付总额 :"
     lbl_bank_title = 'Company Bank Details' if is_english_only else 'Company Bank Details <span style="font-size: 10.2px; font-weight: 700; color: #544F4E;">公司银行戶口</span>'
@@ -522,9 +533,9 @@ body {{
                     <div style="font-size: 15.0px; font-weight: 700; color: #E52320; margin-bottom: 4px; line-height: 1.2;">
                         {lbl_prem_title}
                     </div>
-                    <div class="spec-row"><div class="spec-label">{lbl_ins_prem}</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(premium))}</div></div>
                     {discount_row_html}
-                    <div class="spec-row"><div class="spec-label">{lbl_roadtax_runner}</div><div class="spec-colon">:</div><div class="spec-value">{escape(rt_combined)}</div></div>
+                    <div class="spec-row"><div class="spec-label" style="width: {prem_label_width};">{lbl_ins_prem}</div><div class="spec-colon">:</div><div class="spec-value">{escape(_format_money(displayed_premium))}</div></div>
+                    <div class="spec-row"><div class="spec-label" style="width: {prem_label_width};">{lbl_roadtax_runner}</div><div class="spec-colon">:</div><div class="spec-value">{escape(rt_combined)}</div></div>
                     <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 12px;">
                         <div style="font-size: 13.8px; font-weight: 700; color: #E52320; white-space: nowrap;">{lbl_total_payable}</div>
                         <div style="font-size: 22px; font-weight: 800; color: #E52320; letter-spacing: -0.4px; line-height: 1; white-space: nowrap;">{escape(_format_money(total_payable))}</div>

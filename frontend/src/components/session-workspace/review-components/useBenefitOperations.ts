@@ -168,15 +168,21 @@ export function useBenefitOperations({
     if (typeof payloadOrTarget === "object" && payloadOrTarget !== null) {
       label = payloadOrTarget.label.trim();
       displayVal = payloadOrTarget.value?.trim() || "";
-      targetState = payloadOrTarget.targetState || (payloadOrTarget.isSelected === false ? "available_addon" : "current");
-      if (payloadOrTarget.cost_status) {
-        costStatus = payloadOrTarget.cost_status;
-      } else if (payloadOrTarget.placement === "foc") {
+      if (payloadOrTarget.placement === "foc") {
+        targetState = "current";
         costStatus = "included";
-      } else if (payloadOrTarget.price != null && payloadOrTarget.price !== "") {
+      } else if (payloadOrTarget.placement === "addon") {
+        targetState = payloadOrTarget.targetState || (payloadOrTarget.isSelected === false ? "available_addon" : "current");
         costStatus = "paid";
       } else {
-        costStatus = "included";
+        targetState = payloadOrTarget.targetState || (payloadOrTarget.isSelected === false ? "available_addon" : "current");
+        if (payloadOrTarget.cost_status) {
+          costStatus = payloadOrTarget.cost_status;
+        } else if (payloadOrTarget.price != null && payloadOrTarget.price !== "") {
+          costStatus = "paid";
+        } else {
+          costStatus = "included";
+        }
       }
 
       if (costStatus === "paid" && payloadOrTarget.price != null && payloadOrTarget.price !== "") {
@@ -199,11 +205,25 @@ export function useBenefitOperations({
 
     if (!label) return;
     const key = `custom:${crypto.randomUUID()}`;
+    const typedValue = displayVal
+      ? {
+          type: "custom",
+          display_text: displayVal,
+          ...(descriptionText ? { description: descriptionText } : {}),
+          ...(iconHintText ? { icon_hint: iconHintText } : {}),
+        }
+      : {
+          type: "text",
+          display_text: "",
+          hide_limit: true,
+          ...(descriptionText ? { description: descriptionText } : {}),
+          ...(iconHintText ? { icon_hint: iconHintText } : {}),
+        };
     const op = {
       op: "create_custom_benefit",
       selection_key: key,
       label,
-      typed_value: displayVal ? { type: "custom", display_text: displayVal } : { type: "custom", display_text: label },
+      typed_value: typedValue,
       cost_status: costStatus,
       state: targetState,
       ...(costStatus === "paid" && priceObj ? { price: priceObj } : {}),
@@ -224,9 +244,21 @@ export function useBenefitOperations({
   ) {
     const key = `concept:${concept.concept_key}:${crypto.randomUUID().slice(0, 8)}`;
     const cleanLimit = coverageLimit && typeof coverageLimit === "string" && !coverageLimit.includes("[object") ? coverageLimit.trim() : "";
-    const typedValue = cleanLimit
-      ? { type: "custom", display_text: cleanLimit.startsWith("RM") ? cleanLimit : `RM ${cleanLimit}` }
-      : { type: "custom", display_text: concept.label };
+    const hasUnitOrText = /^(?:rm|myr)\b|\b(?:km|years?|yrs?|days?|unlimited|%)\b/i.test(cleanLimit);
+    const formattedLimit = cleanLimit ? (hasUnitOrText ? cleanLimit : `RM ${cleanLimit}`) : "";
+    const conceptDesc = concept.description?.trim() || "";
+    const typedValue = formattedLimit
+      ? {
+          type: "custom",
+          display_text: formattedLimit,
+          ...(conceptDesc ? { description: conceptDesc } : {}),
+        }
+      : {
+          type: "text",
+          display_text: "",
+          hide_limit: true,
+          ...(conceptDesc ? { description: conceptDesc } : {}),
+        };
     const op = {
       op: "create_custom_benefit",
       selection_key: key,
@@ -237,6 +269,7 @@ export function useBenefitOperations({
       cost_status: "paid",
       state,
       price: price || null,
+      ...(conceptDesc ? { description: conceptDesc } : {}),
     };
     onQueue(op, `benefits.${key}`);
     setShowGlobalModal(false);

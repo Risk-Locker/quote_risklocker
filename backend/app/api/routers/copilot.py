@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, settings_dep
 from app.api.schemas import (
+    BenefitDescriptionPolishRequest,
+    BenefitDescriptionPolishResponse,
     CopilotChatRequest,
     CopilotChatResponse,
     GroundingChatRequest,
@@ -85,6 +87,27 @@ def apply_catalog_diff_route(
     return apply_catalog_diff_plan(db, user, plan)
 
 
+@router.post("/copilot/polish-benefit-description", response_model=BenefitDescriptionPolishResponse)
+def polish_benefit_description_route(
+    payload: BenefitDescriptionPolishRequest,
+    user: User = Depends(current_user),
+) -> dict:
+    """Enhance a custom benefit or add-on description for Design 2 quotation cards."""
+    from app.auth.rbac import require_role
+
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.benefit_description_ai import polish_benefit_description
+
+    return polish_benefit_description(
+        label=payload.label,
+        coverage_limit=payload.coverage_limit,
+        draft_description=payload.draft_description,
+        placement=payload.placement,
+        insurer_name=payload.insurer_name,
+        vehicle_type=payload.vehicle_type,
+    )
+
+
 @router.get("/settings/ai-context")
 def settings_ai_context(
     db: Session = Depends(get_db),
@@ -104,7 +127,7 @@ def settings_ai_context(
             "code": getattr(c, "code", "") or "",
             "aliases": list(c.detection_phrases or []),
             "aliases_count": len(c.detection_phrases or []),
-            "has_packages": "amassurance" in c.name.lower(),
+            "has_packages": any(tok in c.name.lower() for tok in ("amassurance", "kurnia", "liberty")),
         }
         for c in db.scalars(select(InsuranceCompany).order_by(InsuranceCompany.name)).all()
     ]
@@ -204,7 +227,7 @@ def settings_ai_memory_get(
     items = []
     for m, cname in memories:
         items.append({
-            "id": str(m.id),
+            "id": m.id,
             "field_name": m.field_name,
             "original_value": m.original_value or "—",
             "corrected_value": m.corrected_value or "—",

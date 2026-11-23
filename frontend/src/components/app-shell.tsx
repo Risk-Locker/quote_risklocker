@@ -231,6 +231,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // All nav sections are kept so staff can faintly see them in a disabled state ("unclickable and slightly hidden")
   const filteredSections = navSections;
+  const isSessionWorkspace = /^\/sessions\/[^/]+/.test(pathname || "");
 
   return (
     <div className="min-h-screen bg-[var(--rl-bg)]">
@@ -464,14 +465,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Main Grid Container */}
       <div
-        className={`mx-auto grid w-full gap-4 sm:gap-6 px-3 sm:px-5 py-4 sm:py-6 transition-[grid-template-columns] duration-200 ${
+        className={`mx-auto grid w-full transition-[grid-template-columns] duration-200 ${
+          isSessionWorkspace ? "gap-0 px-0 py-0" : "gap-4 sm:gap-6 px-3 sm:px-5 py-4 sm:py-6"
+        } ${
           isCollapsed
             ? "grid-cols-1 md:grid-cols-[64px_minmax(0,1fr)]"
             : "grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)]"
         }`}
       >
         {/* Desktop Sidebar */}
-        <aside className="hidden md:block">
+        <aside className={`hidden md:block ${isSessionWorkspace ? "py-3 pl-2 pr-1 border-r border-[var(--rl-border)] bg-[var(--rl-surface)]/50" : ""}`}>
           <nav className="flex flex-col gap-3 sticky top-[80px]">
             {filteredSections.map((section, sIdx) => {
               const isSectionLocked = isStaff && section.staffRestricted;

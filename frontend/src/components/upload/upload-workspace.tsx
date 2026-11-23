@@ -32,6 +32,7 @@ import { QueueProgressBanner } from "@/components/upload/queue-progress-banner";
 import { useUploadQueuePoller } from "@/components/upload/useUploadQueuePoller";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
+import { OpenInNewTabToggle, openTargetRoute, useOpenInNewTabPreference } from "@/hooks/useOpenInNewTabPreference";
 import {
   saveStagedQueue,
   loadStagedQueue,
@@ -236,6 +237,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [bulkNotice, setBulkNotice] = useState("");
   const [redetectingItemId, setRedetectingItemId] = useState<string | null>(null);
+  const { openInNewTab, setOpenInNewTab } = useOpenInNewTabPreference();
 
   const handleRedetectBulkItem = async (item: BulkFileItem) => {
     if (!item.sessionId) return;
@@ -249,7 +251,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         message?: string;
       }>(`/sessions/${item.sessionId}/rescan`, {
         method: "POST",
-        body: JSON.stringify({ mode: "in_place", engine: "auto" }),
+        body: JSON.stringify({ mode: "in_place", engine: "deep" }),
       });
       if (res?.success) {
         setBulkFiles((prev) =>
@@ -335,11 +337,16 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         const fallbackTenure = existingTenureId || bulkFiles.find((f) => f.tenureId)?.tenureId;
         if (fallbackTenure) {
           redirectedRef.current = true;
-          router.push(`/comparison?tenure_id=${fallbackTenure}&from_upload=true` as Route);
+          const targetUrl = `/comparison?tenure_id=${fallbackTenure}&from_upload=true`;
+          openTargetRoute(targetUrl, {
+            openInNewTab,
+            router,
+            onBlocked: () => setBulkNotice("Upload complete. Pop-up blocked — click Compare below to open in a new tab."),
+          });
         }
       }
     }
-  }, [bulkFiles, bulkProcessing, existingTenureId, mode, router]);
+  }, [bulkFiles, bulkProcessing, existingTenureId, mode, openInNewTab, router]);
 
   // Persist staged queue across tab reloads/crashes
   useEffect(() => {
@@ -452,7 +459,12 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       if (!mounted.current || cancelRequested.current) return;
       setJob(response.job);
       if (response.job.state === "completed") {
-        router.push(`/sessions/${result.session_id}`);
+        const targetUrl = `/sessions/${result.session_id}`;
+        openTargetRoute(targetUrl, {
+          openInNewTab,
+          router,
+          onBlocked: () => setError("Session ready, but pop-up was blocked. Allow pop-ups or open from Sessions."),
+        });
         return;
       }
       if (response.job.state === "failed" || response.job.state === "cancelled") {
@@ -1066,8 +1078,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
             </p>
           </div>
 
-          {/* Mode Switcher with Distinct URLs */}
-          <div className="shrink-0 self-start lg:self-center flex items-center gap-1 rounded-lg border border-[var(--rl-border)] bg-[var(--rl-bg-surface)] p-1 shadow-2xs">
+          {/* Mode Switcher & New Tab Toggle */}
+          <div className="shrink-0 self-start lg:self-center flex flex-wrap items-center gap-2">
+            <OpenInNewTabToggle checked={openInNewTab} onChange={setOpenInNewTab} />
+            <div className="flex items-center gap-1 rounded-lg border border-[var(--rl-border)] bg-[var(--rl-bg-surface)] p-1 shadow-2xs">
             <button
               type="button"
               onClick={() => handleTabChange("comparison")}
@@ -1109,6 +1123,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                 10 Slots
               </span>
             </button>
+            </div>
           </div>
         </div>
       </header>
@@ -1888,7 +1903,12 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                               <Button
                                 type="button"
                                 size="sm"
-                                onClick={() => router.push(`/comparison?tenure_id=${item.tenureId}` as Route)}
+                                onClick={() =>
+                                  openTargetRoute(`/comparison?tenure_id=${item.tenureId}`, {
+                                    openInNewTab,
+                                    router,
+                                  })
+                                }
                                 className="min-h-[34px] px-3.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 gap-1.5 cursor-pointer shadow-2xs"
                               >
                                 <Columns size={13} weight="bold" />
@@ -1899,7 +1919,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                                 type="button"
                                 size="sm"
                                 variant="secondary"
-                                onClick={() => void openComparisonForItem(item, false)}
+                                onClick={() => void openComparisonForItem(item, openInNewTab)}
                                 className="min-h-[34px] px-3 text-xs font-semibold cursor-pointer"
                               >
                                 Compare Matrix

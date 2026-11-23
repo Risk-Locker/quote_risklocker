@@ -1115,19 +1115,38 @@ def _add_company_detection(
         if not has_mmip_company:
             _add_static(results, "insurance_company", "MMIP", "mmip_priority", 0.995, "MMIP", text, page_text)
 
+    front_text = "\n".join(
+        str(p.get("text") or "")
+        for p in (page_text or [])
+        if int(p.get("page") or 1) <= 2 and str(p.get("text") or "").strip()
+    ).strip()
+
     matches: list[tuple[int, str, dict, str]] = []
-    for source, method in ((source_filename, "database_company_filename"), (text, "database_company_text")):
-        for match in company_alias_matches(source, companies):
-            matches.append((match["length"], method, match["company"], str(match["alias"])))
+    fn_matches = company_alias_matches(source_filename, companies)
+    if fn_matches:
+        best_fn_len = max(int(m["length"]) for m in fn_matches)
+        for match in fn_matches:
+            if int(match["length"]) == best_fn_len:
+                matches.append((int(match["length"]), "database_company_filename", match["company"], str(match["alias"])))
+
+    txt_matches = company_alias_matches(front_text, companies) if front_text else []
+    best_front_len = max((int(m["length"]) for m in txt_matches), default=0)
+    if not txt_matches or best_front_len < 10:
+        full_txt_matches = company_alias_matches(text, companies)
+        if full_txt_matches:
+            best_full_len = max(int(m["length"]) for m in full_txt_matches)
+            if best_full_len > best_front_len:
+                txt_matches = full_txt_matches
+    if txt_matches:
+        best_txt_len = max(int(m["length"]) for m in txt_matches)
+        for match in txt_matches:
+            if int(match["length"]) == best_txt_len:
+                matches.append((int(match["length"]), "database_company_text", match["company"], str(match["alias"])))
 
     if not matches:
         return
-    # Prefer the most specific alias, then filename evidence. Equal-scoring
-    # alternatives remain visible to the conflict detector for human review.
-    best_length = max(item[0] for item in matches)
-    selected = [item for item in matches if item[0] == best_length]
     seen: set[tuple[str, str]] = set()
-    for _length, method, company, alias in selected:
+    for _length, method, company, alias in matches:
         name = str(company["name"])
         marker = (name, method)
         if marker in seen:

@@ -52,6 +52,32 @@ function stripTrailingMetric(label: string): string {
     .trim();
 }
 
+const BUNDLE_TIER_SUFFIX_RE =
+  /(?:\s*[-–/:]\s*|\s*\(\s*|\s+)(?:(?:plans?|pelan|tier|pakej)\s*(?:no\.?\s*)?(?:(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))*|ev)|ev\s*plan)(?:\s*\/\s*(?:ev\s*plan|(?:plans?|pelan)\s*(?:\d+|[a-d])))?\s*\)?\s*$/i;
+
+function formatBundleTitleWithTier(baseLabel: string, tierLabel: string): string {
+  const cleanTier = (tierLabel || "").trim();
+  const rawBase = (baseLabel || "").trim();
+  if (!cleanTier) return rawBase;
+  let cleanBase = rawBase;
+  for (let i = 0; i < 3; i += 1) {
+    const stripped = cleanBase.replace(BUNDLE_TIER_SUFFIX_RE, "").replace(/[\s\-–/:,]+$/g, "").trim();
+    if (!stripped || stripped === cleanBase) break;
+    cleanBase = stripped;
+  }
+  return `${cleanBase || rawBase} - ${cleanTier}`;
+}
+
+function isRedundantTierValue(val: string | null | undefined, tierLabel: string): boolean {
+  const valS = String(val || "").trim();
+  if (!valS) return false;
+  const valL = valS.toLowerCase();
+  if (tierLabel && valL === tierLabel.trim().toLowerCase()) return true;
+  return /^(?:(?:plans?|pelan|tier|pakej)\s*(?:no\.?\s*)?(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))*|(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))+|ev\s*plan|driver\s*plan\s*\d+|included)$/i.test(
+    valL
+  );
+}
+
 function parseMoneyVal(raw: unknown): number {
   if (raw === null || raw === undefined || typeof raw === "boolean") return 0;
   let val: unknown = raw;
@@ -165,7 +191,13 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     const key = String(operation.selection_key || `custom:${Date.now()}`);
     const selectionId = `pending:${key}`;
     const typed = operation.typed_value as Record<string, unknown> | null | undefined;
-    const value = String(typed?.display_text || typed?.value || operation.label || "Included");
+    const hasDisplayText = Boolean(typed && "display_text" in typed);
+    const value = hasDisplayText
+      ? String(typed?.display_text ?? "")
+      : String(typed?.value ?? "");
+    const description = String((operation as any).description ?? typed?.description ?? "").trim();
+    const iconHint = String((operation as any).icon_hint ?? typed?.icon_hint ?? "").trim() || undefined;
+    const hideCov = Boolean(typed?.hide_limit || (hasDisplayText && value.trim() === ""));
     const isAddon = operation.state === "available_addon";
     const costStatus = String(operation.cost_status || (isAddon ? "paid" : "included"));
     const price = operation.price as { amount?: number | string; currency?: string } | null | undefined;
@@ -178,7 +210,13 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       concept_key: key,
       label: String(operation.label || "Custom benefit"),
       value,
+      description,
+      typed_value: typed || null,
+      hide_coverage: hideCov,
+      has_manual_value_override: Boolean(value.trim()),
+      is_extra: costStatus === "paid",
       cost_status: costStatus,
+      ...(iconHint ? { icon_hint: iconHint } : {}),
       ...(price ? { price: price as any } : {}),
     };
 
@@ -207,6 +245,7 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
         concept_id: null,
         item_kind: "custom",
         typed_value: typed || null,
+        typed_value_override: typed || null,
       }],
       benefit_cards: {
         current_benefits: isAddon
@@ -281,15 +320,29 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
     let nextExtras = snapshot.extras;
     let newPriceNum = 0;
 
+    const isDroppingBundle = Boolean(offer.is_bundle && (isRemoved || isAddon));
     if (isRemoved) {
-      nextCurrent = nextCurrent.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextCurrent = nextCurrent.filter(
+        (item) =>
+          item.offering_id !== offeringId &&
+          item.selection_id !== selectionId &&
+          !(isDroppingBundle && (item.is_bundle_effect || item.cost_status === "bundle_included")),
+      );
       nextAddons = nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
       nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
     } else if (isAddon) {
-      nextCurrent = nextCurrent.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId);
+      nextCurrent = nextCurrent.filter(
+        (item) =>
+          item.offering_id !== offeringId &&
+          item.selection_id !== selectionId &&
+          !(isDroppingBundle && (item.is_bundle_effect || item.cost_status === "bundle_included")),
+      );
       nextAddons = [
         ...nextAddons.filter((item) => item.offering_id !== offeringId && item.selection_id !== selectionId),
-        updatedCard,
+        {
+          ...updatedCard,
+          ...(isDroppingBundle ? { selected_bundle_tier_id: null, selected_bundle_tier_label: null } : {}),
+        },
       ];
       nextExtras = nextExtras.filter((ex) => ex.selection_id !== selectionId);
     } else {
@@ -388,15 +441,27 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
           let nextAddons = snapshot.benefit_cards.available_addons;
           let nextExtras = snapshot.extras;
 
+          const isDroppingBundle = Boolean(inCurrent?.is_bundle && (state === "removed" || state === "available_addon"));
           if (state === "removed") {
-            nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId && item.card_key !== selectionId);
+            nextCurrent = nextCurrent.filter(
+              (item) =>
+                item.selection_id !== selectionId &&
+                item.card_key !== selectionId &&
+                !(isDroppingBundle && (item.is_bundle_effect || item.cost_status === "bundle_included")),
+            );
             nextAddons = nextAddons.filter((item) => item.selection_id !== selectionId && item.card_key !== selectionId);
             nextExtras = nextExtras.filter((item) => item.selection_id !== selectionId);
           } else if (state === "available_addon" && inCurrent) {
             // Move from current to addon
-            nextCurrent = nextCurrent.filter((item) => item.selection_id !== selectionId && item.card_key !== selectionId);
+            nextCurrent = nextCurrent.filter(
+              (item) =>
+                item.selection_id !== selectionId &&
+                item.card_key !== selectionId &&
+                !(isDroppingBundle && (item.is_bundle_effect || item.cost_status === "bundle_included")),
+            );
             nextAddons = [...nextAddons, {
               ...inCurrent,
+              ...(isDroppingBundle ? { selected_bundle_tier_id: null, selected_bundle_tier_label: null } : {}),
               ...(costStatus ? { cost_status: costStatus } : {}),
               ...(labelVal ? { label: labelVal } : {}),
               ...(descVal !== undefined ? { description: descVal } : {}),
@@ -431,14 +496,19 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
       const updateCard = (item: BenefitCardSummary): BenefitCardSummary => {
         if (item.selection_id !== selectionId && item.card_key !== selectionId) return item;
         const baseLbl = labelVal || item.label;
-        const nextLbl = !labelVal && (hideCov || hasTyped) ? (stripTrailingMetric(baseLbl) || baseLbl) : baseLbl;
         const matchedTierOpt = nextTierId && item.available_bundle_tiers
           ? item.available_bundle_tiers.find((t) => t.id === nextTierId)
           : null;
+        let nextLbl = !labelVal && (hideCov || hasTyped) ? (stripTrailingMetric(baseLbl) || baseLbl) : baseLbl;
+        if (!labelVal && matchedTierOpt && item.has_plan_tiers) {
+          nextLbl = formatBundleTitleWithTier(nextLbl, matchedTierOpt.label);
+        }
+        const clearDupVal = Boolean(!hasTyped && matchedTierOpt && isRedundantTierValue(item.value, matchedTierOpt.label));
         return {
           ...item,
           ...(costStatus ? { cost_status: costStatus } : {}),
           label: nextLbl,
+          ...(clearDupVal ? { value: "" } : {}),
           ...(descVal !== undefined ? { description: descVal } : {}),
           ...(nextTierId !== undefined
             ? {

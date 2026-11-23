@@ -35,6 +35,22 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { RealtimePresenceBanner } from "@/components/realtime/RealtimePresenceBanner";
+import { useOpenInNewTabPreference } from "@/hooks/useOpenInNewTabPreference";
+
+function ClientMatrixLink({ tenureId }: { tenureId: string }) {
+  const { openInNewTab } = useOpenInNewTabPreference();
+  return (
+    <Link
+      href={`/comparison?tenure_id=${tenureId}` as Route}
+      target={openInNewTab ? "_blank" : undefined}
+      rel={openInNewTab ? "noopener noreferrer" : undefined}
+      className="font-bold text-[var(--rl-black)] hover:underline inline-flex items-center gap-1 text-xs"
+    >
+      <Columns size={13} weight="bold" />
+      Open Matrix →
+    </Link>
+  );
+}
 
 interface ClientDossierItem {
   client_id: string;
@@ -479,13 +495,7 @@ export default function ClientRecordsPage() {
                       </span>
 
                       {c.latest_tenure_id ? (
-                        <Link
-                          href={`/comparison?tenure_id=${c.latest_tenure_id}` as Route}
-                          className="font-bold text-[var(--rl-black)] hover:underline inline-flex items-center gap-1 text-xs"
-                        >
-                          <Columns size={13} weight="bold" />
-                          Open Matrix →
-                        </Link>
+                        <ClientMatrixLink tenureId={c.latest_tenure_id} />
                       ) : (
                         <span className="text-neutral-400 text-xs">No Matrix</span>
                       )}

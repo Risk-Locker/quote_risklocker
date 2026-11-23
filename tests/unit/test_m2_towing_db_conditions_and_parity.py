@@ -111,11 +111,22 @@ def test_seven_insurer_towing_matrix_and_evaluator_authoritative():
     assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy Private Car Comprehensive") == "RM 300"
     assert resolve_insurer_towing_limit("Tune Protect", "MotorShield Bundle") == "Unlimited"
 
-    # 7. AmAssurance: auto365 Plus = 100 km, auto365 Premier = 365 km (no upgrade required)
+    # 7. AmAssurance: Lite = 50 km, Plus = 100 km, Premier = 365 km, TPFT Premier = 200 km;
+    #    Private Car 365 Plan 1 -> 600 km, Plan 2/3/4 -> Unlimited across all packages
+    assert resolve_towing_entitlement("AmAssurance", product_name="auto365 Comprehensive Lite").formatted == "50 km"
     assert resolve_towing_entitlement("AmAssurance", product_name="auto365 Comprehensive Plus").formatted == "100 km"
     assert resolve_towing_entitlement("AmAssurance", product_name="auto365 Comprehensive Premier").formatted == "365 km"
+    assert resolve_towing_entitlement("AmAssurance", product_name="auto365 TPFT Premier").formatted == "200 km"
+    assert resolve_towing_entitlement("AmAssurance", product_name="auto365 TPFT Premier", package_or_rider="Private Car 365 Plan 1").formatted == "600 km"
+    assert resolve_towing_entitlement("AmAssurance", product_name="auto365 TPFT Premier", package_or_rider="Private Car 365 Plan 2").formatted == "Unlimited"
+    assert resolve_insurer_towing_limit("AmAssurance", "auto365 Comprehensive Lite") == "50 km"
     assert resolve_insurer_towing_limit("AmAssurance", "auto365 Comprehensive Plus") == "100 km"
     assert resolve_insurer_towing_limit("AmAssurance", "auto365 Comprehensive Premier") == "365 km"
+    assert resolve_insurer_towing_limit("AmAssurance", "auto365 TPFT Premier") == "200 km"
+    assert resolve_insurer_towing_limit("AmAssurance", "auto365 TPFT Premier Private Car 365 Plan 1") == "600 km"
+    assert resolve_insurer_towing_limit("AmAssurance", "auto365 TPFT Premier Private Car 365 Plan 4") == "Unlimited"
+    assert resolve_insurer_towing_limit("AmAssurance", "Third Party Only") == "-"
+    assert resolve_insurer_towing_limit("AmAssurance", "Auto365 Comprehensive Lite (TPFT)") == "-"
 
 
 def test_db_condition_replacement_value_and_manual_edit_flow_to_design2(m2_db: Session):

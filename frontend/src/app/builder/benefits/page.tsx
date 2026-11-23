@@ -2745,20 +2745,6 @@ ${aiMarkdownTable}`;
             onOpenAddConditionDialog={openAddConditionDialog}
             onEditCondition={openEditConditionDialog}
             onRefreshConcepts={() => loadReferenceData(true)}
-            onQuickCreateUnlimitedTowingRule={() => {
-              setEditingConditionId(null);
-              setCondFormName("DPP -> Unlimited Towing Upgrade");
-              const dpp = concepts.find((c) => c.concept_key === "driver_passenger_protection");
-              const towing = concepts.find((c) => c.concept_key === "towing_assistance" || c.concept_key === "breakdown_assist");
-              if (dpp) setCondTriggerId(dpp.id);
-              if (towing) setCondTargetId(towing.id);
-              setCondActionType("promote_to_addon");
-              setCondReplacement("Unlimited towing distance within Malaysia");
-              setCondReplacementTitle("Unlimited Towing");
-              setCondReplacementValue("Unlimited");
-              setCondPlanTiers([]);
-              setConditionDialog(true);
-            }}
             onDeleteCondition={deleteCompanyCondition}
           />
         ) : screenTab === "matrix" ? (

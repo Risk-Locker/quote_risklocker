@@ -5,11 +5,12 @@ grounded in insurer PDS (Product Disclosure Sheets) and policy wording:
   - QBE: Standard RM500; Driver/Passenger Protector (N4) -> Unlimited
   - STMB / Takaful Malaysia: Standard 50km; Motor PA Plus P1=100km, P2=200km, P3=300km, P4=Unlimited
   - Etiqa: Standard 200km; OTO 360 -> Unlimited
-  - Lonpac: Standard RM400; E-Assist Smart Driver P1=RM1,000, P2/EV=Unlimited
-  - Berjaya Sompo: Standard/Rakan Auto=RM300; SOMPO Motor/MotorSafe=Unlimited
-  - Tune Protect: Standard 200km; Motor Easy / AutoBuddy / Motor Shield -> Unlimited
-  - AmAssurance (Amgen): auto365 Lite=RM200 (Breakdown Towing=150km), Plus=100km, Premier=365km
-  - Kurnia: Standard RM200; Auto Assist Plus/Premier -> Unlimited
+  - Lonpac: Standard RM400; E-Assist Smart Driver P1=RM600, P2/EV=Unlimited
+  - Berjaya Sompo: Standard Unlimited Nationwide (no upgrade required)
+  - Tune Protect: Standard RM300; Motor Easy Bundle / AutoBuddy / Motor Shield -> Unlimited
+  - AmAssurance / Kurnia / Liberty: auto365 Comprehensive Lite=50km, Plus=100km, Premier=365km,
+    TPFT Premier=200km; Private Car 365 Plan 1->600km, Plan 2/3/4->Unlimited;
+    Auto Assist Plus/Premier / amDrive Plus -> Unlimited
 
 Constraint: Strictly outputs RM <amount>, <num>km, or Unlimited.
 """
@@ -107,12 +108,16 @@ def resolve_towing_entitlement(
             return TowingEntitlement.unlimited()
         return TowingEntitlement.from_rm(300)
 
-    # 7. AmAssurance (Amgen)
-    if "AMASSURANCE" in comp or "AMGEN" in comp or "AMGENERAL" in comp:
+    # 7. AmAssurance / Kurnia / Liberty (identical auto365 towing schedule)
+    if any(tok in comp for tok in ("AMASSURANCE", "AMGEN", "AMGENERAL", "KURNIA", "LIBERTY")):
         if any(k in combined for k in ("private car 365", "pc 365", "pc365", "365 plan")):
             if any(k in combined for k in ("plan 2", "plan2", "p2", "plan 3", "plan3", "p3", "plan 4", "plan4", "p4")):
                 return TowingEntitlement.unlimited()
             return TowingEntitlement.from_km(600)
+        if any(k in combined for k in ("auto assist plus", "auto assist premier", "amdrive plus", "unlimited")):
+            return TowingEntitlement.unlimited()
+        if ("tpft" in combined or "third party fire" in combined) and "premier" in combined:
+            return TowingEntitlement.from_km(200)
         if "lite" in combined:
             if "breakdown" in combined or "150" in combined:
                 return TowingEntitlement.from_km(150)
@@ -121,15 +126,7 @@ def resolve_towing_entitlement(
             return TowingEntitlement.from_km(365)
         if "plus" in combined or "100km" in combined:
             return TowingEntitlement.from_km(100)
-        if "unlimited" in combined:
-            return TowingEntitlement.unlimited()
         return TowingEntitlement.from_km(100)
-
-    # 8. Kurnia
-    if "KURNIA" in comp:
-        if any(k in combined for k in ("plus", "premier", "auto assist plus", "auto assist premier", "unlimited")):
-            return TowingEntitlement.unlimited()
-        return TowingEntitlement.from_rm(200)
 
     # 9. Generic Fallback Parsing for unlisted insurers
     if any(k in combined for k in ("unlimited", "tanpa had", "24-hr unlimited")):

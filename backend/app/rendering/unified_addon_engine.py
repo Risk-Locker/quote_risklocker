@@ -666,143 +666,6 @@ def is_item_selected(
     return False
 
 
-def detect_towing_upgrade(
-    active_benefits: list[dict[str, Any]] | None,
-    insurer_name: str = "",
-) -> dict[str, str] | None:
-    """Detect if an active paid rider upgrades towing entitlement based on Malaysian Motor Towing Reference."""
-    for raw in active_benefits or []:
-        if not (
-            raw.get("is_extra")
-            or raw.get("cost_status") == "paid"
-            or raw.get("is_selected") is True
-            or raw.get("selected") is True
-            or _positive_price(raw)
-        ):
-            continue
-        title = str(raw.get("title") or raw.get("label") or "").lower()
-        concept = str(raw.get("concept_key") or "").lower()
-        val_str = str(raw.get("value") or "").lower()
-        desc_str = str(raw.get("description") or "").lower()
-        off_key = str(raw.get("offering_key") or raw.get("card_key") or "").lower()
-        tv = raw.get("typed_value")
-        tv_str = ""
-        if isinstance(tv, dict):
-            tv_str = f"{tv.get('display_text') or ''} {tv.get('value') or ''} {tv.get('plan_key') or ''} {tv.get('enum_key') or ''}".lower()
-        elif tv is not None:
-            tv_str = str(tv).lower()
-        if re.search(r"\b1\s*-\s*4\b", f"{val_str} {tv_str}"):
-            continue
-        combined = f"{title} {concept} {val_str} {desc_str} {off_key} {tv_str}"
-
-        # 1. Etiqa + OTO 360
-        if "oto 360" in combined or "oto_360" in combined or "oto-360" in combined or "oto360" in combined:
-            return {
-                "title": "Unlimited Towing Assistance (Unlimited - Driver Plan 1)",
-                "limit": "Unlimited - Driver Plan 1",
-                "description": "24/7 unlimited breakdown & accidental towing assistance (Driver Plan 1). Upgraded via OTO 360.",
-                "rider": "OTO 360",
-            }
-
-        # 2. Takaful Malaysia / STMB + Motor PA Plus
-        if any(k in combined for k in ("motor pa plus", "motor-pa-plus", "motor_pa_plus", "motor pa plan", "pa plus", "pa-plus")):
-            if "plan 4" in combined or "plan-4" in combined or "p4" in combined:
-                return {
-                    "title": "Unlimited Towing Assistance",
-                    "limit": "Unlimited",
-                    "description": "24/7 unlimited towing assistance nationwide. Upgraded via Motor PA Plus - Plan 4.",
-                    "rider": "Motor PA Plus - Plan 4",
-                }
-            if "plan 3" in combined or "plan-3" in combined or "p3" in combined:
-                return {
-                    "title": "Extended Towing Assistance (300 km)",
-                    "limit": "300 km",
-                    "description": "24/7 extended towing assistance up to 300 km. Upgraded via Motor PA Plus - Plan 3.",
-                    "rider": "Motor PA Plus - Plan 3",
-                }
-            if "plan 2" in combined or "plan-2" in combined or "p2" in combined:
-                return {
-                    "title": "Extended Towing Assistance (200 km)",
-                    "limit": "200 km",
-                    "description": "24/7 extended towing assistance up to 200 km. Upgraded via Motor PA Plus - Plan 2.",
-                    "rider": "Motor PA Plus - Plan 2",
-                }
-            if "plan 1" in combined or "plan-1" in combined or "p1" in combined:
-                return {
-                    "title": "Extended Towing Assistance (100 km)",
-                    "limit": "100 km",
-                    "description": "24/7 extended towing assistance up to 100 km. Upgraded via Motor PA Plus - Plan 1.",
-                    "rider": "Motor PA Plus - Plan 1",
-                }
-
-        # 3. QBE + Driver & Passenger Protector (N4 - Unlimited Auto Assistance)
-        if any(
-            k in combined
-            for k in (
-                "driver passenger protector",
-                "driver-passenger-protector",
-                "driver & passenger protector",
-                "driver and passenger protector",
-                "unlimited auto assistance",
-                "dpp",
-                "n4",
-            )
-        ):
-            return {
-                "title": "Unlimited Towing Assistance (Unlimited - Plan 1)",
-                "limit": "Unlimited - Plan 1",
-                "description": "24/7 unlimited auto towing assistance (Plan 1). Upgraded via Driver & Passenger Protector (N4).",
-                "rider": "Driver & Passenger Protector (N4)",
-            }
-
-        # 4. Lonpac + E-Assist Smart Driver (Plan 1 -> RM 600; Plan 2 / EV Plan -> Unlimited)
-        if any(k in combined for k in ("e-assist", "smart driver", "smart-driver-pa")):
-            if any(k in combined for k in ("plan 2", "plan-2", "plan b", "ev plan", "ev-plan", "ev")):
-                return {
-                    "title": "Unlimited Towing Assistance",
-                    "limit": "Unlimited",
-                    "description": "24/7 unlimited breakdown towing nationwide. Upgraded via E-Assist Smart Driver (Plan 2 / EV Plan).",
-                    "rider": "E-Assist Smart Driver - Plan 2 / EV Plan",
-                }
-            if any(k in combined for k in ("plan 1", "plan-1", "plan a")):
-                return {
-                    "title": "Extended Towing Assistance (RM 600)",
-                    "limit": "RM 600",
-                    "description": "24/7 breakdown towing coverage up to RM 600. Upgraded via E-Assist Smart Driver (Plan 1).",
-                    "rider": "E-Assist Smart Driver - Plan 1",
-                }
-
-        # 5. Tune Protect + Motor Easy Bundle / AutoBuddy / Motor Shield
-        if any(
-            k in combined
-            for k in (
-                "motor easy",
-                "motor-easy",
-                "autobuddy",
-                "auto-buddy",
-                "motor shield",
-                "motorshield",
-            )
-        ):
-            return {
-                "title": "Unlimited Towing Assistance",
-                "limit": "Unlimited",
-                "description": "24/7 unlimited towing assistance nationwide. Upgraded via Motor Easy Bundle / AutoBuddy / Motor Shield.",
-                "rider": "Motor Easy Bundle / AutoBuddy / Motor Shield",
-            }
-
-        # 6. AmAssurance + Breakdown Towing Assistance
-        if "breakdown towing" in combined:
-            return {
-                "title": "Extended Towing Assistance (150 km)",
-                "limit": "150 km",
-                "description": "24/7 breakdown towing assistance up to 150 km. Upgraded via Breakdown Towing Assistance.",
-                "rider": "Breakdown Towing Assistance",
-            }
-
-    return None
-
-
 COMMERCIAL_EXCLUDED_MATRIX_IDS = frozenset({
     "towing",
     "international_towing",
@@ -993,33 +856,8 @@ def extract_free_coverage_items(
             if is_hide_cov or has_manual_val_ovr:
                 c_title = _strip_trailing_metric_parens(c_title)
             c_desc = str(raw.get("description") or raw.get("short_description") or "").strip()
-            has_manual_override = bool(
-                raw.get("has_manual_override")
-                or has_manual_val_ovr
-                or is_hide_cov
-                or raw.get("is_manual")
-                or str(raw.get("source") or "").lower() == "manual"
-                or raw.get("label_override")
-            )
-            has_promoted_towing = any(
-                isinstance(b, dict) and b.get("promoted_to_addon")
-                for b in (active_benefits or [])
-            )
-            towing_upgrade = None
-            if not is_comm and not is_non_comp and not has_manual_override and not has_promoted_towing:
-                card_already_upgraded = (
-                    "unlimited" in c_val.lower()
-                    or "unlimited" in c_title.lower()
-                    or "extended" in c_title.lower()
-                )
-                if not card_already_upgraded:
-                    towing_upgrade = detect_towing_upgrade(active_benefits, insurer_name)
-            out_title = towing_upgrade["title"] if towing_upgrade else _format_towing_title(c_title, c_val, is_manual_val=has_manual_val_ovr)
-            out_desc = (
-                towing_upgrade["description"]
-                if towing_upgrade
-                else (c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer.")
-            )
+            out_title = _format_towing_title(c_title, c_val, is_manual_val=has_manual_val_ovr)
+            out_desc = c_desc or "24/7 accidental towing service to nearest panel workshop or approved repairer."
 
             norm_out = _normalize_benefit_code(out_title)
             if norm_out not in seen_titles and "emergency_towing_assistance" not in seen_titles:
@@ -1162,10 +1000,25 @@ def build_unified_matrix_cards(
                 formatted_val = format_addon_value("betterment", raw_val) or default_years
         else:
             formatted_val = format_addon_value(raw_val)
-            if not formatted_val and matched_cat and not item.get("promoted_to_addon"):
+            if not formatted_val and matched_cat and not item.get("promoted_to_addon") and not item.get("is_bundle"):
                 formatted_val = format_addon_value(matched_cat.get("default_value"))
 
         title_str = str(item.get("title") or item.get("label") or (matched_cat["title"] if matched_cat else cat_id.replace("_", " ").title()))
+
+        if bool(item.get("is_bundle")) and not bool(item.get("is_bundle_effect")) and formatted_val:
+            fv_l = formatted_val.strip().lower()
+            tier_l = str(item.get("selected_bundle_tier_label") or "").strip().lower()
+            if (
+                (tier_l and fv_l == tier_l)
+                or re.fullmatch(
+                    r"(?:(?:plans?|pelan|tier|pakej)\s*(?:no\.?\s*)?(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))*|"
+                    r"(?:\d+|[a-d])(?:\s*[-–/,&to]+\s*(?:\d+|[a-d]))+|ev\s*plan|driver\s*plan\s*\d+|included)",
+                    fv_l,
+                    re.IGNORECASE,
+                )
+                or (fv_l in title_str.lower() and not any(u in fv_l for u in ("rm", "myr", "km", "%")))
+            ):
+                formatted_val = ""
 
         # Check if coverage limit is explicitly hidden (Windscreen is strictly mandatory on Malaysian motor quotes)
         is_hide_cov = bool(

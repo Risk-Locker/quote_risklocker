@@ -17,6 +17,134 @@ def normalize_detection(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
+def _strip_liberty_shared_boilerplate(raw: str) -> str:
+    """Remove promotional app banners and shared multi-brand PDPA blocks in long documents.
+
+    AmAssurance and Liberty quotations print 'Kurnia One Touch Mobile App today!' in their
+    footer, and Liberty General Insurance Berhad schedules include a shared PDPA page listing
+    libertyinsurance.com.my, amassurance.com.my, and kurnia.com side by side.
+    Single-brand Page 1 footers (e.g. Website: www.libertyinsurance.com.my) are preserved.
+    """
+    if len(raw) <= 80:
+        return raw
+    cleaned = re.sub(r"\bkurnia\s+one\s+touch(?:\s+mobile\s+app)?\b", " ", raw, flags=re.IGNORECASE)
+    # Agency / branch codes like "Issued By : AMGEN J1 RISK LOCKER..." are RiskLocker portal codes, not the underwriter.
+    cleaned = re.sub(r"\bAMGEN\s+J\d+\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"https?://(?:www\.)?(?:kurnia\.com|amassurance\.com\.my|libertyinsurance\.com\.my)/(?:content/)?(?:privacy-policy|resources/pdpa)\S*",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    lower = cleaned.lower()
+    has_shared_pdpa_emails = (
+        ("customer@amassurance.com.my" in lower and "customer@kurnia.com" in lower)
+        or ("customer@libertyinsurance.com.my" in lower and ("customer@kurnia.com" in lower or "customer@amassurance.com.my" in lower))
+    )
+    filtered_lines: list[str] = []
+    for line in cleaned.splitlines():
+        l_low = line.lower()
+        brand_mentions = sum(
+            1 for tok in ("kurnia", "amassurance", "liberty")
+            if re.search(rf"\b{tok}\b", l_low)
+        )
+        if brand_mentions >= 2:
+            continue
+        if has_shared_pdpa_emails and any(
+            em in l_low for em in ("customer@kurnia.com", "customer@amassurance.com.my", "customer@libertyinsurance.com.my")
+        ):
+            continue
+        filtered_lines.append(line)
+    result = "\n".join(filtered_lines).strip()
+    return result or raw
+
+
+def _score_liberty_group_brands(padded: str) -> dict[str, int]:
+    """Score Liberty vs Kurnia vs AmAssurance symmetrically without shared-product bias."""
+    # Remove shared legal underwriter phrase before checking standalone 'liberty insurance'
+    liberty_masked = re.sub(r"\bliberty general insurance(?:\s+berhad)?\b", " ", padded)
+    liberty_score = (
+        (12 if (" www libertyinsurance com my " in padded or " libertyinsurance com my " in padded) else 0)
+        + (8 if (" liberty insurance tower " in padded or " liberty insurance berhad " in padded) else 0)
+        + (6 if " liberty insurance " in liberty_masked else 0)
+    )
+    am_score = (
+        (12 if (" www amassurance com my " in padded or " amassurance com my " in padded or " www amassurance com " in padded or " amassurance com " in padded) else 0)
+        + (6 if " amassurance " in padded else 0)
+        + (4 if " amgeneral " in padded else 0)
+    )
+    kurnia_score = (
+        (12 if (" www kurnia com " in padded or " kurnia com " in padded) else 0)
+        + (6 if any(cue in padded for cue in (" kurnia insurans ", " kurnia insurance ", " kurnia auto assist ")) else 0)
+        + (4 if " kurnia " in padded else 0)
+    )
+    return {"liberty": liberty_score, "amassurance": am_score, "kurnia": kurnia_score}
+
+
+def _append_liberty_group_winner(
+    padded: str,
+    company_rows: list[dict],
+    out: list[dict],
+) -> set[str]:
+    """Append Priority 2 Liberty-group matches and return suppressed brand keys."""
+    scores = _score_liberty_group_brands(padded)
+    max_score = max(scores.values())
+    if max_score <= 0:
+        return set()
+    winners = {brand for brand, score in scores.items() if score == max_score}
+    suppressed = set(scores.keys()) - winners
+    for company in company_rows:
+        c_name = normalize_detection(str(company.get("name") or ""))
+        if "liberty" in winners and "liberty" in c_name:
+            out.append({"company": company, "alias": "www.libertyinsurance.com.my", "length": 500, "compact": False})
+        elif "kurnia" in winners and "kurnia" in c_name:
+            out.append({"company": company, "alias": "www.kurnia.com", "length": 500, "compact": False})
+        elif "amassurance" in winners and ("amassurance" in c_name or "amgen" in c_name):
+            out.append({"company": company, "alias": "AmAssurance", "length": 500, "compact": False})
+    return suppressed
+
+
+def _append_mmip_matches(padded: str, company_rows: list[dict], out: list[dict]) -> None:
+    has_mmip_cue = any(
+        cue in padded
+        for cue in (
+            " mmip ",
+            " malaysian motor insurance pool ",
+            " malaysia motor insurance pool ",
+            " motor insurance pool ",
+        )
+    )
+    if not has_mmip_cue:
+        return
+    for company in company_rows:
+        c_name = str(company.get("name") or "").strip()
+        c_aliases = [c_name, *(company.get("aliases") or [])]
+        if any("mmip" in normalize_detection(str(a)) or "motor insurance pool" in normalize_detection(str(a)) for a in c_aliases):
+            out.append({"company": company, "alias": "MMIP", "length": 10000, "compact": False})
+
+
+def _collect_company_alias_hits(company: dict, padded: str, compact_text: str, out: list[dict]) -> None:
+    name = str(company.get("name") or "").strip()
+    if not name:
+        return
+    aliases = [name, *(company.get("aliases") or [])]
+    padded_without_liberty_parent: str | None = None
+    for raw_alias in aliases:
+        normalized = normalize_detection(str(raw_alias))
+        if len(normalized) < 2:
+            continue
+        if normalized == "liberty" and " liberty general insurance " in padded:
+            if padded_without_liberty_parent is None:
+                padded_without_liberty_parent = re.sub(r"\bliberty general insurance(?:\s+berhad)?\b", " ", padded)
+            if " liberty insurance " not in padded_without_liberty_parent and " libertyinsurance com my " not in padded:
+                continue
+        if f" {normalized} " in padded:
+            out.append({"company": company, "alias": raw_alias, "length": len(normalized), "compact": False})
+        compact = normalized.replace(" ", "")
+        if len(compact) >= 5 and (len(compact) >= 8 or len(compact_text) < 200) and compact in compact_text:
+            out.append({"company": company, "alias": raw_alias, "length": len(compact), "compact": True})
+
+
 def company_alias_matches(selected: str, company_rows: list[dict]) -> list[dict]:
     """Return company/alias matches for a detected string, best-first.
 
@@ -32,62 +160,25 @@ def company_alias_matches(selected: str, company_rows: list[dict]) -> list[dict]
     raw = (selected or "").strip()
     if not raw:
         return []
-    spaced = normalize_detection(raw)
+    scan_raw = _strip_liberty_shared_boilerplate(raw)
+    spaced = normalize_detection(scan_raw)
     padded = f" {spaced} "
     compact_text = spaced.replace(" ", "")
     out: list[dict] = []
 
     # Priority 1: MMIP (Malaysian Motor Insurance Pool) overrides servicing insurer names on pool cases
-    has_mmip_cue = any(
-        cue in padded
-        for cue in (
-            " mmip ",
-            " malaysian motor insurance pool ",
-            " malaysia motor insurance pool ",
-            " motor insurance pool ",
-        )
-    )
-    if has_mmip_cue:
-        for company in company_rows:
-            c_name = str(company.get("name") or "").strip()
-            c_aliases = [c_name, *(company.get("aliases") or [])]
-            if any("mmip" in normalize_detection(str(a)) or "motor insurance pool" in normalize_detection(str(a)) for a in c_aliases):
-                out.append({"company": company, "alias": "MMIP", "length": 10000, "compact": False})
+    _append_mmip_matches(padded, company_rows, out)
 
-    # Priority 2: Disambiguate Kurnia / AmAssurance under Liberty General Insurance Berhad
+    # Priority 2: Disambiguate Liberty / Kurnia / AmAssurance under Liberty General Insurance Berhad symmetrically
     has_liberty_parent = " liberty general insurance " in padded or " liberty " in padded
-    has_kurnia_cue = any(cue in padded for cue in (" www kurnia com ", " kurnia com ", " kurnia "))
-    has_am_cue = any(cue in padded for cue in (" www amassurance com ", " amassurance com ", " amassurance ", " amgeneral "))
-    if has_liberty_parent and has_kurnia_cue:
-        for company in company_rows:
-            c_name = normalize_detection(str(company.get("name") or ""))
-            if "kurnia" in c_name:
-                out.append({"company": company, "alias": "www.kurnia.com", "length": 9000, "compact": False})
-    elif has_liberty_parent and has_am_cue:
-        for company in company_rows:
-            c_name = normalize_detection(str(company.get("name") or ""))
-            if "amassurance" in c_name or "amgen" in c_name:
-                out.append({"company": company, "alias": "AmAssurance", "length": 9000, "compact": False})
+    suppressed_brands: set[str] = _append_liberty_group_winner(padded, company_rows, out) if has_liberty_parent else set()
 
     for company in company_rows:
-        name = str(company.get("name") or "").strip()
-        if not name:
+        c_norm = normalize_detection(str(company.get("name") or ""))
+        if c_norm and any(sb in c_norm or (sb == "amassurance" and "amgen" in c_norm) for sb in suppressed_brands):
             continue
-        aliases = [name, *(company.get("aliases") or [])]
-        for raw_alias in aliases:
-            normalized = normalize_detection(str(raw_alias))
-            if len(normalized) < 2:
-                continue
-            if f" {normalized} " in padded:
-                out.append({"company": company, "alias": raw_alias, "length": len(normalized), "compact": False})
-            compact = normalized.replace(" ", "")
-            
-            # If the search text is very long (e.g. a full document), short compact matches 
-            # (like 'amgen') are likely false positives formed by crossing word boundaries.
-            if len(compact) >= 5 and (len(compact) >= 8 or len(compact_text) < 200):
-                if compact in compact_text:
-                    out.append({"company": company, "alias": raw_alias, "length": len(compact), "compact": True})
-    
+        _collect_company_alias_hits(company, padded, compact_text, out)
+
     # Sort by length (descending), then spaced (not compact) over compact
     out.sort(key=lambda item: (item["length"], not item["compact"]), reverse=True)
     return out

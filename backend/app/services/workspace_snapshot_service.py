@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-from typing import Any
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from typing import Any, cast
 
 from pydantic import ValidationError
 from sqlalchemy import func, select, delete
@@ -61,6 +61,7 @@ from app.rendering.render_context import (
 from app.services.catalog_review_service import _resolve_vehicle_category, auto_apply_extracted_benefits, initialize_catalog_review, pin_catalog_context, seed_base_benefits
 from app.extraction.validators import normalize_date, normalize_money, normalize_valuation_type
 from app.extraction.benefit_lines import is_spurious_benefit_line
+from app.services.bundle_plan_matcher import is_base_auto365_policy_label
 
 
 
@@ -183,23 +184,36 @@ def _decision_summary(db, decision: DraftSourceLineDecision, lines_by_id: dict |
 
 
 
-def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBenefitSelection], decisions: list[DraftSourceLineDecision]) -> dict[str, list[dict]]:
-    concepts = list(db.scalars(select(BenefitConcept)).all())
+def _workspace_benefit_cards(
+    db,
+    draft: QuotationDraft,
+    selections: list[DraftBenefitSelection],
+    decisions: list[DraftSourceLineDecision],
+    *,
+    concepts: list[BenefitConcept] | None = None,
+    offerings: list[CatalogOffering] | None = None,
+    extras_section: dict | None = None,
+) -> dict[str, list[dict]]:
+    concepts = concepts if concepts is not None else list(db.scalars(select(BenefitConcept)).all())
     if not draft.catalog_revision_id:
-        offerings: list = []
+        offerings = []
         relations: list = []
         facets: list = []
         plans: list = []
-        retired_concept_ids = {str(item.id) for item in concepts if getattr(item, "status", "active") == "retired"}
+        retired_concept_ids = {item.id for item in concepts if getattr(item, "status", "active") == "retired"}
         valid_selections = [
             s for s in selections
             if s.item_kind != "catalog" and (s.concept_id or "") not in retired_concept_ids
         ]
     else:
-        offerings = list(
-            db.scalars(
-                select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
-            ).all()
+        offerings = (
+            offerings
+            if offerings is not None
+            else list(
+                db.scalars(
+                    select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+                ).all()
+            )
         )
         offering_ids = {item.id for item in offerings}
         concept_ids = {item.concept_id for item in offerings}
@@ -236,8 +250,8 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
             if package_ids
             else []
         )
-        retired_concept_ids = {str(item.id) for item in concepts if getattr(item, "status", "active") == "retired"}
-        offerings_by_concept = {str(item.concept_id): item for item in offerings if item.concept_id}
+        retired_concept_ids = {item.id for item in concepts if getattr(item, "status", "active") == "retired"}
+        offerings_by_concept = {item.concept_id: item for item in offerings if item.concept_id}
         valid_selections = []
         for s in selections:
             if (s.concept_id or "") in retired_concept_ids:
@@ -255,7 +269,7 @@ def _workspace_benefit_cards(db, draft: QuotationDraft, selections: list[DraftBe
     from app.services.formula_evaluator import extract_evaluation_context
     from app.services.benefit_catalog_matrix import get_catalog_for_product
     
-    extras_section = _workspace_extracted_benefits_section(db, draft, decisions, selections)
+    extras_section = extras_section if extras_section is not None else _workspace_extracted_benefits_section(db, draft, decisions, selections, concepts=concepts)
     eval_context = extract_evaluation_context(draft.fields or {}, extras_section.get("extras", []))
     
     # Try to determine insurer_key and product_type
@@ -339,9 +353,51 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     decisions = _rows_for_draft(db, DraftSourceLineDecision, draft.id)
     template_revision = _template_for_draft(db, draft)
     blockers = generation_blockers(draft, decisions, selections, template_revision=template_revision)
+    concepts = list(db.scalars(select(BenefitConcept)).all())
+    offerings = (
+        list(
+            db.scalars(
+                select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
+            ).all()
+        )
+        if draft.catalog_revision_id
+        else []
+    )
+    extraction = (
+        db.scalar(
+            select(ExtractionRecord)
+            .where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id)
+            .options(
+                load_only(
+                    ExtractionRecord.id,
+                    ExtractionRecord.uploaded_file_id,
+                    ExtractionRecord.candidates,
+                    ExtractionRecord.benefit_lines,
+                )
+            )
+        )
+        if draft.uploaded_file_id
+        else None
+    )
+    extras_section = _workspace_extracted_benefits_section(
+        db,
+        draft,
+        decisions,
+        selections,
+        concepts=concepts,
+        extraction=extraction,
+    )
     try:
-        benefit_cards = _workspace_benefit_cards(db, draft, selections, decisions)
-    except Exception as e:
+        benefit_cards = _workspace_benefit_cards(
+            db,
+            draft,
+            selections,
+            decisions,
+            concepts=concepts,
+            offerings=offerings,
+            extras_section=extras_section,
+        )
+    except Exception:
         import traceback
         traceback.print_exc()
         benefit_cards = {"current_benefits": [], "available_addons": []}
@@ -371,16 +427,6 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
     tier = db.get(InsuranceProductTier, draft.tier_id) if draft.tier_id else None
     package = db.get(BenefitPackage, draft.package_id) if getattr(draft, "package_id", None) else None
     catalog_overview = _catalog_overview(db, draft)
-    concepts = list(db.scalars(select(BenefitConcept)).all())
-    offerings = (
-        list(
-            db.scalars(
-                select(CatalogOffering).where(CatalogOffering.catalog_revision_id == draft.catalog_revision_id)
-            ).all()
-        )
-        if draft.catalog_revision_id
-        else []
-    )
     extras = build_extras(selections, concepts, offerings)
     disp_opts = draft.display_options or {}
     round_tot = bool(disp_opts.get("round_total", False))
@@ -392,6 +438,53 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         round_total=round_tot,
         include_road_tax=inc_rt,
         include_runner_fee=inc_rf,
+    )
+
+    from decimal import Decimal
+    from types import SimpleNamespace
+    from app.domain.motor.discount_calculator import calculate_motor_discount, to_decimal_clean
+    from app.models.tables import InsuranceTenure
+
+    raw_fields = dict(draft.fields or {})
+    tenure_obj = db.get(InsuranceTenure, session.tenure_id) if getattr(session, "tenure_id", None) else None
+    raw_prem_f = raw_fields.get("premium") or raw_fields.get("coverage_premium") or raw_fields.get("basic_premium_vehicle")
+    gross_prem_dec = to_decimal_clean(raw_prem_f, Decimal("0.00"))
+    raw_pct_val = raw_fields.get("motor_discount_pct")
+    raw_flat_val = raw_fields.get("quotation_discount")
+    has_pct = raw_pct_val is not None and (not isinstance(raw_pct_val, dict) or raw_pct_val.get("value") not in (None, "")) and raw_pct_val != ""
+    has_flat = raw_flat_val is not None and (not isinstance(raw_flat_val, dict) or raw_flat_val.get("value") not in (None, "")) and raw_flat_val != ""
+    if has_pct:
+        pct_dec = to_decimal_clean(raw_pct_val, Decimal("0.00"))
+    elif tenure_obj is not None:
+        pct_dec = to_decimal_clean(getattr(tenure_obj, "motor_discount_pct", 0), Decimal("0.00"))
+        raw_fields["motor_discount_pct"] = {"value": f"{pct_dec:.2f}", "status": "ready", "message": ""}
+    else:
+        pct_dec = Decimal("0.00")
+    if has_flat:
+        flat_dec = to_decimal_clean(raw_flat_val, Decimal("0.00"))
+    elif tenure_obj is not None:
+        flat_dec = to_decimal_clean(getattr(tenure_obj, "quotation_discount", 0), Decimal("0.00"))
+        raw_fields["quotation_discount"] = {"value": f"{flat_dec:.2f}", "status": "ready", "message": ""}
+    else:
+        flat_dec = Decimal("0.00")
+    disc_bd = calculate_motor_discount(gross_prem_dec, pct_dec, flat_dec)
+    discount_summary = {
+        "motor_discount_pct": f"{disc_bd.motor_discount_pct:.2f}",
+        "pct_discount_amount": f"{disc_bd.pct_discount_amount:.2f}",
+        "flat_discount_amount": f"{disc_bd.flat_discount_amount:.2f}",
+        "effective_discount": f"{disc_bd.effective_discount:.2f}",
+        "gross_motor_premium": f"{disc_bd.gross_motor_premium:.2f}",
+        "net_motor_premium": f"{disc_bd.net_motor_premium:.2f}",
+    }
+    raw_fields["effective_discount"] = {"value": discount_summary["effective_discount"], "status": "ready", "message": ""}
+    raw_fields["net_motor_premium"] = {"value": discount_summary["net_motor_premium"], "status": "ready", "message": ""}
+    draft_fields_for_summary = cast(
+        Any,
+        SimpleNamespace(
+            fields=raw_fields,
+            scalar_decisions=draft.scalar_decisions,
+            uploaded_file=draft.uploaded_file,
+        ),
     )
     
     # Extract car model string safely
@@ -417,7 +510,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         "uploaded_file_id": draft.uploaded_file_id,
         "revision": draft.revision,
         "status": draft.status,
-        "is_test": bool(getattr(session, "is_test", False)),
+        "is_test": getattr(session, "is_test", False) is True,
         "created_by": session.owner.name if getattr(session, "owner", None) else "System",
         "created_by_email": session.owner.email if getattr(session, "owner", None) else "",
         "created_at": session.created_at.isoformat() if getattr(session, "created_at", None) else None,
@@ -432,7 +525,12 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         "coverage_end_date": session.coverage_end_date.isoformat() if getattr(session, "coverage_end_date", None) else None,
         "display_options": draft.display_options or {},
         "quotation_ref": session.quotation_ref,
-        "fields": _field_summary(draft, session.quotation_ref),
+        "fields": _field_summary(
+            draft_fields_for_summary,
+            session.quotation_ref,
+            rec_candidates=(extraction.candidates or {}) if extraction else {},
+        ),
+        "discount_summary": discount_summary,
         "benefits": [_selection_summary(item) for item in sorted(selections, key=lambda item: (item.sort_order, item.selection_key))],
         "benefit_cards": benefit_cards,
         "extras": extras,
@@ -486,7 +584,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
             }
             for version in versions
         ],
-        "extracted_benefits_section": _workspace_extracted_benefits_section(db, draft, decisions, selections),
+        "extracted_benefits_section": extras_section,
         "capabilities": workspace_capabilities(user),
         "quotation_tracking": {
             "status": session.quotation_status or "pending",
@@ -504,11 +602,24 @@ def _workspace_extracted_benefits_section(
     draft: QuotationDraft,
     decisions: list[DraftSourceLineDecision],
     selections: list[DraftBenefitSelection],
+    *,
+    concepts: list[BenefitConcept] | None = None,
+    extraction: ExtractionRecord | None = None,
 ) -> dict:
     """Detailed summary of detected insurance packages, extra covers, and add-on costs from quotation PDF."""
-    extraction = db.scalar(
-        select(ExtractionRecord).where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id)
-    )
+    if extraction is None and draft.uploaded_file_id:
+        extraction = db.scalar(
+            select(ExtractionRecord)
+            .where(ExtractionRecord.uploaded_file_id == draft.uploaded_file_id)
+            .options(
+                load_only(
+                    ExtractionRecord.id,
+                    ExtractionRecord.uploaded_file_id,
+                    ExtractionRecord.candidates,
+                    ExtractionRecord.benefit_lines,
+                )
+            )
+        )
     detected_package_name = ""
     detected_packs = []
     if extraction and extraction.candidates:
@@ -535,12 +646,13 @@ def _workspace_extracted_benefits_section(
 
     raw_lines = extraction.benefit_lines if extraction and extraction.benefit_lines else []
     selection_concepts = {str(s.concept_id): s for s in selections if s.state == "current"}
-    all_concepts = list(db.scalars(select(BenefitConcept)).all())
-    concepts_by_id = {str(c.id): c for c in all_concepts}
+    all_concepts = concepts if concepts is not None else list(db.scalars(select(BenefitConcept)).all())
+    concepts_by_id = {c.id: c for c in all_concepts}
     concepts_by_key = {c.concept_key: c for c in all_concepts}
 
-    extras_list = []
-    seen_labels = set()
+    extras_list: list[dict] = []
+    concept_index_by_key: dict[str, int] = {}
+    seen_labels: set[str] = set()
     total_opt_cover = str((draft.fields or {}).get("optional_cover_amount", {}).get("value") or "")
 
     for idx, line in enumerate(raw_lines):
@@ -552,8 +664,8 @@ def _workspace_extracted_benefits_section(
         norm_label = re.sub(r"\s+", " ", label).strip()
         if norm_label.lower() in seen_labels:
             continue
-        # Reject pure amounts, totals, accounting calculation rows, or negative flags
-        if re.match(r"^[:\-•*+~]?\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?\s*%?\s*$", norm_label, re.IGNORECASE):
+        # Reject pure amounts, tariff markers, base policy titles, accounting rows, or negative flags
+        if re.match(r"^[:\-•*+~]?\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{1,2})?\s*(?:[TtNn]{1,2}|%)?\s*$", norm_label, re.IGNORECASE):
             continue
         if re.match(r"^(?:total|basic contribution|gross contribution|total contribution|takaful contribution|\+ additional|\- ncd|\+ service tax|\+ stamp duty|quotation type|agent code|takaful scheme|insurance scheme|agreed value|market value|acceptance of any|this quotation|endorsement attaching|cbc regulation)\b", norm_label, re.IGNORECASE):
             continue
@@ -561,7 +673,7 @@ def _workspace_extracted_benefits_section(
             continue
         if line.get("line_kind") in {"narrative", "pds_narrative"} or line.get("source_scope") == "pds":
             continue
-        if is_spurious_benefit_line(norm_label):
+        if is_base_auto365_policy_label(norm_label) or is_spurious_benefit_line(norm_label):
             continue
 
         # Check if user explicitly dismissed this detected line
@@ -646,7 +758,8 @@ def _workspace_extracted_benefits_section(
 
         is_optional = bool(line.get("is_optional_cover")) or line.get("section") == "Optional Covers" or bool(cost)
 
-        extras_list.append({
+        source_kind = "gemini_vision" if "gemini" in str(line.get("line_id", "")) else "native_pdf"
+        entry_payload = {
             "id": line.get("line_id") or f"ext_{idx}",
             "label": label,
             "raw_text": line.get("raw_text") or label,
@@ -659,22 +772,36 @@ def _workspace_extracted_benefits_section(
             "selection_id": selection_id,
             "display_overrides": disp_ovr,
             "show_coverage": show_cov,
-            "source": "gemini_vision" if "gemini" in str(line.get("line_id", "")) else "native_pdf",
-        })
+            "source": source_kind,
+        }
+        if concept_key and concept_key in concept_index_by_key:
+            prev_idx = concept_index_by_key[concept_key]
+            prev = extras_list[prev_idx]
+            prev_rank = (1 if prev["is_applied"] else 0, 1 if prev["source"] == "gemini_vision" else 0, 1 if prev["cost"] else 0, 1 if prev["coverage_limit"] else 0)
+            curr_rank = (1 if is_applied else 0, 1 if source_kind == "gemini_vision" else 0, 1 if cost else 0, 1 if cov_limit else 0)
+            if curr_rank > prev_rank:
+                extras_list[prev_idx] = entry_payload
+            continue
+        if concept_key:
+            concept_index_by_key[concept_key] = len(extras_list)
+        extras_list.append(entry_payload)
 
-    calc_extras_sum = 0.0
+    calc_extras_sum = Decimal("0.00")
     for e in extras_list:
         c_str = re.sub(r"[^0-9.]", "", str(e.get("cost") or ""))
         if c_str:
             try:
-                calc_extras_sum += float(c_str)
-            except ValueError:
+                val = Decimal(c_str).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                if val > Decimal("0.00"):
+                    calc_extras_sum += val
+            except (InvalidOperation, ValueError):
                 pass
 
-    if calc_extras_sum > 0:
+    if calc_extras_sum > Decimal("0.00"):
         try:
-            cur_tot = float(re.sub(r"[^0-9.]", "", total_opt_cover)) if total_opt_cover else 0.0
-            if cur_tot == 0.0 or cur_tot > (calc_extras_sum * 5.0):
+            cur_clean = re.sub(r"[^0-9.]", "", total_opt_cover) if total_opt_cover else ""
+            cur_tot = Decimal(cur_clean).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if cur_clean else Decimal("0.00")
+            if cur_tot == Decimal("0.00") or cur_tot > (calc_extras_sum * Decimal("5")):
                 total_opt_cover = f"{calc_extras_sum:,.2f}"
         except Exception:
             total_opt_cover = f"{calc_extras_sum:,.2f}"
@@ -736,13 +863,13 @@ def _workspace_packs(db, draft: QuotationDraft) -> list[dict]:
     }
     concepts = {item.id: item for item in db.scalars(select(BenefitConcept)).all()}
     result: list[dict] = []
-    for package in sorted(packages, key=lambda item: (int(item.sort_order or 0), str(item.id))):
+    for package in sorted(packages, key=lambda item: (int(item.sort_order or 0), item.id)):
         plan_rows = []
-        for plan in sorted(plans, key=lambda item: (int(item.sort_order or 0), str(item.id))):
+        for plan in sorted(plans, key=lambda item: (int(item.sort_order or 0), item.id)):
             if plan.package_id != package.id:
                 continue
             members = []
-            for item in sorted(items, key=lambda row: (int(row.sort_order or 0), str(row.id))):
+            for item in sorted(items, key=lambda row: (int(row.sort_order or 0), row.id)):
                 if item.plan_id != plan.id:
                     continue
                 offering = offerings.get(item.offering_id)
@@ -1043,8 +1170,8 @@ def template_selection_impact(
             "name": str((target.config or {}).get("template_name") or "Published template"),
             "config_hash": target.config_hash,
         },
-        "will_reset_layout_override": bool(resets_layout),
-        "requires_confirmation": bool(changed),
+        "will_reset_layout_override": resets_layout,
+        "requires_confirmation": changed,
         "messages": [
             "The quotation-specific layout will reset because it belongs to another template revision."
         ] if resets_layout else [],

@@ -47,13 +47,33 @@ export function collectWorkspaceAttentionItems(
   const items: AttentionItem[] = [];
   if (!workspace) return items;
 
+  const HIDDEN_MIRROR_FIELDS = new Set([
+    "coverage_amount",
+    "market_value",
+    "agreed_value",
+    "insured_name",
+    "make",
+    "ic_no",
+    "nric_no",
+    "id_number",
+    "customer_ic_no",
+    "veh_reg_no",
+    "registration_no",
+    "client_name",
+    "policyholder_name",
+    "engine_number",
+    "chassis_number",
+    "vehicle_model",
+    "coverage_start_date",
+    "coverage_end_date",
+  ]);
   const seenFields = new Set<string>();
   const fields = workspace.fields || {};
   for (const [key, rawField] of Object.entries(fields)) {
     const field = rawField as WorkspaceField | undefined;
     if (!field || field.status !== "check_needed") continue;
-    // Skip hidden internal mirror keys when primary key represents the field
-    if (["coverage_amount", "market_value", "agreed_value", "insured_name"].includes(key)) continue;
+    // Skip hidden internal mirror keys when primary canonical key represents the field
+    if (HIDDEN_MIRROR_FIELDS.has(key)) continue;
     if (seenFields.has(key)) continue;
     seenFields.add(key);
     const val = (formValues[key] ?? field.value ?? "").toString().trim();

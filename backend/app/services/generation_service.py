@@ -10,6 +10,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 import uuid
 
 from sqlalchemy import select, text
@@ -388,7 +389,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     from app.services.workspace_service import _workspace_extracted_benefits_section
     
     # Needs to be called with db, draft, decisions (empty list is fine for generation), selections
-    extras_section = _workspace_extracted_benefits_section(db, draft, [], selections)
+    extras_section = _workspace_extracted_benefits_section(db, draft, [], selections, concepts=concepts)
     eval_context = extract_evaluation_context(draft.fields or {}, extras_section.get("extras", []))
     company = getattr(draft, "company", None)
     product = getattr(draft, "product", None)
@@ -499,6 +500,18 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
             "status": "ready",
             "message": "",
         }
+    from app.domain.motor.discount_calculator import calculate_motor_discount, to_decimal_clean
+
+    prem_for_disc = to_decimal_clean(
+        _field_text(fields, "premium")
+        or _field_text(fields, "coverage_premium")
+        or _field_text(fields, "basic_premium_vehicle")
+    )
+    pct_for_disc = to_decimal_clean(_field_text(fields, "motor_discount_pct"))
+    flat_for_disc = to_decimal_clean(_field_text(fields, "quotation_discount"))
+    disc_bd = calculate_motor_discount(prem_for_disc, pct_for_disc, flat_for_disc)
+    fields["effective_discount"] = {"value": f"{disc_bd.effective_discount:.2f}", "status": "ready", "message": ""}
+    fields["net_motor_premium"] = {"value": f"{disc_bd.net_motor_premium:.2f}", "status": "ready", "message": ""}
     canvas = config.get("canvas") or {}
     raw_elements = canvas.get("elements") or []
     render_ctx = {

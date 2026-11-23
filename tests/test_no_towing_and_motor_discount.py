@@ -317,9 +317,25 @@ def test_motor_discount_pct_syncs_across_comparison_covernote_draft_whatsapp_and
     assert adjusted_total_text(q1_draft.fields, []) == "1,010"
     assert adjusted_total_text(q1_draft.fields, [], round_total=True) == "1,010.00"
     html = render_design2_html(q1_draft.fields, template_config={}, db=db_session)
-    assert "Motor Discount (10%)" in html
-    assert "RM 100.00" in html
+    assert "Discount / 折扣" in html
+    assert "10%" in html
+    assert "Insurance Premium / 保费 (after discount)" in html
+    assert "RM 900.00" in html
     assert "RM 1,010.00" in html
+    assert "width: 214px;" in html
+
+    # Also verify 0% discount hides Discount row and reverts to standard label & 186px width
+    zero_fields = {
+        **q1_draft.fields,
+        "motor_discount_pct": {"value": "0.00", "status": "ready"},
+        "quotation_discount": {"value": "0.00", "status": "ready"},
+        "total_amount": {"value": "1110.00", "status": "ready"},
+    }
+    html_zero = render_design2_html(zero_fields, template_config={}, db=db_session)
+    assert "Discount / 折扣" not in html_zero
+    assert "(after discount)" not in html_zero
+    assert "Insurance Premium / 保费" in html_zero
+    assert "width: 214px;" not in html_zero
 
     wa = format_whatsapp_teaser_from_data(comp)
     assert "10%" in wa

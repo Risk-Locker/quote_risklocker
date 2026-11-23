@@ -536,6 +536,27 @@ class ComparisonRescanRequest(BaseModel):
     deep: bool = True
 
 
+@router.post("/{tenure_id}/redetect")
+def start_comparison_redetect(
+    tenure_id: str,
+    payload: ComparisonRescanRequest | None = None,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Start a cancellable multi-pass Deep Re-detect job for all quotes (or a single quote) under this comparison."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.redetect_job_service import start_comparison_redetect_job
+
+    return start_comparison_redetect_job(
+        db,
+        tenure_id,
+        user,
+        settings,
+        session_id=payload.session_id if payload else None,
+    )
+
+
 @router.post("/{tenure_id}/rescan")
 def rescan_comparison(
     tenure_id: str,

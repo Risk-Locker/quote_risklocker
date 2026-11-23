@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ArrowCounterClockwise, ArrowLeft, ArrowRight, Check, Eye, EyeSlash, Lock, PencilSimple, Sparkle, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowLeft, ArrowRight, Check, Eye, EyeSlash, Lock, PencilSimple, Plus, Sparkle, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Design2BenefitIconSvg } from "@/components/template-canvas/design2-icons";
@@ -31,6 +31,7 @@ export function IncludedCard({
 }) {
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || String(selectionId).startsWith("pending:");
+  const hasCatalogOffering = Boolean(card.offering_id && !String(card.offering_id).startsWith("custom:") && !String(card.offering_id).startsWith("pending:"));
 
   const isWindscreen = card.label.toLowerCase().includes("windscreen") || (card.concept_key || "").toLowerCase().includes("windscreen");
   const isBetterment = card.label.toLowerCase().includes("betterment") || (card.concept_key || "").toLowerCase().includes("betterment");
@@ -98,7 +99,7 @@ export function IncludedCard({
         { op: "benefit_update", selection_id: selectionId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
         `benefits.${selectionId}.limit`
       );
-    } else if (card.offering_id) {
+    } else if (hasCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
         `benefits.offer.${card.offering_id}.limit`
@@ -119,7 +120,7 @@ export function IncludedCard({
     flashSaved("title");
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, label: clean }, `benefits.${selectionId}.label`);
-    } else if (card.offering_id) {
+    } else if (hasCatalogOffering) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, label: clean }, `benefits.offer.${card.offering_id}.label`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
@@ -136,14 +137,14 @@ export function IncludedCard({
     flashSaved("limit");
     const typed = clean
       ? { type: "custom", display_text: clean, hide_limit: false }
-      : { type: "custom", display_text: "", hide_limit: true };
+      : { type: "text", display_text: "", hide_limit: true };
     const cleanedLabel = stripMetricFromLabelIfPresent();
     if (selectionId && !pending) {
       onQueue(
         { op: "benefit_update", selection_id: selectionId, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
         `benefits.${selectionId}.limit`
       );
-    } else if (card.offering_id) {
+    } else if (hasCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
         `benefits.offer.${card.offering_id}.limit`
@@ -168,7 +169,7 @@ export function IncludedCard({
     flashSaved("desc");
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, description: clean }, `benefits.${selectionId}.description`);
-    } else if (card.offering_id) {
+    } else if (hasCatalogOffering) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, description: clean }, `benefits.offer.${card.offering_id}`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
@@ -198,7 +199,7 @@ export function IncludedCard({
     if (!trimmed) {
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: "included" }, `benefits.${selectionId}.price`);
-      } else if (card.offering_id) {
+      } else if (hasCatalogOffering) {
         onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", price: null }, `benefits.offer.${card.offering_id}`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
@@ -212,7 +213,7 @@ export function IncludedCard({
     const costStatus = cleanNum > 0 ? "paid" : "included";
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: costStatus }, `benefits.${selectionId}.price`);
-    } else if (card.offering_id) {
+    } else if (hasCatalogOffering) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, price: newPrice }, `benefits.offer.${card.offering_id}`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
@@ -228,7 +229,7 @@ export function IncludedCard({
       flashSaved("price");
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
-      } else if (card.offering_id) {
+      } else if (hasCatalogOffering) {
         onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
@@ -477,8 +478,8 @@ export function IncludedCard({
               className="text-[16px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-1 transition-colors cursor-pointer"
               title="Set coverage amount"
             >
-              <PencilSimple size={14} />
-              <span>+ Coverage</span>
+              <Plus size={14} weight="bold" />
+              <span>Add coverage</span>
             </button>
           )}
         </div>
@@ -518,8 +519,8 @@ export function IncludedCard({
             className="text-[15px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-1 transition-colors mt-0.5 cursor-pointer"
             title="Add description"
           >
-            <PencilSimple size={14} />
-            <span>+ Description</span>
+            <Plus size={14} weight="bold" />
+            <span>Add description</span>
           </button>
         )}
 
@@ -686,7 +687,7 @@ export function AddonCard({
     flashSaved("limit");
     const typed = clean
       ? { type: "custom", display_text: clean, hide_limit: false }
-      : { type: "custom", display_text: "", hide_limit: true };
+      : { type: "text", display_text: "", hide_limit: true };
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: typed }, `benefits.${selectionId}.limit`);
     } else if (card.offering_id) {
@@ -1155,6 +1156,7 @@ export function MatrixAddonCard({
 }) {
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || String(selectionId).startsWith("pending:");
+  const hasMatrixCatalogOffering = Boolean(card.offering_id && !String(card.offering_id).startsWith("custom:") && !String(card.offering_id).startsWith("pending:"));
 
   const isWindscreen = card.label.toLowerCase().includes("windscreen") || (card.concept_key || "").toLowerCase().includes("windscreen");
   const isBetterment = card.label.toLowerCase().includes("betterment") || (card.concept_key || "").toLowerCase().includes("betterment");
@@ -1222,7 +1224,7 @@ export function MatrixAddonCard({
         { op: "benefit_update", selection_id: selectionId, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
         `benefits.${selectionId}.limit`
       );
-    } else if (card.offering_id) {
+    } else if (hasMatrixCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: newTyped, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
         `benefits.offer.${card.offering_id}.limit`
@@ -1243,7 +1245,7 @@ export function MatrixAddonCard({
     flashSaved("title");
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, label: clean }, `benefits.${selectionId}.label`);
-    } else if (card.offering_id) {
+    } else if (hasMatrixCatalogOffering) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, label: clean }, `benefits.offer.${card.offering_id}.label`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
@@ -1260,14 +1262,14 @@ export function MatrixAddonCard({
     flashSaved("limit");
     const typed = clean
       ? { type: "custom", display_text: clean, hide_limit: false }
-      : { type: "custom", display_text: "", hide_limit: true };
+      : { type: "text", display_text: "", hide_limit: true };
     const cleanedLabel = stripMetricFromLabelIfPresent();
     if (selectionId && !pending) {
       onQueue(
         { op: "benefit_update", selection_id: selectionId, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
         `benefits.${selectionId}.limit`
       );
-    } else if (card.offering_id) {
+    } else if (hasMatrixCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, typed_value: typed, ...(cleanedLabel ? { label: cleanedLabel } : {}) },
         `benefits.offer.${card.offering_id}.limit`
@@ -1292,7 +1294,7 @@ export function MatrixAddonCard({
     flashSaved("desc");
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, description: clean }, `benefits.${selectionId}.description`);
-    } else if (card.offering_id) {
+    } else if (hasMatrixCatalogOffering) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, description: clean }, `benefits.offer.${card.offering_id}`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
@@ -1322,7 +1324,7 @@ export function MatrixAddonCard({
     if (!trimmed) {
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: "paid" }, `benefits.${selectionId}.price`);
-      } else if (card.offering_id) {
+      } else if (hasMatrixCatalogOffering) {
         onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: null }, `benefits.offer.${card.offering_id}`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
@@ -1335,7 +1337,7 @@ export function MatrixAddonCard({
     const newPrice = { amount: cleanNum, currency: "MYR" };
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
-    } else if (card.offering_id) {
+    } else if (hasMatrixCatalogOffering) {
       onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: newPrice }, `benefits.offer.${card.offering_id}`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
@@ -1351,7 +1353,7 @@ export function MatrixAddonCard({
       flashSaved("price");
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
-      } else if (card.offering_id) {
+      } else if (hasMatrixCatalogOffering) {
         onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
@@ -1409,22 +1411,32 @@ export function MatrixAddonCard({
 
   const handleRemove = () => setConfirmRemoveAddonOpen(true);
 
+  const isBundleEffect = Boolean(card.is_bundle_effect || card.cost_status === "bundle_included");
   const serialStr = String(index + 1).padStart(2, "0");
 
   return (
     <article
-      className={`group flex items-start gap-3.5 rounded-[var(--rl-radius-sm)] border p-4 shadow-xs transition-all ${
-        isSelected
-          ? "border-emerald-300 bg-emerald-50/40 ring-1 ring-emerald-400/40"
-          : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
-      }`}
+      className={`group flex items-start gap-3.5 rounded-[var(--rl-radius-sm)] border p-4 shadow-xs transition-all ${isSelected
+        ? "border-emerald-300 bg-emerald-50/40 ring-1 ring-emerald-400/40"
+        : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
+        }`}
     >
-      {/* 1. Design 2 Checkbox (Click to toggle Selected / Ticked) */}
+      {/* 1. Design 2 Checkbox (Click to toggle Selected / Ticked; locked when managed by parent bundle) */}
       <button
         type="button"
-        onClick={() => onToggleSelect(!isSelected)}
-        className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md transition-transform hover:scale-105 cursor-pointer"
-        title={isSelected ? "Ticked on Quote (Click to untick)" : "Unticked (Click to tick and push to top #01)"}
+        disabled={isBundleEffect}
+        onClick={() => {
+          if (!isBundleEffect) onToggleSelect(!isSelected);
+        }}
+        className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md transition-transform ${isBundleEffect ? "cursor-default opacity-90" : "hover:scale-105 cursor-pointer"
+          }`}
+        title={
+          isBundleEffect
+            ? "Included automatically with active bundled benefit — remove or untick the parent bundle to restore Box 1 towing"
+            : isSelected
+              ? "Ticked on Quote (Click to untick)"
+              : "Unticked (Click to tick and push to top #01)"
+        }
       >
         {isSelected ? (
           <div className="flex size-7 items-center justify-center rounded-full bg-[#5ABA00] text-white shadow-xs">
@@ -1438,9 +1450,8 @@ export function MatrixAddonCard({
       {/* 2. Number + Asset Media */}
       <div className="flex items-center gap-2.5 shrink-0">
         <span
-          className={`flex h-8 min-w-8 px-1.5 items-center justify-center rounded font-mono text-[16px] font-bold ${
-            isSelected ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-600"
-          }`}
+          className={`flex h-8 min-w-8 px-1.5 items-center justify-center rounded font-mono text-[16px] font-bold ${isSelected ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-600"
+            }`}
         >
           #{serialStr}
         </span>
@@ -1563,11 +1574,10 @@ export function MatrixAddonCard({
                       `benefits.${selectionId}.plan_tier`
                     )
                   }
-                  className={`rounded px-2 py-0.5 text-[11px] font-bold transition-colors cursor-pointer border ${
-                    isActiveTier
-                      ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
-                      : "bg-white text-[var(--rl-text-strong)] border-[var(--rl-border)] hover:bg-neutral-100"
-                  }`}
+                  className={`rounded px-2 py-0.5 text-[11px] font-bold transition-colors cursor-pointer border ${isActiveTier
+                    ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
+                    : "bg-white text-[var(--rl-text-strong)] border-[var(--rl-border)] hover:bg-neutral-100"
+                    }`}
                 >
                   {tierOpt.label}
                 </button>
@@ -1638,71 +1648,70 @@ export function MatrixAddonCard({
                 className="text-[16px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-1 transition-colors cursor-pointer"
                 title="Set coverage amount"
               >
-                <PencilSimple size={14} />
-                <span>+ Coverage</span>
+                <Plus size={14} weight="bold" />
+                <span>Add coverage</span>
               </button>
             )}
           </div>
 
           {/* Premium Price (hidden for unlocked side-by-side bundle benefit cards — price lives only on parent bundle) */}
           {!(card.is_bundle_effect || card.cost_status === "bundle_included") && (
-          <div className="flex items-center gap-1.5 text-[16px]">
-            <span className="font-semibold text-[var(--rl-text-muted)]">Price:</span>
-            {isEditingPrice ? (
-              <div className="flex items-center gap-1.5">
-                <span className="text-[16px] font-bold text-[var(--rl-text-muted)]">RM</span>
-                <input
-                  type="number"
-                  step="any"
-                  value={priceInput}
-                  autoFocus
-                  placeholder="0.00"
-                  onChange={(e) => setPriceInput(e.target.value)}
-                  onBlur={() => handlePriceCommit(priceInput)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handlePriceCommit(priceInput);
-                    if (e.key === "Escape") { setIsEditingPrice(false); setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : ""); }
-                  }}
-                  className="h-8 w-24 rounded border border-[var(--rl-black)] px-2 font-mono text-[16px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
-                />
-              </div>
-            ) : (
-              <div className="group/price flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setIsEditingPrice(true)}
-                  className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-[16px] font-mono font-bold transition-colors ${
-                    isSelected
+            <div className="flex items-center gap-1.5 text-[16px]">
+              <span className="font-semibold text-[var(--rl-text-muted)]">Price:</span>
+              {isEditingPrice ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[16px] font-bold text-[var(--rl-text-muted)]">RM</span>
+                  <input
+                    type="number"
+                    step="any"
+                    value={priceInput}
+                    autoFocus
+                    placeholder="0.00"
+                    onChange={(e) => setPriceInput(e.target.value)}
+                    onBlur={() => handlePriceCommit(priceInput)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handlePriceCommit(priceInput);
+                      if (e.key === "Escape") { setIsEditingPrice(false); setPriceInput(currentPriceNum !== null ? String(currentPriceNum) : ""); }
+                    }}
+                    className="h-8 w-24 rounded border border-[var(--rl-black)] px-2 font-mono text-[16px] font-bold text-[var(--rl-text-strong)] focus:outline-none"
+                  />
+                </div>
+              ) : (
+                <div className="group/price flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingPrice(true)}
+                    className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-[16px] font-mono font-bold transition-colors ${isSelected
                       ? currentPriceNum !== null && currentPriceNum > 0
                         ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
                         : "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
                       : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-                  }`}
-                  title="Click to edit price (0 for FOC)"
-                >
-                  <span>
-                    {currentPriceNum !== null && currentPriceNum > 0
-                      ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : isSelected
-                      ? "FOC / Free"
-                      : "+ Set Price"}
-                  </span>
-                  <PencilSimple size={14} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-black)]" />
-                </button>
-                {hasPriceDiff && (
-                  <button
-                    type="button"
-                    onClick={handleRevertPrice}
-                    className="flex items-center gap-1 rounded bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 text-[14px] font-semibold text-gray-600 transition-colors"
-                    title={`Revert to initial catalog price (RM ${initialPriceNum})`}
+                      }`}
+                    title="Click to edit price (0 for FOC)"
                   >
-                    <ArrowCounterClockwise size={14} weight="bold" />
-                    <span>Revert</span>
+                    <span>
+                      {currentPriceNum !== null && currentPriceNum > 0
+                        ? `RM ${currentPriceNum.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : isSelected
+                          ? "FOC / Free"
+                          : "+ Set Price"}
+                    </span>
+                    <PencilSimple size={14} className="text-[var(--rl-text-muted)] group-hover/price:text-[var(--rl-black)]" />
                   </button>
-                )}
-              </div>
-            )}
-          </div>
+                  {hasPriceDiff && (
+                    <button
+                      type="button"
+                      onClick={handleRevertPrice}
+                      className="flex items-center gap-1 rounded bg-gray-100 hover:bg-gray-200 px-1.5 py-0.5 text-[14px] font-semibold text-gray-600 transition-colors"
+                      title={`Revert to initial catalog price (RM ${initialPriceNum})`}
+                    >
+                      <ArrowCounterClockwise size={14} weight="bold" />
+                      <span>Revert</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -1741,24 +1750,26 @@ export function MatrixAddonCard({
             className="text-[15px] text-[var(--rl-text-muted)] hover:text-[var(--rl-black)] flex items-center gap-1 transition-colors cursor-pointer"
             title="Add description"
           >
-            <PencilSimple size={14} />
-            <span>+ Description</span>
+            <Plus size={14} weight="bold" />
+            <span>Add description</span>
           </button>
         )}
       </div>
 
-      {/* 4. Action Button: Delete */}
-      <div className="flex items-center gap-1 shrink-0 self-start">
-        <button
-          type="button"
-          aria-label={`Remove ${card.label}`}
-          onClick={handleRemove}
-          className="rounded p-1.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
-          title="Remove add-on completely"
-        >
-          <X size={18} weight="bold" />
-        </button>
-      </div>
+      {/* 4. Action Button: Delete (hidden on bundle-included effects so parent bundle controls Box 1 restoration) */}
+      {!isBundleEffect && (
+        <div className="flex items-center gap-1 shrink-0 self-start">
+          <button
+            type="button"
+            aria-label={`Remove ${card.label}`}
+            onClick={handleRemove}
+            className="rounded p-1.5 text-[var(--rl-text-muted)] hover:bg-[var(--rl-red-light)] hover:text-[var(--rl-red)] transition-colors cursor-pointer"
+            title="Remove add-on completely"
+          >
+            <X size={18} weight="bold" />
+          </button>
+        </div>
+      )}
       <ConfirmDialog
         open={confirmRemoveAddonOpen}
         onOpenChange={setConfirmRemoveAddonOpen}

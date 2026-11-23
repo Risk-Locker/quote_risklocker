@@ -53,6 +53,8 @@ import {
 import { toBlob, toPng } from "html-to-image";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { DeepRedetectProgressBanner } from "@/components/redetect/DeepRedetectProgressBanner";
+import { useDeepRedetect } from "@/components/redetect/useDeepRedetect";
 import { Dialog } from "@/components/ui/dialog";
 import type {
   ComparisonEntry,
@@ -517,37 +519,40 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [splitModeByCompany, setSplitModeByCompany] = useState<Record<string, boolean>>({});
   const [expandedBreakdownId, setExpandedBreakdownId] = useState<Record<string, boolean>>({});
   const [rescanningQuoteId, setRescanningQuoteId] = useState<string | null>(null);
-  const [isRescanning, setIsRescanning] = useState(false);
   const [reranking, setReranking] = useState(false);
   const [showDetectionLogsModal, setShowDetectionLogsModal] = useState(false);
-  const [rescanElapsedSeconds, setRescanElapsedSeconds] = useState(0);
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isRescanning || rescanningQuoteId) {
-      setRescanElapsedSeconds(0);
-      interval = setInterval(() => {
-        setRescanElapsedSeconds((prev) => prev + 1);
-      }, 1000);
-    } else {
-      setRescanElapsedSeconds(0);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isRescanning, rescanningQuoteId]);
-
-  // Operational Hard-Timeout Safeguard (clears any stuck analyzing / ranking state after 60s)
-  useEffect(() => {
-    if (!isRescanning && !rescanningQuoteId && !reranking) return;
-    const safetyTimer = setTimeout(() => {
-      setIsRescanning(false);
+  const deepRedetect = useDeepRedetect({
+    onCompleted: async () => {
       setRescanningQuoteId(null);
+      await fetchComparison(true);
+      triggerStatus(
+        "success",
+        "Re-detect Complete",
+        "All quotations verified across logo, catalog, and mathematical checks."
+      );
+    },
+    onCancelled: () => {
+      setRescanningQuoteId(null);
+      triggerStatus("info", "Re-detect Cancelled", "Existing comparison values were left unchanged.");
+    },
+    onFailed: (msg) => {
+      setRescanningQuoteId(null);
+      triggerStatus("error", "Re-detect Failed", msg);
+    },
+  });
+  const isRescanning = deepRedetect.isRunning && !rescanningQuoteId;
+  const rescanElapsedSeconds = deepRedetect.elapsedSeconds;
+
+  // Operational Hard-Timeout Safeguard (clears stuck ranking state after 60s)
+  useEffect(() => {
+    if (!reranking) return;
+    const safetyTimer = setTimeout(() => {
       setReranking(false);
       setOperationStatus((prev) => (prev?.type === "loading" ? null : prev));
     }, 60000);
     return () => clearTimeout(safetyTimer);
-  }, [isRescanning, rescanningQuoteId, reranking]);
+  }, [reranking]);
 
   // 30-Second Real-Time Process Notification Toast
   const [operationStatus, setOperationStatus] = useState<{
@@ -565,8 +570,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     const timer = setTimeout(() => {
       setOperationStatus(null);
       if (operationStatus.type === "loading") {
-        setIsRescanning(false);
-        setRescanningQuoteId(null);
         setReranking(false);
       }
     }, timeoutMs);
@@ -934,28 +937,11 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
 
   const handleRescanQuotes = async () => {
     try {
-      setIsRescanning(true);
-      triggerStatus(
-        "loading",
-        "Rescanning Quotations",
-        "Analyzing chunk-aware text blocks, verifying JPJ road tax math, and detecting perils & schedule excess with 100% precision...",
-        "Processing"
-      );
-      const updated = await api<any>(`/comparison/${tenureId}/rescan`, {
-        method: "POST",
-        body: JSON.stringify({ deep: true }),
-      });
-      if (updated) setData(updated);
-      await fetchComparison(true);
-      triggerStatus(
-        "success",
-        "Rescan Complete",
-        "All quotations rescanned and verified against Malaysian underwriter schedules with zero hallucinations."
-      );
+      setRescanningQuoteId(null);
+      setOperationStatus(null);
+      await deepRedetect.startComparisonRedetect(tenureId);
     } catch (err: any) {
-      triggerStatus("error", "Rescan Failed", err.message || String(err));
-    } finally {
-      setIsRescanning(false);
+      triggerStatus("error", "Re-detect Failed", err.message || String(err));
     }
   };
 
@@ -1482,28 +1468,12 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         onViewPdf={(session) => setActivePdfSession(session)}
         onRescanQuote={async (quoteEntry) => {
           try {
+            setOperationStatus(null);
             setRescanningQuoteId(quoteEntry.id);
-            triggerStatus(
-              "loading",
-              `Re-Analyzing ${quoteEntry.company_name || "Quotation"}`,
-              "Verifying policy benefits, excess schedules, and pricing against underwriter catalog with zero hallucinations...",
-              "Analyzing"
-            );
-            const updated = await api<any>(`/comparison/${tenureId}/rescan`, {
-              method: "POST",
-              body: JSON.stringify({ session_id: quoteEntry.session_id || null, deep: true }),
-            });
-            if (updated) setData(updated);
-            await fetchComparison(true);
-            triggerStatus(
-              "success",
-              "Analysis Complete",
-              `Verified ${quoteEntry.company_name || "Quotation"} against underwriter catalog.`
-            );
+            await deepRedetect.startComparisonRedetect(tenureId, quoteEntry.session_id || null);
           } catch (err: any) {
-            triggerStatus("error", "Re-Analysis Failed", err.message || String(err));
-          } finally {
             setRescanningQuoteId(null);
+            triggerStatus("error", "Re-detect Failed", err.message || String(err));
           }
         }}
         onSelectWinner={handleSelectWinner}
@@ -1889,6 +1859,14 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </div>
           </div>
         )}
+
+        <DeepRedetectProgressBanner
+          job={deepRedetect.job}
+          elapsedSeconds={deepRedetect.elapsedSeconds}
+          cancelling={deepRedetect.cancelling}
+          onCancel={() => void deepRedetect.cancelRedetect()}
+          onDismiss={deepRedetect.dismissBanner}
+        />
 
         {/* 30-Second Real-Time Process Notification Toast */}
         {operationStatus && (
@@ -2283,12 +2261,13 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
               variant="secondary"
               size="sm"
               onClick={handleRescanQuotes}
-              loading={isRescanning}
-              icon={<ArrowsClockwise size={14} weight="bold" className={isRescanning ? "animate-spin text-[#ed1c24]" : "text-[#ed1c24]"} />}
+              loading={deepRedetect.isRunning}
+              disabled={deepRedetect.isRunning}
+              icon={<ArrowsClockwise size={14} weight="bold" className={deepRedetect.isRunning ? "animate-spin text-[#ed1c24]" : "text-[#ed1c24]"} />}
               className="border-[#e5e5ea] bg-white hover:border-[#1b1717] text-[#1b1717] font-semibold text-xs"
-              title="Re-extract and re-sync values from all uploaded quotation PDFs"
+              title="Run multi-pass visual logo & deep AI verification across all uploaded quotations"
             >
-              Re-Analyze All Quotes
+              {deepRedetect.isRunning ? "Re-detecting..." : "Re-detect"}
             </Button>
 
             <Button

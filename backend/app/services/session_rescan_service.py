@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from datetime import datetime, timezone
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, Literal
 
 from sqlalchemy import delete, select
@@ -16,22 +14,17 @@ from sqlalchemy.orm import Session as DbSession
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.workspace import qc_temp_directory
-from app.extraction.company_resolution import build_companies_payload, resolve_company
-from app.extraction.db_lookups import get_correction_memory, get_db_packs
-from app.extraction.entity_classifier import classify_client_entity
+from app.extraction.company_resolution import resolve_company
 from app.extraction.native_pdf import extract_native
 from app.extraction.sandbox import extract_with_limits
 from app.models.enums import AccountStatus, RecordStatus
 from app.models.tables import (
     AppSetting,
     Batch,
-    BenefitConcept,
-    CompanyAlias,
     DraftBenefitSelection,
     DraftSourceLineDecision,
     ExtractionBenefitLine,
     ExtractionRecord,
-    InsuranceCompany,
     QuotationDraft,
     Session as QuotationSession,
     UploadedFile,
@@ -79,7 +72,7 @@ def _apply_service_fee_if_included(
     if not inc_rf:
         fields["service_fee"] = {"value": "0.00", "status": "ready", "message": ""}
         return
-    if explicit_service_fee and str(explicit_service_fee).strip():
+    if explicit_service_fee and explicit_service_fee.strip():
         return
     from app.services.admin_service import get_runner_fee_default
 
@@ -103,8 +96,10 @@ def apply_gemini_result(
     db_benefit_concepts: list[dict],
     *,
     raw_text: str = "",
+    brand_verdict: dict[str, Any] | None = None,
 ) -> None:
     """Apply Gemini AI extraction results to draft, extraction record, tracked vehicle, and catalog."""
+    from app.domain.motor.discount_calculator import calculate_motor_discount, to_decimal_clean
     from app.extraction.draft_mapper import reconcile_vehicle_capacity_and_fees
     from app.models.tables import TrackedVehicle
 
@@ -119,8 +114,15 @@ def apply_gemini_result(
         "clean_vehicle_name",
         "capacity_unit",
         "powertrain",
+        "motor_discount_pct",
+        "motor_discount_amount",
+        "quotation_discount",
+        "effective_discount",
+        "net_motor_premium",
     }
     fields = dict(draft.fields or {})
+    preserved_pct = to_decimal_clean(fields.get("motor_discount_pct"), Decimal("0.00"))
+    preserved_flat = to_decimal_clean(fields.get("quotation_discount"), Decimal("0.00"))
     for key, val in gemini_res.items():
         if key in _SKIP_KEYS or val is None:
             continue
@@ -174,7 +176,7 @@ def apply_gemini_result(
             except Exception:
                 tot_num = None
 
-    evidence_text = raw_text or str(extraction.raw_text or "") or ""
+    evidence_text = raw_text or (extraction.raw_text or "")
     _entity_type, resolved_vtype, inc_rt, inc_rf = reconcile_vehicle_capacity_and_fees(
         fields,
         gemini_hints=gemini_res,
@@ -187,23 +189,27 @@ def apply_gemini_result(
         inc_rf=inc_rf,
     )
 
-    # Recompute quotation total_amount when fees are disabled vs enabled
+    # Recompute quotation total_amount when fees & active discounts are applied
     prem_str = str((fields.get("premium") or {}).get("value") or "").strip()
-    if tot_num is not None:
-        rt_dec = Decimal(str((fields.get("roadtax") or {}).get("value") or "0") or "0") if inc_rt else Decimal("0")
-        rf_dec = Decimal(str((fields.get("service_fee") or {}).get("value") or "0") or "0") if inc_rf else Decimal("0")
+    rt_dec = Decimal(str((fields.get("roadtax") or {}).get("value") or "0").replace(",", "") or "0") if inc_rt else Decimal("0")
+    rf_dec = Decimal(str((fields.get("service_fee") or {}).get("value") or "0").replace(",", "") or "0") if inc_rf else Decimal("0")
+    gross_motor_dec = to_decimal_clean(prem_str, Decimal("0.00"))
+    if gross_motor_dec <= Decimal("0.00") and tot_num is not None:
+        gross_motor_dec = tot_num
+        fields["premium"] = {"value": f"{gross_motor_dec:.2f}", "status": "ready", "message": ""}
+    if gross_motor_dec > Decimal("0.00"):
+        disc_bd = calculate_motor_discount(gross_motor_dec, preserved_pct, preserved_flat)
+        fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready", "message": ""}
+        fields["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready", "message": ""}
+        fields["quotation_discount"] = {"value": f"{disc_bd.flat_discount_amount:.2f}", "status": "ready", "message": ""}
+        fields["effective_discount"] = {"value": f"{disc_bd.effective_discount:.2f}", "status": "ready", "message": ""}
+        fields["net_motor_premium"] = {"value": f"{disc_bd.net_motor_premium:.2f}", "status": "ready", "message": ""}
+        fields["total_amount"] = {"value": f"{disc_bd.net_total_payable(rt_dec, rf_dec):.2f}", "status": "ready", "message": ""}
+    elif tot_num is not None:
         if inc_rt or inc_rf:
             fields["total_amount"] = {"value": f"{(tot_num + rt_dec + rf_dec):.2f}", "status": "ready", "message": ""}
         else:
             fields["total_amount"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
-    elif prem_str:
-        try:
-            prem_dec = Decimal(prem_str.replace(",", ""))
-            rt_dec = Decimal(str((fields.get("roadtax") or {}).get("value") or "0") or "0") if inc_rt else Decimal("0")
-            rf_dec = Decimal(str((fields.get("service_fee") or {}).get("value") or "0") or "0") if inc_rf else Decimal("0")
-            fields["total_amount"] = {"value": f"{(prem_dec + rt_dec + rf_dec):.2f}", "status": "ready", "message": ""}
-        except Exception:
-            pass
 
     start_d = str(gemini_res.get("cover_start_date") or "").strip()
     end_d = str(gemini_res.get("cover_end_date") or "").strip()
@@ -237,6 +243,13 @@ def apply_gemini_result(
     draft.status = RecordStatus.READY.value
 
     comp_name = str(gemini_res.get("insurance_company") or "").strip()
+    if (
+        brand_verdict
+        and brand_verdict.get("canonical_company")
+        and float(brand_verdict.get("confidence") or 0.0) >= 0.85
+        and "mmip" not in comp_name.lower()
+    ):
+        comp_name = str(brand_verdict["canonical_company"]).strip()
     resolved = resolve_company(comp_name, db_companies)
     if resolved["status"] == "matched":
         company = next((c for c in db_companies if c["company_id"] == resolved["company_id"]), None)
@@ -479,19 +492,28 @@ def rescan_session(
     draft_fields: dict[str, Any] = {}
     gemini_res: dict | None = None
     doc_text: str | None = None
+    brand_verdict: dict[str, Any] | None = None
 
-    # Pass 1: Native PDF extraction (run for 'auto', 'native', AND 'deep' so Gemini gets exact raw text)
-    if engine in ("auto", "native", "deep"):
-        with qc_temp_directory("rescan-") as directory:
-            source_path = (directory / "source.pdf").resolve()
-            source_path.write_bytes(source_bytes)
-            if engine == "deep":
-                try:
-                    native = extract_native(source_path)
-                    doc_text = native.raw_text
-                except Exception:
-                    doc_text = None
-            else:
+    if engine == "deep":
+        from app.extraction.deep_redetect_engine import run_deep_redetect_pipeline
+
+        deep_out = run_deep_redetect_pipeline(
+            pdf_bytes=source_bytes,
+            source_filename=target_uploaded.original_filename or "quotation.pdf",
+            current_fields=old_scalar_snapshot,
+            db_context=context,
+            prompt_override=prompt_override,
+            batch_item_index=abs(hash(target_session.id)) % 100,
+        )
+        gemini_res = deep_out.gemini_res
+        doc_text = deep_out.native_raw_text
+        brand_verdict = deep_out.brand_verdict
+    else:
+        # Pass 1: Native PDF extraction (run for 'auto' and 'native')
+        if engine in ("auto", "native"):
+            with qc_temp_directory("rescan-") as directory:
+                source_path = (directory / "source.pdf").resolve()
+                source_path.write_bytes(source_bytes)
                 native_result = extract_with_limits(
                     source_path,
                     enhanced_reading=target_uploaded.enhanced_reading,
@@ -519,43 +541,43 @@ def rescan_session(
                         logger.info("Rescan: Native extraction produced empty/cannot_read (%d fields); attempting Gemini AI fallback", meaningful_count)
                         run_ai = True
 
-    # Pass 2: Gemini Vision extraction BEFORE wiping or mutating existing draft
-    if run_ai:
-        from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
+        # Pass 2: Gemini Vision extraction BEFORE wiping or mutating existing draft
+        if run_ai:
+            from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
 
-        if doc_text is None:
+            if doc_text is None:
+                try:
+                    with qc_temp_directory("rescan-doc-") as td:
+                        temp_pdf = td / "doc.pdf"
+                        temp_pdf.write_bytes(source_bytes)
+                        native = extract_native(temp_pdf)
+                        doc_text = native.raw_text
+                except Exception:
+                    doc_text = None
+
             try:
-                with qc_temp_directory("rescan-doc-") as td:
-                    temp_pdf = td / "doc.pdf"
-                    temp_pdf.write_bytes(source_bytes)
-                    native = extract_native(temp_pdf)
-                    doc_text = native.raw_text
-            except Exception:
-                doc_text = None
+                gemini_res = extract_with_gemini_sync(
+                    source_bytes,
+                    document_text=doc_text,
+                    source_filename=target_uploaded.original_filename,
+                    db_companies=db_companies,
+                    db_benefit_concepts=db_benefit_concepts,
+                    db_packs=context.get("db_packs") or [],
+                    correction_memory=context.get("db_corrections") or [],
+                    prompt_override=prompt_override,
+                    batch_item_index=abs(hash(target_session.id)) % 100,
+                )
+            except AppError:
+                raise
+            except Exception as ai_exc:
+                raise AppError(f"Gemini AI extraction failed: {ai_exc}", 502) from ai_exc
 
-        try:
-            gemini_res = extract_with_gemini_sync(
-                source_bytes,
-                document_text=doc_text,
-                source_filename=target_uploaded.original_filename,
-                db_companies=db_companies,
-                db_benefit_concepts=db_benefit_concepts,
-                db_packs=context.get("db_packs") or [],
-                correction_memory=context.get("db_corrections") or [],
-                prompt_override=prompt_override,
-                batch_item_index=abs(hash(target_session.id)) % 100,
-            )
-        except AppError:
-            raise
-        except Exception as ai_exc:
-            raise AppError(f"Gemini AI extraction failed: {ai_exc}", 502) from ai_exc
-
-        if not gemini_res:
-            keys_pool = get_key_pool()
-            if not keys_pool.get_all_keys():
-                raise AppError("No GEMINI_API_KEY configured. Please check your environment.", 400)
-            err = keys_pool.get_last_error_message() or "AI extraction failed or returned an empty result."
-            raise AppError(f"Gemini AI extraction failed: {err}", 502)
+            if not gemini_res:
+                keys_pool = get_key_pool()
+                if not keys_pool.get_all_keys():
+                    raise AppError("No GEMINI_API_KEY configured. Please check your environment.", 400)
+                err = keys_pool.get_last_error_message() or "AI extraction failed or returned an empty result."
+                raise AppError(f"Gemini AI extraction failed: {err}", 502)
 
     # Atomic mutation phase: ONLY executed after extraction passes succeeded
     if mode == "in_place":
@@ -602,6 +624,7 @@ def rescan_session(
             db_companies=db_companies,
             db_benefit_concepts=db_benefit_concepts,
             raw_text=doc_text or "",
+            brand_verdict=brand_verdict,
         )
         engine_used = "deep" if engine == "deep" else "ai"
     else:
@@ -726,12 +749,13 @@ def rescan_session(
         if old_v != new_v:
             diff[k] = {"old": old_v, "new": new_v}
 
-    if getattr(target_session, "tenure_id", None):
+    tenure_id = getattr(target_session, "tenure_id", None)
+    if tenure_id:
         try:
             from app.services.marketing_comparison_service import rescan_comparison_tenure
-            rescan_comparison_tenure(db, target_session.tenure_id, deep=False)
+            rescan_comparison_tenure(db, tenure_id, deep=False)
         except Exception as sync_err:
-            logger.warning("Could not auto-sync comparison tenure %s: %s", target_session.tenure_id, sync_err)
+            logger.warning("Could not auto-sync comparison tenure %s: %s", tenure_id, sync_err)
 
     db.commit()
 

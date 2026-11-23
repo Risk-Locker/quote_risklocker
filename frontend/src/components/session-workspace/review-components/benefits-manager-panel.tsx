@@ -8,7 +8,6 @@ import {
   CaretDown,
   CaretUp,
   Check,
-  CheckCircle,
   Columns,
   Lightning,
   MagnifyingGlass,
@@ -16,7 +15,6 @@ import {
   Plus,
   Rows,
   ShieldCheck,
-  Sparkle,
   X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +24,8 @@ import { AddCustomBenefitModal } from "./add-custom-benefit-modal";
 
 export interface BenefitsManagerPanelProps {
   companyName?: string | null;
+  vehicleType?: string | null;
+  onClosePanel?: () => void;
   benefitsCollapsed: boolean;
   setBenefitsCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   benefitsViewMode: "defaults" | "addons" | "both";
@@ -64,6 +64,8 @@ export interface BenefitsManagerPanelProps {
 
 export function BenefitsManagerPanel({
   companyName,
+  vehicleType,
+  onClosePanel,
   benefitsCollapsed,
   setBenefitsCollapsed,
   currentCards,
@@ -144,7 +146,7 @@ export function BenefitsManagerPanel({
           { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "paid", is_extra: true, ...(defaultPrice ? { price: defaultPrice } : {}) },
           `benefits.${selectionId}.state`
         );
-      } else if (card.offering_id) {
+      } else if (card.offering_id && !String(card.offering_id).startsWith("custom:") && !String(card.offering_id).startsWith("pending:")) {
         onQueue(
           { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", is_extra: true, ...(defaultPrice ? { price: defaultPrice } : {}) },
           `benefits.offer.${card.offering_id}`
@@ -162,7 +164,7 @@ export function BenefitsManagerPanel({
           { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid", is_extra: false },
           `benefits.${selectionId}.state`
         );
-      } else if (card.offering_id) {
+      } else if (card.offering_id && !String(card.offering_id).startsWith("custom:") && !String(card.offering_id).startsWith("pending:")) {
         onQueue(
           { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", is_extra: false },
           `benefits.offer.${card.offering_id}`
@@ -184,55 +186,57 @@ export function BenefitsManagerPanel({
     description: string;
     icon_hint: string;
     isSelected: boolean;
+    cost_status?: "included" | "paid";
+    placement?: "foc" | "addon";
   }) => {
     addCustomBenefit(data);
   };
 
   return (
-    <div className="rl-tour-benefits grid gap-4 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-4 shadow-card transition-all">
+    <div className="rl-tour-benefits grid gap-3 rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] p-3 shadow-card transition-all">
       {/* Top Header & Global Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-bold text-[var(--rl-text-strong)]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">
             {companyName ? `${companyName} Benefits & Add-ons` : "Benefits & Add-ons"}
           </h2>
-          <p className="text-xs text-[var(--rl-text-muted)]">
-            Two-box management: Free Policy Inclusions (Top-Right) and Bottom Matrix Add-on Covers with real-time checkbox selection.
+          <p className="text-[11px] text-[var(--rl-text-muted)]">
+            Free Policy Inclusions (Box 1) and Matrix Add-on Covers (Box 2) synced live with Preview.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Layout Mode Selector (Side-by-Side vs Stacked) */}
-          <div className="flex items-center rounded-md border border-[var(--rl-border)] bg-gray-100 p-0.5 text-xs font-semibold">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Layout Mode Selector (Stacked vs Side-by-Side) */}
+          <div className="hidden 2xl:flex items-center rounded-md border border-[var(--rl-border)] bg-gray-100 p-0.5 text-[11px] font-semibold">
             <button
               type="button"
               onClick={() => setLayoutMode("stacked")}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded transition-colors ${
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer ${
                 layoutMode === "stacked"
                   ? "bg-white text-[var(--rl-text-strong)] shadow-2xs font-bold"
                   : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
               }`}
               title="Stacked View: Box 1 on top, Box 2 below"
             >
-              <Rows size={13} weight="bold" />
+              <Rows size={12} weight="bold" />
               <span>Stacked</span>
             </button>
             <button
               type="button"
               onClick={() => setLayoutMode("side_by_side")}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded transition-colors ${
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer ${
                 layoutMode === "side_by_side"
                   ? "bg-white text-[var(--rl-text-strong)] shadow-2xs font-bold"
                   : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
               }`}
-              title="Side-by-Side View: Box 1 (left) and Box 2 (right)"
+              title="Side-by-Side View: Box 1 and Box 2 in 2 columns"
             >
-              <Columns size={13} weight="bold" />
+              <Columns size={12} weight="bold" />
               <span>Side-by-Side</span>
             </button>
           </div>
 
-          {/* Unified Add Buttons (Single Source of Truth) */}
+          {/* Unified Add Buttons (Single Symbol Each) */}
           <Button
             size="sm"
             variant="primary"
@@ -241,15 +245,15 @@ export function BenefitsManagerPanel({
               setCustomModalPlacement("addon");
               setShowAddCustomModal(true);
             }}
-            className="text-xs font-bold bg-[var(--rl-red)] hover:bg-red-700 text-white shadow-xs"
+            className="text-xs font-bold bg-[var(--rl-red)] hover:bg-red-700 border-[var(--rl-red)] text-white shadow-xs"
             title="Add a custom benefit or add-on"
           >
-            + Add Custom Benefit
+            Add Custom Benefit
           </Button>
           <Button
             size="sm"
             variant="secondary"
-            icon={<Sparkle size={14} weight="bold" className="text-[var(--rl-red)]" />}
+            icon={<Plus size={14} weight="bold" />}
             onClick={() => {
               setModalTarget("available_addon");
               setShowGlobalModal(true);
@@ -257,14 +261,15 @@ export function BenefitsManagerPanel({
             className="text-xs"
             title="Browse global library of benefits and add-ons"
           >
-            + Global Library
+            Global Library
           </Button>
 
           <Button
             size="sm"
             variant="secondary"
-            icon={<ArrowCounterClockwise size={14} weight="bold" className="text-amber-600" />}
+            icon={<ArrowCounterClockwise size={13} weight="bold" className="text-amber-600" />}
             onClick={handleReset}
+            className="text-xs"
             title="Reset to initial insurance defaults and detections"
           >
             Reset
@@ -272,9 +277,10 @@ export function BenefitsManagerPanel({
           <Button
             size="sm"
             variant="secondary"
-            icon={<ArrowArcLeft size={14} weight="bold" />}
+            icon={<ArrowArcLeft size={13} weight="bold" />}
             onClick={handleUndo}
             disabled={undoStack.length === 0}
+            className="text-xs"
             title="Undo recent benefit change"
           >
             Undo
@@ -282,9 +288,10 @@ export function BenefitsManagerPanel({
           <Button
             size="sm"
             variant="secondary"
-            icon={<ArrowArcRight size={14} weight="bold" />}
+            icon={<ArrowArcRight size={13} weight="bold" />}
             onClick={handleRedo}
             disabled={redoStack.length === 0}
+            className="text-xs"
             title="Redo benefit change"
           >
             Redo
@@ -292,24 +299,35 @@ export function BenefitsManagerPanel({
           <button
             type="button"
             onClick={() => setBenefitsCollapsed((v) => !v)}
-            className="flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors cursor-pointer"
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold text-[var(--rl-text-muted)] hover:bg-gray-100 hover:text-[var(--rl-text-strong)] transition-colors cursor-pointer"
             title={benefitsCollapsed ? "Expand Benefits & Add-ons" : "Collapse Benefits & Add-ons"}
           >
-            {benefitsCollapsed ? <CaretDown size={14} weight="bold" /> : <CaretUp size={14} weight="bold" />}
+            {benefitsCollapsed ? <CaretDown size={13} weight="bold" /> : <CaretUp size={13} weight="bold" />}
             <span>{benefitsCollapsed ? "Expand" : "Collapse"}</span>
           </button>
+          {onClosePanel ? (
+            <button
+              type="button"
+              onClick={onClosePanel}
+              className="hidden lg:flex items-center justify-center p-1 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded border border-transparent hover:border-gray-200 transition-all cursor-pointer"
+              title="Close Benefit Edit Panel"
+              aria-label="Close Benefit Edit Panel"
+            >
+              <X size={14} weight="bold" />
+            </button>
+          ) : null}
         </div>
       </div>
 
       {/* Search and Quick Filters */}
       <div className="relative flex items-center">
-        <MagnifyingGlass size={16} className="absolute left-3 text-[var(--rl-text-muted)] pointer-events-none" />
+        <MagnifyingGlass size={15} className="absolute left-3 text-[var(--rl-text-muted)] pointer-events-none" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search benefits by name, description, or coverage limit (e.g. 'flood', 'towing', 'betterment', 'RM 5,000')..."
-          className="h-9 w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white pl-9 pr-24 text-xs text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] focus:border-[var(--rl-red)] focus:ring-1 focus:ring-[var(--rl-red)] focus:outline-none transition-all shadow-xs"
+          placeholder="Search benefits by name, description, or limit..."
+          className="h-8 w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white pl-8 pr-20 text-xs text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] focus:border-[var(--rl-red)] focus:ring-1 focus:ring-[var(--rl-red)] focus:outline-none transition-all shadow-2xs"
         />
         {searchQuery ? (
           <button
@@ -335,36 +353,47 @@ export function BenefitsManagerPanel({
           </span>
         </div>
       ) : (
-        <div className={layoutMode === "side_by_side" ? "grid grid-cols-1 xl:grid-cols-2 gap-4 items-start" : "grid gap-5"}>
+        <div className={layoutMode === "side_by_side" ? "grid grid-cols-1 2xl:grid-cols-2 gap-3.5 items-start" : "grid gap-3.5"}>
           {/* ========================================================================= */}
           {/* BOX 1: Default / FOC Benefits (Maps to Top-Right Card in Design 2)        */}
           {/* ========================================================================= */}
-          <section className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/70 p-4 flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-2.5">
-              <div className="flex items-center gap-2">
-                <div className="flex size-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-800">
-                  <ShieldCheck size={18} weight="fill" />
+          <section className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/70 p-3 flex flex-col gap-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="flex size-6 items-center justify-center rounded-md bg-emerald-100 text-emerald-800 shrink-0">
+                  <ShieldCheck size={15} weight="fill" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
-                    Box 1: Complimentary & Default Inclusions (Free Added Coverage)
+                    Box 1: Free Added Coverage
                   </h3>
                   <p className="text-[11px] text-[var(--rl-text-muted)]">
-                    Appears in Top-Right card of Design 2 quotation. No extra charge to customer.
+                    Top-Right card on Design 2. Complimentary inclusions.
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-xs font-bold text-emerald-800 font-mono">
-                  {filteredFocCards.length}{q ? ` / ${focCards.length}` : ""} standard covers (constant)
+              <div className="flex items-center gap-1.5">
+                <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-bold text-emerald-800 font-mono">
+                  {filteredFocCards.length}{q ? ` / ${focCards.length}` : ""} active
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomModalPlacement("foc");
+                    setShowAddCustomModal(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-white hover:bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 transition-colors cursor-pointer shadow-2xs"
+                  title="Add a custom complimentary benefit to Box 1"
+                >
+                  <Plus size={12} weight="bold" />
+                  <span>Add</span>
+                </button>
               </div>
             </div>
 
-            {/* Inclusions List - Spacious cards */}
-            <div className={`grid ${layoutMode === "side_by_side" ? "grid-cols-1 gap-3" : "grid-cols-1 xl:grid-cols-2 gap-3.5"} max-h-[780px] overflow-y-auto pr-1`}>
+            <div className="grid grid-cols-1 gap-2.5">
               {filteredFocCards.length === 0 ? (
-                <div className="col-span-full flex flex-col items-center justify-center p-6 text-center text-xs text-[var(--rl-text-muted)]">
+                <div className="col-span-full flex flex-col items-center justify-center p-5 text-center text-xs text-[var(--rl-text-muted)]">
                   {searchQuery ? (
                     <p>No free inclusions match &ldquo;{searchQuery}&rdquo;.</p>
                   ) : (
@@ -403,44 +432,56 @@ export function BenefitsManagerPanel({
           {/* ========================================================================= */}
           {/* BOX 2: Add-On Upgrades & Extra Benefits (Maps to Bottom Matrix in Design 2) */}
           {/* ========================================================================= */}
-          <section className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/70 p-4 flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-2.5">
-              <div className="flex items-center gap-2">
-                <div className="flex size-7 items-center justify-center rounded-lg bg-amber-100 text-amber-800">
-                  <Lightning size={18} weight="fill" />
+          <section className="rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-gray-50/70 p-3 flex flex-col gap-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--rl-border)] pb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="flex size-6 items-center justify-center rounded-md bg-amber-100 text-amber-800 shrink-0">
+                  <Lightning size={15} weight="fill" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
-                    Box 2: Add-On Upgrades & Extra Benefits (Design 2 Bottom Matrix)
+                    Box 2: Add-On Upgrades
                   </h3>
                   <p className="text-[11px] text-[var(--rl-text-muted)]">
-                    Tick the checkbox to select an add-on. Selected items float to Slot #01, #02... and appear ticked on Design 2.
+                    Tick to select add-on. Selected items float to Slot #01.
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-xs font-bold text-emerald-800 font-mono">
-                  ✔ {filteredPurchasedAddons.length}{q ? ` / ${purchasedAddonCards.length}` : ""} Ticked on Quote
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="rounded-md bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[11px] font-bold text-emerald-800 font-mono">
+                  ✔ {filteredPurchasedAddons.length}{q ? ` / ${purchasedAddonCards.length}` : ""} Ticked
                 </span>
-                <span className="rounded-md bg-blue-50 border border-blue-200 px-2 py-0.5 text-xs font-bold text-blue-800 font-mono">
-                  {filteredAddonCards.length}{q ? ` / ${addonCards.length}` : ""} Optional Available
+                <span className="rounded-md bg-blue-50 border border-blue-200 px-2 py-0.5 text-[11px] font-bold text-blue-800 font-mono">
+                  {filteredAddonCards.length}{q ? ` / ${addonCards.length}` : ""} Optional
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomModalPlacement("addon");
+                    setShowAddCustomModal(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white hover:bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-900 transition-colors cursor-pointer shadow-2xs"
+                  title="Add a custom add-on to Box 2"
+                >
+                  <Plus size={12} weight="bold" />
+                  <span>Add</span>
+                </button>
               </div>
             </div>
 
             {/* Package Bundle Stack (if available) */}
             {workspace.packs && workspace.packs.length > 0 && (
-              <div className="grid gap-2.5 rounded-lg border border-red-200/90 bg-red-50/30 p-3">
+              <div className="grid gap-2 rounded-lg border border-red-200/90 bg-red-50/30 p-2.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
-                    <PackageIcon size={16} weight="fill" className="text-[var(--rl-red)]" />
+                    <PackageIcon size={15} weight="fill" className="text-[var(--rl-red)]" />
                     <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--rl-text-strong)]">
-                      Add-on Bundle Packages ({workspace.packs.length} available)
+                      Add-on Bundle Packages ({workspace.packs.length})
                     </h4>
                   </div>
-                  <span className="text-[10px] font-bold text-[var(--rl-red)] bg-red-100 border border-red-200 px-2 py-0.5 rounded">
-                    Bundle Tier Selector
+                  <span className="text-[10px] font-bold text-[var(--rl-red)] bg-red-100 border border-red-200 px-1.5 py-0.5 rounded">
+                    Bundle Tier
                   </span>
                 </div>
                 {workspace.packs.map((pack) => {
@@ -452,11 +493,11 @@ export function BenefitsManagerPanel({
                   return (
                     <div
                       key={pack.package_id}
-                      className="rounded-md border border-neutral-200 bg-white p-3 shadow-xs flex flex-wrap items-center justify-between gap-3"
+                      className="rounded-md border border-neutral-200 bg-white p-2.5 shadow-xs flex flex-wrap items-center justify-between gap-2.5"
                     >
                       <div className="flex items-center gap-2">
                         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--rl-red-light)] text-[var(--rl-red)]">
-                          <PackageIcon size={16} weight="bold" />
+                          <PackageIcon size={15} weight="bold" />
                         </div>
                         <div>
                           <div className="flex items-center gap-1.5">
@@ -475,7 +516,7 @@ export function BenefitsManagerPanel({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <div className="flex flex-wrap items-center p-0.5 rounded-md border border-[var(--rl-border)] bg-gray-100 gap-1">
                           {pack.plans.map((plan) => {
                             const isSelected = plan.plan_id === selectedPlanId;
@@ -486,7 +527,7 @@ export function BenefitsManagerPanel({
                                 onClick={() =>
                                   setPackPlanSelections((prev) => ({ ...prev, [pack.package_id]: plan.plan_id }))
                                 }
-                                className={`px-2.5 py-1 text-xs font-semibold rounded cursor-pointer transition-all ${
+                                className={`px-2 py-0.5 text-xs font-semibold rounded cursor-pointer transition-all ${
                                   isSelected
                                     ? "bg-white text-[var(--rl-text-strong)] shadow-xs font-bold"
                                     : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
@@ -501,7 +542,7 @@ export function BenefitsManagerPanel({
                           size="sm"
                           onClick={() => addPack(pack, selectedPlanId)}
                           disabled={!selectedPlanId}
-                          className="text-xs font-bold h-7 px-3 bg-[var(--rl-red)] hover:bg-red-700 text-white shadow-xs"
+                          className="text-xs font-bold h-7 px-2.5 bg-[var(--rl-red)] hover:bg-red-700 text-white shadow-xs"
                         >
                           {activeGroup ? "Switch Tier" : "Apply Bundle"}
                         </Button>
@@ -509,7 +550,7 @@ export function BenefitsManagerPanel({
                           <button
                             type="button"
                             onClick={() => removePack(activeGroup.plan_id)}
-                            className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-[var(--rl-red)] hover:bg-red-100 transition-colors"
+                            className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-bold text-[var(--rl-red)] hover:bg-red-100 transition-colors cursor-pointer"
                           >
                             Remove
                           </button>
@@ -522,9 +563,9 @@ export function BenefitsManagerPanel({
             )}
 
             {/* Matrix Addons Grid - Both Selected (Floated to Top) and Optional */}
-            <div className={`grid ${layoutMode === "side_by_side" ? "grid-cols-1 gap-3" : "grid-cols-1 xl:grid-cols-2 gap-3.5"} max-h-[780px] overflow-y-auto pr-1`}>
+            <div className="grid grid-cols-1 gap-2.5">
               {filteredPurchasedAddons.length === 0 && filteredAddonCards.length === 0 ? (
-                <div className="col-span-full flex flex-col items-center justify-center p-8 text-center text-xs text-[var(--rl-text-muted)]">
+                <div className="col-span-full flex flex-col items-center justify-center p-6 text-center text-xs text-[var(--rl-text-muted)]">
                   {searchQuery ? (
                     <p>No add-on covers match &ldquo;{searchQuery}&rdquo;.</p>
                   ) : (
@@ -534,13 +575,14 @@ export function BenefitsManagerPanel({
                         <Button
                           size="sm"
                           variant="primary"
+                          icon={<Plus size={14} weight="bold" />}
                           onClick={() => {
                             setCustomModalPlacement("addon");
                             setShowAddCustomModal(true);
                           }}
-                          className="text-xs bg-[var(--rl-red)] text-white font-bold"
+                          className="text-xs bg-[var(--rl-red)] border-[var(--rl-red)] text-white font-bold"
                         >
-                          + Add Custom Add-on
+                          Add Custom Add-on
                         </Button>
                         <Button
                           size="sm"
@@ -551,7 +593,7 @@ export function BenefitsManagerPanel({
                           }}
                           className="text-xs"
                         >
-                          Browse Global Library
+                          Global Library
                         </Button>
                       </div>
                     </>
@@ -612,6 +654,8 @@ export function BenefitsManagerPanel({
       <AddCustomBenefitModal
         open={showAddCustomModal}
         initialPlacement={customModalPlacement}
+        companyName={companyName}
+        vehicleType={vehicleType}
         onClose={() => setShowAddCustomModal(false)}
         onAdd={handleAddCustomSubmit}
       />

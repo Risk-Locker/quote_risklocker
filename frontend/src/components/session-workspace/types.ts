@@ -28,6 +28,9 @@ export type BenefitCardSummary = {
   group_id?: string | null;
   sort_order?: number;
   typed_value?: Record<string, unknown> | null;
+  hide_coverage?: boolean;
+  has_manual_value_override?: boolean;
+  is_extra?: boolean;
   price?: { amount?: number | string; currency?: string } | null;
   optional_price?: { amount?: number | string; currency?: string } | null;
   initial_price?: { amount?: number | string; currency?: string } | null;
@@ -35,6 +38,7 @@ export type BenefitCardSummary = {
   detected_limit?: string | number | null;
   icon_hint?: string | null;
   is_bundle?: boolean;
+  has_plan_tiers?: boolean;
   is_bundle_effect?: boolean;
   bundle_id?: string | null;
   bundle_name?: string | null;
@@ -75,8 +79,17 @@ export type WorkspaceSnapshot = {
   uploaded_file_id: string;
   revision: number;
   status: string;
+  tenure_id?: string | null;
   document_type?: "quotation" | "covernote" | string;
   is_test?: boolean;
+  discount_summary?: {
+    motor_discount_pct: string;
+    pct_discount_amount: string;
+    flat_discount_amount: string;
+    effective_discount: string;
+    gross_motor_premium: string;
+    net_motor_premium: string;
+  };
   created_by?: string | null;
   created_by_email?: string | null;
   created_at?: string | null;

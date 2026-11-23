@@ -217,6 +217,10 @@ def _normalize_edited_value(field_name: str, raw) -> str | None:
         if not text or text.count(".") > 1:
             raise AppError("Enter NCD as a percentage number, for example 25.", 422)
         return text
+    if field_name == "motor_discount_pct":
+        from app.domain.motor.discount_calculator import clamp_discount_pct
+
+        return f"{clamp_discount_pct(raw):.2f}"
     if field_name == "valuation_type":
         return normalize_valuation_type(str(raw))
     return str(raw)
@@ -286,9 +290,11 @@ def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft 
     pct_val = _extract_decimal_field(fields, "motor_discount_pct") or Decimal("0.00")
     flat_val = _extract_decimal_field(fields, "quotation_discount") or Decimal("0.00")
     disc_bd = calculate_motor_discount(base_prem, pct_val, flat_val)
-    if disc_bd.effective_discount > Decimal("0.00"):
-        fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready", "message": ""}
-        fields["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready", "message": ""}
+    fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready", "message": ""}
+    fields["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready", "message": ""}
+    fields["quotation_discount"] = {"value": f"{disc_bd.flat_discount_amount:.2f}", "status": "ready", "message": ""}
+    fields["effective_discount"] = {"value": f"{disc_bd.effective_discount:.2f}", "status": "ready", "message": ""}
+    fields["net_motor_premium"] = {"value": f"{disc_bd.net_motor_premium:.2f}", "status": "ready", "message": ""}
     total = disc_bd.net_total_payable(rt_val, sf_val)
     fields["total_amount"] = {"value": f"{total:.2f}", "status": "ready", "message": ""}
     decisions["total_amount"] = {
@@ -561,14 +567,40 @@ def _safe_package_plan_id(db, plan_id: str | None) -> str | None:
 
 
 
+def _validate_benefit_typed_value(raw_typed: Any) -> dict[str, Any] | None:
+    if raw_typed is None:
+        return None
+    candidate = dict(raw_typed) if isinstance(raw_typed, dict) else raw_typed
+    if isinstance(candidate, dict) and candidate.get("type") == "custom" and not str(candidate.get("display_text") or "").strip():
+        candidate["type"] = "text"
+    validated = BenefitValue.model_validate(candidate).model_dump(mode="json", exclude_none=True)
+    if isinstance(raw_typed, dict):
+        if "display_text" in raw_typed and raw_typed.get("display_text") == "":
+            validated["display_text"] = ""
+        if "hide_limit" in raw_typed and raw_typed.get("hide_limit") is not None:
+            validated["hide_limit"] = bool(raw_typed.get("hide_limit"))
+    return validated
+
+
 def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> tuple[str, DraftBenefitSelection]:
     key = _validate_selection_key(operation.get("selection_key"))
     label = str(operation.get("label") or "").strip()
     if not label or len(label) > 255:
         raise AppError("Custom benefits require a label of at most 255 characters.", 422)
+    has_desc = "description" in operation or "description_override" in operation
+    raw_desc = operation.get("description") if "description" in operation else operation.get("description_override")
+    clean_desc = str(raw_desc or "").strip()[:1000] if has_desc else ""
+    raw_icon = operation.get("icon_hint")
+    clean_icon = str(raw_icon or "").strip()[:80]
     try:
-        raw_typed = operation.get("typed_value")
-        typed_value = BenefitValue.model_validate(raw_typed).model_dump(mode="json", exclude_none=True) if raw_typed else None
+        typed_value = _validate_benefit_typed_value(operation.get("typed_value"))
+        if typed_value is None and (clean_desc or clean_icon):
+            typed_value = {"type": "text", "display_text": ""}
+        if typed_value is not None:
+            if clean_desc:
+                typed_value["description"] = clean_desc
+            if clean_icon:
+                typed_value["icon_hint"] = clean_icon
         state = ReviewedBenefitState(str(operation.get("state") or "current")).value
         cost_status = normalize_cost_status(operation.get("cost_status"), default=CostStatus.UNKNOWN).value
     except (ValidationError, ValueError) as exc:
@@ -583,6 +615,7 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         raise AppError("A new custom benefit must be current or an available add-on.", 422)
 
     source_line_id = _safe_source_line_id(db, operation.get("source_line_id"))
+    explicit_concept = bool(operation.get("concept_id") or operation.get("concept_key"))
     concept_id = operation.get("concept_id")
     if not concept_id and operation.get("concept_key"):
         matched_concept = db.scalar(select(BenefitConcept).where(BenefitConcept.concept_key == operation.get("concept_key")))
@@ -593,6 +626,21 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         if matched_concept:
             concept_id = matched_concept.id
     concept_id = _safe_concept_id(db, concept_id)
+
+    if concept_id and state == ReviewedBenefitState.CURRENT.value:
+        conflicts = [
+            item
+            for item in _draft_selections_with_pending(db, draft.id)
+            if item.selection_key != key
+            and item.concept_id == concept_id
+            and item.state == ReviewedBenefitState.CURRENT.value
+        ]
+        if conflicts:
+            if explicit_concept:
+                for conflict in conflicts:
+                    conflict.state = ReviewedBenefitState.SUPERSEDED.value
+            else:
+                concept_id = None
 
     existing = _selection_by_key(db, draft.id, key)
     if existing:
@@ -661,30 +709,41 @@ def _resolve_selection(db, draft: QuotationDraft, selection_id: str) -> DraftBen
 
 
 
-def _reset_conditional_targets_for_trigger(db, draft: QuotationDraft, trigger_concept_id: str | None) -> None:
-    """Clear temporary overrides on target benefits when a trigger add-on or bundle changes plan."""
-    if not trigger_concept_id or not getattr(draft, "company_id", None):
+def _reset_conditional_targets_for_trigger(
+    db,
+    draft: QuotationDraft,
+    trigger_concept_id: str | None,
+    *,
+    trigger_selection: DraftBenefitSelection | None = None,
+) -> None:
+    """Clear temporary overrides on target benefits when a trigger add-on or bundle changes plan or is removed."""
+    if (not trigger_concept_id and trigger_selection is None) or not getattr(draft, "company_id", None):
         return
     target_ids: set[str] = set()
+    if trigger_concept_id:
+        try:
+            conds = list(
+                db.scalars(
+                    select(CompanyBenefitCondition).where(
+                        CompanyBenefitCondition.company_id == draft.company_id,
+                        CompanyBenefitCondition.trigger_concept_id == trigger_concept_id,
+                        CompanyBenefitCondition.is_active.is_(True),
+                    )
+                ).all()
+            )
+            target_ids.update(str(c.target_concept_id) for c in conds if getattr(c, "target_concept_id", None))
+        except Exception:
+            pass
     try:
-        conds = list(
-            db.scalars(
-                select(CompanyBenefitCondition).where(
-                    CompanyBenefitCondition.company_id == draft.company_id,
-                    CompanyBenefitCondition.trigger_concept_id == trigger_concept_id,
-                    CompanyBenefitCondition.is_active.is_(True),
-                )
-            ).all()
-        )
-        target_ids.update(str(c.target_concept_id) for c in conds if getattr(c, "target_concept_id", None))
-    except Exception:
-        pass
-    try:
+        from app.services.bundle_plan_matcher import match_bundle_for_selection
         from app.services.company_benefit_bundle_service import load_active_company_bundles
 
         for b in load_active_company_bundles(db, draft.company_id):
             trig_set = {str(b.primary_concept_id)} | {str(x) for x in (b.trigger_concept_ids or []) if x}
-            if str(trigger_concept_id) in trig_set:
+            is_match = bool(trigger_concept_id and str(trigger_concept_id) in trig_set)
+            if not is_match and trigger_selection is not None:
+                is_match = match_bundle_for_selection(trigger_selection, None, None, [b]) is b
+            if is_match:
                 for t in list(getattr(b, "tiers", None) or []):
                     for eff in list(getattr(t, "effects", None) or []):
                         if getattr(eff, "target_concept_id", None):
@@ -700,8 +759,19 @@ def _reset_conditional_targets_for_trigger(db, draft: QuotationDraft, trigger_co
                 continue
             sel.label_override = None
             sel.typed_value_override = None
+            if sel.cost_status == "bundle_included" or (sel.cost_status == CostStatus.PAID.value and not sel.price):
+                sel.cost_status = CostStatus.INCLUDED.value
             if sel.state == ReviewedBenefitState.REMOVED.value and sel.catalog_offering_id:
                 sel.state = ReviewedBenefitState.CURRENT.value
+
+
+def _clear_bundle_tier_metadata(selection: DraftBenefitSelection) -> None:
+    """Clear selected bundle tier and uncertain review metadata when a bundle is unticked/removed."""
+    selection.bundle_tier_id = None
+    ev = dict(selection.evidence_snapshot or {}) if isinstance(selection.evidence_snapshot, dict) else {}
+    for k in ("bundle_id", "plan_tier", "plan_tier_uncertain", "needs_review_reason"):
+        ev.pop(k, None)
+    selection.evidence_snapshot = ev
 
 
 def _apply_bundle_tier_fields(
@@ -812,15 +882,10 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
     if has_typed_op:
         raw_op_typed = operation.get("typed_value") if "typed_value" in operation else operation.get("typed_value_override")
         if raw_op_typed is None:
-            typed_override = {"type": "custom", "display_text": "", "hide_limit": True}
+            typed_override = {"type": "text", "display_text": "", "hide_limit": True}
         else:
             try:
-                typed_override = BenefitValue.model_validate(raw_op_typed).model_dump(mode="json", exclude_none=True)
-                if isinstance(raw_op_typed, dict):
-                    if "display_text" in raw_op_typed and raw_op_typed.get("display_text") == "":
-                        typed_override["display_text"] = ""
-                    if "hide_limit" in raw_op_typed and raw_op_typed.get("hide_limit") is not None:
-                        typed_override["hide_limit"] = bool(raw_op_typed.get("hide_limit"))
+                typed_override = _validate_benefit_typed_value(raw_op_typed)
             except ValidationError as exc:
                 raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
 
@@ -872,7 +937,11 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             if "type" not in curr_typed:
                 curr_typed["type"] = "custom"
             selected.typed_value_override = curr_typed
-    tier_changed = _apply_bundle_tier_fields(db, draft, selected, operation, offering=offering)
+    if selected.state != ReviewedBenefitState.CURRENT.value:
+        _clear_bundle_tier_metadata(selected)
+        tier_changed = False
+    else:
+        tier_changed = _apply_bundle_tier_fields(db, draft, selected, operation, offering=offering)
     selected.selected_by = user.id
     if desired_state == ReviewedBenefitState.CURRENT.value and current and current[0].id != selected.id:
         current[0].state = ReviewedBenefitState.SUPERSEDED.value
@@ -880,7 +949,7 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
     elif desired_state == ReviewedBenefitState.REMOVED.value and current and current[0].id != selected.id:
         current[0].state = ReviewedBenefitState.REMOVED.value
     if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
-        _reset_conditional_targets_for_trigger(db, draft, selected.concept_id)
+        _reset_conditional_targets_for_trigger(db, draft, selected.concept_id, trigger_selection=selected)
     return f"benefits.{selected.id}"
 
 
@@ -932,37 +1001,50 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
         if clean_desc:
             curr_typed["description"] = clean_desc
             if "type" not in curr_typed:
-                curr_typed["type"] = "custom"
+                curr_typed["type"] = "text"
         else:
             curr_typed.pop("description", None)
+        selection.typed_value_override = curr_typed or None
+    if "icon_hint" in operation:
+        clean_icon = str(operation.get("icon_hint") or "").strip()[:80]
+        curr_typed = dict(selection.typed_value_override or {})
+        if clean_icon:
+            curr_typed["icon_hint"] = clean_icon
+            if "type" not in curr_typed:
+                curr_typed["type"] = "text"
+        else:
+            curr_typed.pop("icon_hint", None)
         selection.typed_value_override = curr_typed or None
     if "typed_value" in operation or "typed_value_override" in operation:
         raw = operation.get("typed_value") if "typed_value" in operation else operation.get("typed_value_override")
         prev_typed = dict(selection.typed_value_override or {})
         if raw is None:
-            cleared: dict = {"type": "custom", "display_text": "", "hide_limit": True}
+            cleared: dict = {"type": "text", "display_text": "", "hide_limit": True}
             if "description" in prev_typed:
                 cleared["description"] = prev_typed["description"]
+            if "icon_hint" in prev_typed:
+                cleared["icon_hint"] = prev_typed["icon_hint"]
             selection.typed_value_override = cleared
         else:
             try:
-                validated = BenefitValue.model_validate(raw).model_dump(mode="json", exclude_none=True)
-                if isinstance(raw, dict):
-                    if "display_text" in raw and raw.get("display_text") == "":
-                        validated["display_text"] = ""
-                    if "hide_limit" in raw and raw.get("hide_limit") is not None:
-                        validated["hide_limit"] = bool(raw.get("hide_limit"))
+                validated = _validate_benefit_typed_value(raw) or {}
                 if "description" in prev_typed and "description" not in validated:
                     validated["description"] = prev_typed["description"]
+                if "icon_hint" in prev_typed and "icon_hint" not in validated:
+                    validated["icon_hint"] = prev_typed["icon_hint"]
                 if "display_text" in prev_typed and "display_text" not in validated and not (isinstance(raw, dict) and "display_text" in raw):
                     validated["display_text"] = prev_typed["display_text"]
                 selection.typed_value_override = validated
             except ValidationError as exc:
                 raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
-    tier_changed = _apply_bundle_tier_fields(db, draft, selection, operation)
+    if selection.state != ReviewedBenefitState.CURRENT.value:
+        _clear_bundle_tier_metadata(selection)
+        tier_changed = False
+    else:
+        tier_changed = _apply_bundle_tier_fields(db, draft, selection, operation)
     selection.selected_by = user.id
     if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
-        _reset_conditional_targets_for_trigger(db, draft, selection.concept_id)
+        _reset_conditional_targets_for_trigger(db, draft, selection.concept_id, trigger_selection=selection)
     return f"benefits.{selection.id}"
 
 
@@ -1479,7 +1561,8 @@ def apply_workspace_patch(
                     "roadtax", "service_fee", "customer_name", "insured_name", "policyholder_name",
                     "ic_or_brn", "ic_no", "nric_no", "vehicle_no", "car_model", "vehicle_model",
                     "car_brand", "make", "engine_cc", "vehicle_year", "vehicle_type", "powertrain",
-                    "chassis_no", "engine_no", "include_road_tax", "include_runner_fee"
+                    "chassis_no", "engine_no", "include_road_tax", "include_runner_fee",
+                    "motor_discount_pct", "quotation_discount",
                 )
                 if any(any(k in p for k in identity_keys) for p in changed_paths) or "include_road_tax" in (draft.display_options or {}) or "include_runner_fee" in (draft.display_options or {}):
                     def _get_v(field_k: str) -> Any:
@@ -1490,6 +1573,19 @@ def apply_workspace_patch(
                     val_rt = float(str(raw_rt).replace(",", "")) if (raw_rt is not None and str(raw_rt).strip() != "") else tenure.road_tax
                     raw_sf = _get_v("service_fee")
                     val_sf = float(str(raw_sf).replace(",", "")) if (raw_sf is not None and str(raw_sf).strip() != "") else tenure.runner_fee
+
+                    raw_disc_pct = _get_v("motor_discount_pct")
+                    val_disc_pct = (
+                        float(str(raw_disc_pct).replace(",", ""))
+                        if (any("motor_discount_pct" in p for p in changed_paths) and raw_disc_pct is not None and str(raw_disc_pct).strip() != "")
+                        else None
+                    )
+                    raw_flat_disc = _get_v("quotation_discount")
+                    val_flat_disc = (
+                        float(str(raw_flat_disc).replace(",", ""))
+                        if (any("quotation_discount" in p for p in changed_paths) and raw_flat_disc is not None and str(raw_flat_disc).strip() != "")
+                        else None
+                    )
 
                     raw_inc_rt = _get_v("include_road_tax")
                     if raw_inc_rt is None and draft.display_options:
@@ -1533,6 +1629,8 @@ def apply_workspace_patch(
                         runner_fee=val_sf,
                         include_road_tax=inc_rt,
                         include_runner_fee=inc_rf,
+                        motor_discount_pct=val_disc_pct,
+                        quotation_discount=val_flat_disc,
                     )
 
                 # Sync comparison entries under this tenure (Invariant 2: Two-way quotation sync)
