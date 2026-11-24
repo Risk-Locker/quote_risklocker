@@ -154,7 +154,7 @@ export function useReviewCatalogAndTemplate({
   const design2CardCount = useMemo(() => {
     if (!isDesign2) return 0;
     const compName = String((workspace?.fields?.insurance_company as any)?.value || workspace?.pinned_names?.company_name || workspace?.hierarchy?.company_name || "");
-    return buildUnifiedMatrixCards(currentCards, addonCards, undefined, 24, 24, compName).length;
+    return buildUnifiedMatrixCards(currentCards, addonCards, undefined, 0, 24, compName).length;
   }, [isDesign2, currentCards, addonCards, workspace?.fields, workspace?.pinned_names?.company_name, workspace?.hierarchy?.company_name]);
 
   const balancedElements = useMemo(() => {

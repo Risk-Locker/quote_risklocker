@@ -72,6 +72,7 @@ export interface BenefitsStepNavigatorProps {
 export function BenefitsStepNavigator({
   companies,
   selectedCompanyId,
+  selectedCompany,
   companyWorkspace,
   loadCompany,
   profiles,
@@ -357,131 +358,146 @@ export function BenefitsStepNavigator({
       ) : (
         <>
           {/* Row 2: Segment + Engine Type + Vehicle Type + Coverage */}
-          <div className="flex flex-wrap items-center gap-4 border-t border-[var(--rl-border)] pt-3 text-xs">
-            {/* Step 2: Segment */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                  2. Segment:
-                </span>
-                <Tooltip content="Choose private vs commercial vehicle policy scope">
-                  <Info size={11} className="text-[var(--rl-text-muted)]" />
-                </Tooltip>
-              </div>
-              <div className="flex gap-1">
-                {segments.map((seg) => {
-                  const active = seg.id === selectedSegmentId;
-                  return (
-                    <button
-                      key={seg.id}
-                      onClick={() => setSelectedSegmentId(seg.id)}
-                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
-                        active
-                          ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
-                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                      }`}
-                    >
-                      {seg.key === "private" ? "Private" : "Company / Commercial"}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+          {(() => {
+            const activeCompany = selectedCompany || companyWorkspace?.company || null;
+            const isMmip = Boolean(
+              activeCompany &&
+                (((activeCompany as any).slug || "").toLowerCase() === "mmip" ||
+                  activeCompany.name.trim().toLowerCase() === "mmip")
+            );
+            const activeSegment = segments.find((s) => s.id === selectedSegmentId);
+            const isPrivateSegment = !activeSegment || activeSegment.key === "private";
+            const visibleVehicles = isPrivateSegment
+              ? vehicles.filter((v) => v.key !== "lorry" && !v.name.toLowerCase().includes("lorry"))
+              : vehicles;
+            const coverageOptions = isMmip
+              ? [{ id: "tpo", label: "Third Party" }]
+              : [
+                  { id: "comprehensive", label: "Comprehensive" },
+                  { id: "tpft", label: "Third Party, Fire & Theft" },
+                ];
 
-            <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
-
-            {/* Step 3: Engine Type */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                  3. Engine:
-                </span>
-                <Tooltip content="Filter policy products for petrol or electric vehicles (EV)">
-                  <Info size={11} className="text-[var(--rl-text-muted)]" />
-                </Tooltip>
-              </div>
-              <div className="flex gap-1">
-                {(["ice", "ev"] as const).map((eng) => {
-                  const active = selectedEngineType === eng;
-                  return (
-                    <button
-                      key={eng}
-                      onClick={() => setSelectedEngineType(eng)}
-                      className={`flex items-center gap-1 rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
-                        active
-                          ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
-                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                      }`}
-                    >
-                      {eng === "ev" && <Lightning size={12} weight="fill" className="text-amber-500" />}
-                      <span>{eng === "ice" ? "Petrol" : "EV (Electric)"}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
-
-            {/* Step 4: Vehicle Type */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                4. Vehicle type:
-              </span>
-              <div className="flex gap-1">
-                {vehicles.map((v) => {
-                  const active = v.id === selectedVehicleId;
-                  return (
-                    <button
-                      key={v.id}
-                      onClick={() => setSelectedVehicleId(v.id)}
-                      className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
-                        active
-                          ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
-                          : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                      }`}
-                    >
-                      {v.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
-
-            {/* Step 5: Coverage Type */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
-                5. Coverage:
-              </span>
-              <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
-                {[
-                  { id: "comprehensive", label: "Comprehensive", hint: "(Third Party available)" },
-                  { id: "tpft", label: "Third Party, Fire & Theft", hint: "" },
-                  { id: "tpo", label: "Third Party", hint: "" },
-                ].map((cov) => {
-                  const active = builderCoverageFilter === cov.id;
-                  return (
-                    <button
-                      key={cov.id}
-                      onClick={() => builderCoverageFilter !== cov.id && setBuilderCoverageFilter(cov.id as any)}
-                      className={`flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] px-2.5 py-1 transition-all ${
-                        active
-                          ? "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-sm"
-                          : "border border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                      }`}
-                    >
-                      <span>{cov.label}</span>
-                      {cov.hint && (
-                        <span className="text-[11px] font-normal text-[var(--rl-text-muted)]">
-                          {cov.hint}
+            return (
+              <div className="flex flex-wrap items-center gap-4 border-t border-[var(--rl-border)] pt-3 text-xs">
+                {!isMmip && (
+                  <>
+                    {/* Step 2: Segment */}
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                          2. Segment:
                         </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                        <Tooltip content="Choose private vs commercial vehicle policy scope">
+                          <Info size={11} className="text-[var(--rl-text-muted)]" />
+                        </Tooltip>
+                      </div>
+                      <div className="flex gap-1">
+                        {segments.map((seg) => {
+                          const active = seg.id === selectedSegmentId;
+                          return (
+                            <button
+                              key={seg.id}
+                              onClick={() => setSelectedSegmentId(seg.id)}
+                              className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
+                                active
+                                  ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
+                                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                              }`}
+                            >
+                              {seg.key === "private" ? "Private" : "Company / Commercial"}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
+
+                    {/* Step 3: Engine Type */}
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                          3. Engine:
+                        </span>
+                        <Tooltip content="Filter policy products for petrol or electric vehicles (EV)">
+                          <Info size={11} className="text-[var(--rl-text-muted)]" />
+                        </Tooltip>
+                      </div>
+                      <div className="flex gap-1">
+                        {(["ice", "ev"] as const).map((eng) => {
+                          const active = selectedEngineType === eng;
+                          return (
+                            <button
+                              key={eng}
+                              onClick={() => setSelectedEngineType(eng)}
+                              className={`flex items-center gap-1 rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
+                                active
+                                  ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
+                                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                              }`}
+                            >
+                              {eng === "ev" && <Lightning size={12} weight="fill" className="text-amber-500" />}
+                              <span>{eng === "ice" ? "Petrol" : "EV (Electric)"}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
+
+                    {/* Step 4: Vehicle Type */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                        4. Vehicle type:
+                      </span>
+                      <div className="flex gap-1">
+                        {visibleVehicles.map((v) => {
+                          const active = v.id === selectedVehicleId;
+                          return (
+                            <button
+                              key={v.id}
+                              onClick={() => setSelectedVehicleId(v.id)}
+                              className={`rounded-[var(--rl-radius-sm)] px-2.5 py-1 text-xs font-medium transition-all ${
+                                active
+                                  ? "bg-[var(--rl-surface)] text-[var(--rl-text-strong)] border border-[var(--rl-border)] shadow-sm font-semibold"
+                                  : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                              }`}
+                            >
+                              {v.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="hidden h-5 w-px bg-[var(--rl-border)] sm:block" />
+                  </>
+                )}
+
+                {/* Step 5: Coverage Type */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+                    {isMmip ? "2. Coverage:" : "5. Coverage:"}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+                    {coverageOptions.map((cov) => {
+                      const active = builderCoverageFilter === cov.id;
+                      return (
+                        <button
+                          key={cov.id}
+                          onClick={() => builderCoverageFilter !== cov.id && setBuilderCoverageFilter(cov.id as any)}
+                          className={`flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] px-2.5 py-1 transition-all ${
+                            active
+                              ? "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-sm"
+                              : "border border-transparent text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
+                          }`}
+                        >
+                          <span>{cov.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
               {builderCoverageFilter === "tpo" && (
                 <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-[var(--rl-border)] bg-amber-50/70 dark:bg-amber-950/20 px-2 py-0.5 rounded border border-amber-200">
@@ -508,8 +524,10 @@ export function BenefitsStepNavigator({
                   </Button>
                 </div>
               )}
-            </div>
-          </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Row 3: Product / Configuration Selection */}
           <div className="rl-tour-product flex flex-wrap items-center gap-2 border-t border-[var(--rl-border)] pt-3">

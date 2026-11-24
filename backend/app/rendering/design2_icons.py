@@ -40,11 +40,75 @@ def render_design2_icon_svg(icon_hint: str, size: int = 38) -> str:
     s = str(size)
     key = (icon_hint or "generic").strip().lower()
 
-    # Preserve legacy hint aliases cleanly
+    # Preserve legacy hint aliases AND allow direct concept_key lookup
     alias_map = {
         "passengers": "llop",
         "crane": "boom_damage",
         "all_driver": "all_drivers",
+        "own-damage": "own_damage",
+        "third-party-bi": "third_party_bi",
+        "third-party-bodily-injury": "third_party_bi",
+        "third-party-property": "third_party_property",
+        "third-party-property-damage": "third_party_property",
+        "legal-costs-defense": "legal_defense",
+        "legal-defense": "legal_defense",
+        "repair-workmanship-warranty": "repair_workmanship_warranty",
+        "agreed-value-market-value": "agreed_value",
+        "cashback-no-claim": "cashback_no_claim",
+        "increased-tppd": "increased_tppd",
+        "first-loss-flood": "first_loss_flood",
+        "car-detailing-cleanup": "car_detailing_cleanup",
+        "out-of-pocket-allowance": "out_of_pocket_allowance",
+        "cross-border": "cross_border",
+        "ferry-transit": "ferry_transit",
+        "child-car-seat": "child_car_seat",
+        "payd-telematics": "payd_telematics",
+        "natural-falling-objects": "natural_falling_objects",
+        "side-mirror-protection": "side_mirror_protection",
+        "document-replacement": "document_replacement",
+        "total-loss-theft-allowance": "total_loss_theft_allowance",
+        "flood-relief-allowance": "flood_relief_allowance",
+        "personal-belongings-theft": "personal_belongings_theft",
+        "legal-liability-to-pillion": "pillion",
+        "daily-hospital-income": "daily_hospital_income",
+        "double-indemnity": "double_indemnity",
+        "medical-expenses": "medical_expenses",
+        "permanent-disablement": "permanent_disablement",
+        "accidental-death": "pa",
+        "ev-charging-bodily-injury": "ev_charging_bodily_injury",
+        "ev-home-content-fire": "ev_home_content_fire",
+        "ev-battery-depletion-towing": "ev_towing",
+        "ev-home-charger-liability": "ev_liability",
+        "ev-wall-charger": "ev_charger",
+        "lonpac-ev-smart-pack": "lonpac_ev_smart_pack",
+        "attached-trailers": "attached_trailers",
+        "cargo-protection": "cargo_protection",
+        "commercial-driver-crew-pa": "commercial_driver_crew_pa",
+        "authorized-attendants": "non_fare_passenger",
+        "tool-of-trade": "third_party_working",
+        "private-car-365": "private_car_365",
+        "smart-driver-pa": "smart_driver_pa",
+        "motor-pa-plus": "motor_pa_plus",
+        "oto-360": "oto_360",
+        "driver-passenger-protector": "driver_passenger_protector",
+        "motorshield-bundle": "motorshield_bundle",
+        "sompo-motor-nhancer": "sompo_motor_nhancer",
+        "auto-buddy-malaysia": "auto_buddy_malaysia",
+        "motor-easy": "motor_easy",
+        "betterment-protection": "betterment",
+        "all-drivers": "all_drivers",
+        "special-perils": "special_perils",
+        "strike-riot-civil-commotion": "srcc",
+        "repaint-spray-paint": "respray",
+        "gas-conversion-kit": "gas_conversion",
+        "repair-allowance": "cart",
+        "vehicle-accessories": "accessories",
+        "ncd-relief": "ncd",
+        "key-replacement": "key_care",
+        "legal-liability-of-passengers": "llop",
+        "legal-liability-to-passengers": "llp",
+        "e-hailing-extension": "ehailing",
+        "boom-damage": "boom_damage",
     }
     key = alias_map.get(key, key)
 
@@ -308,6 +372,309 @@ def render_design2_icon_svg(icon_hint: str, size: int = 38) -> str:
             f'<circle cx="33.5" cy="21.5" r="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
             '</g>'
             f'<line x1="7" y1="36.5" x2="41" y2="36.5" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+        ),
+        # 25: Comprehensive Own Damage — sedan + red front impact burst
+        "own_damage": (
+            f'<path d="M8 27L12.5 19.5H27L31.5 25.5H37.5C39.2 25.5 40.5 26.8 40.5 28.5V33H7.5V28.2C7.5 27.6 7.7 27.2 8 27Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<path d="M14 21.2H25.5L29 25.5H12.2L14 21.2Z" fill="{_BLK}"/>'
+            f'<circle cx="14.5" cy="33.5" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<circle cx="33" cy="33.5" r="3.4" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3"/>'
+            f'<path d="M35.5 14.5L38 11.5M38.5 18L42.5 17M37 21.5L41.5 22.5" stroke="{_RED}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<circle cx="34.5" cy="18.2" r="2.2" fill="{_RED}"/>'
+        ),
+        # 26: Third Party Bodily Injury — shield + person + red medical cross
+        "third_party_bi": (
+            f'<path d="M22 9L34 13V23C34 30.5 28.8 36 22 38.5C15.2 36 10 30.5 10 23V13L22 9Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<circle cx="22" cy="18.5" r="3.3" fill="{_BLK}"/>'
+            f'<path d="M15.8 29C15.8 25.5 18.5 24 22 24C25.5 24 28.2 25.5 28.2 29" fill="none" stroke="{_BLK}" stroke-width="2.4" stroke-linecap="round"/>'
+            f'<circle cx="35.5" cy="32.5" r="7.5" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.5"/>'
+            f'<path d="M35.5 28.8V36.2M31.8 32.5H39.2" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>'
+        ),
+        # 27: Third Party Property Damage — car bumper + damaged property post/house + red spark
+        "third_party_property": (
+            f'<path d="M26 20L34 13.5L42 20V35H26V20Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3" stroke-linejoin="round"/>'
+            f'<rect x="31.5" y="25.5" width="5" height="9.5" fill="{_BLK}"/>'
+            f'<path d="M6 27L9.5 21.5H19L22.5 27V33.5H6V27Z" fill="{_BLK}"/>'
+            f'<circle cx="10.5" cy="34" r="2.6" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2"/>'
+            f'<circle cx="19" cy="34" r="2.6" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2"/>'
+            f'<path d="M22 18L24.5 14.5L26.5 18.5L30 16.5" fill="none" stroke="{_RED}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 28: Legal Defense Costs — gavel (#1D1D1B) + red soundblock
+        "legal_defense": (
+            f'<g transform="rotate(-35 22 20)">'
+            f'<rect x="13" y="13" width="16" height="8" rx="1.5" fill="{_BLK}"/>'
+            f'<line x1="21" y1="21" x2="21" y2="35" stroke="{_BLK}" stroke-width="3.2" stroke-linecap="round"/>'
+            '</g>'
+            f'<rect x="10" y="34" width="22" height="4.5" rx="1.5" fill="{_RED}"/>'
+            f'<line x1="7" y1="38.5" x2="35" y2="38.5" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+        ),
+        # 29: Panel Workmanship Warranty — gear/seal badge + wrench + red tick
+        "repair_workmanship_warranty": (
+            f'<circle cx="23" cy="23" r="13.5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<path d="M18.5 17.5A4.2 4.2 0 0 0 24 22.8L28.5 27.3A1.6 1.6 0 0 1 26.2 29.6L21.7 25.1A4.2 4.2 0 0 0 16.4 19.6L19 22.2L21.1 20.1L18.5 17.5Z" fill="{_BLK}"/>'
+            f'<circle cx="34.5" cy="34" r="7.5" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.5"/>'
+            f'<path d="M31.2 34L33.5 36.3L38 31.8" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 30: Agreed Value Settlement — price/contract tag + car + red checkmark lock
+        "agreed_value": (
+            f'<path d="M10 13H25L36 24L24 36L13 25V13Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<circle cx="17" cy="19" r="2.2" fill="{_BLK}"/>'
+            f'<circle cx="33.5" cy="31.5" r="7.5" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.5"/>'
+            f'<path d="M30 31.5L32.5 34L37.2 29" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 31: Non-Claim Cashback — circular cashback arrows + red banknote/coin
+        "cashback_no_claim": (
+            f'<path d="M11 21A13.5 13.5 0 0 1 36 16.5" fill="none" stroke="{_BLK}" stroke-width="2.5" stroke-linecap="round"/>'
+            f'<polyline points="32.5,11.5 36.5,17 31,18" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M37 27A13.5 13.5 0 0 1 12 31.5" fill="none" stroke="{_BLK}" stroke-width="2.5" stroke-linecap="round"/>'
+            f'<polyline points="15.5,36.5 11.5,31 17,30" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<circle cx="24" cy="24" r="6.8" fill="{_RED}"/>'
+            f'<text x="24" y="27.5" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" font-weight="900" fill="#FFFFFF">%</text>'
+        ),
+        # 32: Increased TPPD — shield with red upward boost arrow
+        "increased_tppd": (
+            f'<path d="M24 9L37 13.5V23.8C37 31.8 31.4 37.4 24 39.8C16.6 37.4 11 31.8 11 23.8V13.5L24 9Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5" stroke-linejoin="round"/>'
+            f'<path d="M24 31V17.5M18.5 22.5L24 17L29.5 22.5" stroke="{_RED}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<line x1="18.5" y1="33.5" x2="29.5" y2="33.5" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+        ),
+        # 33: First Loss Special Perils — umbrella over water waves + red cap bar
+        "first_loss_flood": (
+            f'<path d="M10 23A14 14 0 0 1 38 23Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<path d="M24 9V31C24 33 22.5 34.5 20.8 34.5" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<path d="M8 38Q12.5 35.2 17 38T26 38T35 38T41 38" fill="none" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<rect x="17" y="15.5" width="14" height="3.2" rx="1.4" fill="{_RED}"/>'
+        ),
+        # 34: Car Detailing & Cleaning — car cabin + red sparkle stars & droplets
+        "car_detailing_cleanup": (
+            f'<path d="M10 27L14.5 19.5H29L33.5 26H38.5C40 26 41 27 41 28.5V33.5H7.5V28.5C7.5 27.6 8.6 27 10 27Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<circle cx="14.5" cy="34" r="3.2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<circle cx="33.5" cy="34" r="3.2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<path d="M18 9L19.4 13L23.5 14.4L19.4 15.8L18 19.8L16.6 15.8L12.5 14.4L16.6 13Z" fill="{_RED}"/>'
+            f'<path d="M33 10L34 12.6L36.6 13.6L34 14.6L33 17.2L32 14.6L29.4 13.6L32 12.6Z" fill="{_RED}"/>'
+        ),
+        # 35: Out of Pocket Allowance — wallet (#1D1D1B) with red protruding coin
+        "out_of_pocket_allowance": (
+            f'<rect x="8" y="15" width="28" height="21" rx="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<path d="M11 15L29 10L32 15" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linejoin="round"/>'
+            f'<rect x="27" y="22.5" width="11" height="6.5" rx="1.8" fill="{_BLK}"/>'
+            f'<circle cx="30.5" cy="25.8" r="1.4" fill="#FFFFFF"/>'
+            f'<circle cx="18" cy="25.5" r="5.5" fill="{_RED}"/>'
+            f'<text x="18" y="28.6" text-anchor="middle" font-family="Arial,sans-serif" font-size="8.5" font-weight="900" fill="#FFFFFF">$</text>'
+        ),
+        # 36: Cross-Border Extension — globe (#1D1D1B) + red location pin
+        "cross_border": (
+            f'<circle cx="21.5" cy="25" r="13" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<ellipse cx="21.5" cy="25" rx="6" ry="13" fill="none" stroke="{_BLK}" stroke-width="1.8"/>'
+            f'<line x1="9" y1="25" x2="34" y2="25" stroke="{_BLK}" stroke-width="1.8"/>'
+            f'<path d="M34 9.5C30.4 9.5 27.5 12.3 27.5 15.8C27.5 20.5 34 26.5 34 26.5C34 26.5 40.5 20.5 40.5 15.8C40.5 12.3 37.6 9.5 34 9.5Z" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.3"/>'
+            f'<circle cx="34" cy="15.6" r="2.2" fill="#FFFFFF"/>'
+        ),
+        # 37: Ferry Transit Cover — ferry ship hull + waves (#1D1D1B) carrying red car
+        "ferry_transit": (
+            f'<path d="M16 18.5L18.5 14H28.5L31 18.5H16Z" fill="{_RED}"/>'
+            f'<path d="M13 21H34L36.5 24.5H11L13 21Z" fill="{_BLK}"/>'
+            f'<path d="M7.5 24.5H40.5L36.5 32.5H11.5L7.5 24.5Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<path d="M6 37Q10.5 34.2 15 37T24 37T33 37T42 37" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+        ),
+        # 38: Child Car Safety Seat — contoured seat (#1D1D1B) + red harness buckle
+        "child_car_seat": (
+            f'<path d="M16 11C16 9.5 17.5 8.5 19.5 8.5H23C25.5 8.5 27 10.5 27 13V24.5H34.5C36.5 24.5 38 26 38 28V31.5C38 33.5 36.5 35 34.5 35H16C13.5 35 12 33 12 30.5V15C12 12.8 13.8 11 16 11Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5" stroke-linejoin="round"/>'
+            f'<path d="M19.5 13V26.5M23.5 13V26.5" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<circle cx="21.5" cy="26.5" r="3.8" fill="{_RED}"/>'
+            f'<line x1="15" y1="38.5" x2="35" y2="38.5" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+        ),
+        # 39: Drive-Less Save-More (PAYD Telematics) — odometer gauge + red low needle
+        "payd_telematics": (
+            f'<path d="M9 32A15.5 15.5 0 1 1 39 32" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.6" stroke-linecap="round"/>'
+            f'<line x1="12" y1="32" x2="36" y2="32" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<path d="M24 29L15.5 20.5" stroke="{_RED}" stroke-width="2.8" stroke-linecap="round"/>'
+            f'<circle cx="24" cy="29" r="3.2" fill="{_RED}"/>'
+            f'<path d="M14 18.5L15.8 20.2M24 14V16.5M34 18.5L32.2 20.2" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+        ),
+        # 40: Natural Falling Objects Cover — tilted branch/object over car + red alert
+        "natural_falling_objects": (
+            f'<path d="M10 31L14 25H27L31 30.5H36C37.5 30.5 38.5 31.5 38.5 33V36.5H8V32.8C8 31.8 8.8 31 10 31Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3" stroke-linejoin="round"/>'
+            f'<circle cx="14.5" cy="37" r="2.8" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2"/>'
+            f'<circle cx="32" cy="37" r="2.8" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2"/>'
+            f'<path d="M11 12.5L31 19.5M19 10.5L23.5 16.8M27 11.5L29 18.5" stroke="{_BLK}" stroke-width="2.6" stroke-linecap="round"/>'
+            f'<path d="M24 20V23.5M20 21.5L24 24.5L28 21.5" stroke="{_RED}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 41: Side Mirror Damage Cover — wing mirror (#1D1D1B) + red glass crack
+        "side_mirror_protection": (
+            f'<path d="M12 29L16 36H22L19 28" fill="{_BLK}"/>'
+            f'<path d="M12 16.5C12 13.8 14.2 12 17.5 12H33.5C36.8 12 39 14.5 39 18V25C39 27.8 36.8 29.8 33.5 29.8H16C13.5 29.8 12 27.8 12 25V16.5Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5" stroke-linejoin="round"/>'
+            f'<path d="M23 14.5L27 20L24 23L29.5 27.5" stroke="{_RED}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 42: Document Replacement Cover — ID / license card (#1D1D1B) + red stamp
+        "document_replacement": (
+            f'<rect x="7.5" y="12.5" width="33" height="23" rx="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<circle cx="16.5" cy="21" r="3.2" fill="{_BLK}"/>'
+            f'<path d="M11.5 29.5C11.5 26.8 13.8 25.5 16.5 25.5C19.2 25.5 21.5 26.8 21.5 29.5" fill="none" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<line x1="25" y1="19" x2="35.5" y2="19" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<line x1="25" y1="24" x2="35.5" y2="24" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<circle cx="32.5" cy="30.5" r="5" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.3"/>'
+        ),
+        # 43: Compassionate Allowance (Total Loss / Theft) — car + red relief badge
+        "total_loss_theft_allowance": (
+            f'<path d="M8 26.5L12 20H25L29 25.5H34C35.5 25.5 36.5 26.5 36.5 28V32.5H7.5V28C7.5 27.2 7.7 26.8 8 26.5Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.3" stroke-linejoin="round"/>'
+            f'<circle cx="13.5" cy="33" r="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.1"/>'
+            f'<circle cx="30" cy="33" r="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.1"/>'
+            f'<circle cx="35" cy="17" r="7" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.4"/>'
+            f'<path d="M35 13.8V20.2M31.8 17H38.2" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>'
+        ),
+        # 44: Compassionate Flood Relief Allowance — water waves + red relief heart/cash badge
+        "flood_relief_allowance": (
+            f'<path d="M12 27.5C13 23 16 21 20 21H28C32 21 34.5 23 35.5 27.5" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<path d="M7 31.5Q11.5 28.5 16 31.5T25 31.5T34 31.5T41 31.5" fill="none" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+            f'<path d="M9 37Q13 34.2 17 37T25 37T33 37T39 37" fill="none" stroke="{_BLK}" stroke-width="2.1" stroke-linecap="round"/>'
+            f'<circle cx="24" cy="15" r="6.8" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.3"/>'
+            f'<text x="24" y="18.2" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" font-weight="900" fill="#FFFFFF">$</text>'
+        ),
+        # 45: Snatch & Theft Property Cover — handbag/briefcase + red snatch spark
+        "personal_belongings_theft": (
+            f'<rect x="11" y="18.5" width="26" height="19" rx="3" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<path d="M18.5 18.5V15C18.5 13.3 19.8 12 21.5 12H26.5C28.2 12 29.5 13.3 29.5 15V18.5" fill="none" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<line x1="11" y1="25.5" x2="37" y2="25.5" stroke="{_BLK}" stroke-width="2"/>'
+            f'<rect x="21.5" y="23.5" width="5" height="4.5" rx="1" fill="{_RED}"/>'
+            f'<path d="M34 10.5L36.5 14.5L40.5 12.5" fill="none" stroke="{_RED}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 46: Legal Liability to Pillion — motorcycle (#1D1D1B) + red pillion rider helmet
+        "pillion": (
+            f'<circle cx="13.5" cy="32.5" r="5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<circle cx="34.5" cy="32.5" r="5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<path d="M13.5 32.5L21.5 23.5H30L34.5 32.5M26 23.5L28.5 18H32" fill="none" stroke="{_BLK}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<circle cx="25.5" cy="14" r="3" fill="{_BLK}"/>'
+            f'<circle cx="17" cy="15.5" r="3.2" fill="{_RED}"/>'
+            f'<path d="M15.5 19.5L19.5 23" stroke="{_RED}" stroke-width="2.6" stroke-linecap="round"/>'
+        ),
+        # 47: Daily Hospital Income — hospital building (#1D1D1B) + red cross & coin
+        "daily_hospital_income": (
+            f'<rect x="11" y="13.5" width="22" height="24.5" rx="2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<path d="M22 17.5V24.5M18.5 21H25.5" stroke="{_RED}" stroke-width="2.6" stroke-linecap="round"/>'
+            f'<rect x="18.5" y="29.5" width="7" height="8.5" fill="{_BLK}"/>'
+            f'<circle cx="35.5" cy="32.5" r="6.8" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.3"/>'
+            f'<text x="35.5" y="35.6" text-anchor="middle" font-family="Arial,sans-serif" font-size="8.5" font-weight="900" fill="#FFFFFF">$</text>'
+        ),
+        # 48: PA Double Indemnity Payout — shield (#1D1D1B) + bold red 2X
+        "double_indemnity": (
+            f'<path d="M24 9L37.5 13.5V23.8C37.5 32 31.6 37.6 24 40C16.4 37.6 10.5 32 10.5 23.8V13.5L24 9Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.6" stroke-linejoin="round"/>'
+            f'<text x="24" y="28.2" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="900" fill="{_RED}">2X</text>'
+        ),
+        # 49: Accidental Medical Expenses — medical first-aid kit (#1D1D1B) + red cross
+        "medical_expenses": (
+            f'<rect x="9" y="15.5" width="30" height="22" rx="3.2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<path d="M18.5 15.5V12.5C18.5 11.1 19.6 10 21 10H27C28.4 10 29.5 11.1 29.5 12.5V15.5" fill="none" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<path d="M24 20.5V32.5M18 26.5H30" stroke="{_RED}" stroke-width="3.2" stroke-linecap="round"/>'
+        ),
+        # 50: PA Permanent Disablement — protective shield + red medical heart pulse
+        "permanent_disablement": (
+            f'<path d="M24 9L37 13.5V23.8C37 31.8 31.4 37.4 24 39.8C16.6 37.4 11 31.8 11 23.8V13.5L24 9Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5" stroke-linejoin="round"/>'
+            f'<path d="M15 24.5H19.5L22 19L25.5 29.5L28 24.5H33" fill="none" stroke="{_RED}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 51: EV Charging Bodily Injury — person + charging plug + red bolt
+        "ev_charging_bodily_injury": (
+            f'<circle cx="16.5" cy="14.5" r="3.8" fill="{_BLK}"/>'
+            f'<path d="M10.5 28C10.5 22.8 13.2 20.5 16.5 20.5C19.8 20.5 22.5 22.8 22.5 28V36H10.5V28Z" fill="{_BLK}"/>'
+            f'<path d="M33 11L27.5 21H32.5L30.5 29.5L37.5 18.5H32.2L33 11Z" fill="{_RED}"/>'
+            f'<path d="M27 36H38" stroke="{_BLK}" stroke-width="2.3" stroke-linecap="round"/>'
+        ),
+        # 52: EV Home Fire Damage — house outline (#1D1D1B) + red flame
+        "ev_home_content_fire": (
+            f'<path d="M8.5 22L24 10L39.5 22V37.5H8.5V22Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5" stroke-linejoin="round"/>'
+            f'<path d="M24 18.5C27 22.5 30 25.5 30 29.2A6 6 0 0 1 18 29.2C18 26.2 19.8 23.8 21.6 22C21.6 23.8 22.8 24.8 24 24.8C24 22.5 24 20.5 24 18.5Z" fill="{_RED}"/>'
+        ),
+        # 53: Lonpac EV Smart Pack — EV car inside shield dome + red bolt
+        "lonpac_ev_smart_pack": (
+            f'<path d="M9 28A15 15 0 1 1 39 28Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<path d="M12.5 31L15.5 25.5H27L30.5 30H35C36.2 30 37 31 37 32V36H11V32.5C11 31.8 11.7 31 12.5 31Z" fill="{_BLK}"/>'
+            f'<circle cx="16.5" cy="36.5" r="2.6" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2"/>'
+            f'<circle cx="31.5" cy="36.5" r="2.6" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2"/>'
+            f'<path d="M25.5 11.5L21 18.2H24.6L23.2 23.5L28 16.6H24.4L25.5 11.5Z" fill="{_RED}"/>'
+        ),
+        # 54: Attached Trailers Cover — trailer box + red tow coupler hitch
+        "attached_trailers": (
+            f'<rect x="7.5" y="16" width="21" height="15" rx="2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<circle cx="18" cy="33" r="3.6" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<path d="M28.5 28H37.5V24.5" fill="none" stroke="{_RED}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<circle cx="37.5" cy="23.5" r="2.6" fill="{_RED}"/>'
+        ),
+        # 55: Cargo & Goods in Transit Liability — freight crate + red shield
+        "cargo_protection": (
+            f'<rect x="9" y="13" width="24" height="23" rx="2" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<line x1="9" y1="20" x2="33" y2="20" stroke="{_BLK}" stroke-width="2.2"/>'
+            f'<line x1="21" y1="13" x2="21" y2="36" stroke="{_BLK}" stroke-width="2"/>'
+            f'<path d="M34 22.5L40.5 25V30.5C40.5 34.5 37.8 37.2 34 38.6C30.2 37.2 27.5 34.5 27.5 30.5V25L34 22.5Z" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.3"/>'
+        ),
+        # 56: Driver & Crew PA Bundle — two crew busts + red PA shield
+        "commercial_driver_crew_pa": (
+            f'<circle cx="16.5" cy="16" r="3.8" fill="{_BLK}"/>'
+            f'<path d="M9.5 32C9.5 27 12.5 24.5 16.5 24.5C20.5 24.5 23.5 27 23.5 32" fill="none" stroke="{_BLK}" stroke-width="2.4" stroke-linecap="round"/>'
+            f'<circle cx="28.5" cy="17.5" r="3.4" fill="{_BLK}"/>'
+            f'<path d="M23 32C23 28 25.5 25.5 28.5 25.5C31.5 25.5 34 28 34 32" fill="none" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<circle cx="35.5" cy="31" r="6.8" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.3"/>'
+            f'<path d="M35.5 27.8V34.2M32.3 31H38.7" stroke="#FFFFFF" stroke-width="2.1" stroke-linecap="round"/>'
+        ),
+        # 57: Private Car 365 — bundle gift box (#1D1D1B) with red 365 ribbon badge
+        "private_car_365": (
+            f'<rect x="9.5" y="18.5" width="29" height="19" rx="2.5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4"/>'
+            f'<rect x="7.5" y="13.5" width="33" height="5.5" rx="1.5" fill="{_BLK}"/>'
+            f'<path d="M24 9.5C21 9.5 19.5 11.2 19.5 13.5H28.5C28.5 11.2 27 9.5 24 9.5Z" fill="{_RED}"/>'
+            f'<text x="24" y="31.5" text-anchor="middle" font-family="Arial,sans-serif" font-size="10.5" font-weight="900" fill="{_RED}">365</text>'
+        ),
+        # 58: Smart Driver PA — steering wheel (#1D1D1B) + red driver shield center
+        "smart_driver_pa": (
+            f'<circle cx="24" cy="24" r="14.5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="3.2"/>'
+            f'<path d="M10.5 22.5H37.5M24 25V38.5" stroke="{_BLK}" stroke-width="2.8" stroke-linecap="round"/>'
+            f'<circle cx="24" cy="24" r="5.2" fill="{_RED}"/>'
+        ),
+        # 59: Motor PA Plus — driver & passenger shield (#1D1D1B) + bold red + badge
+        "motor_pa_plus": (
+            f'<path d="M22 9L34 13V23C34 30.5 28.8 36 22 38.5C15.2 36 10 30.5 10 23V13L22 9Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<text x="22" y="27.5" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="900" fill="{_BLK}">PA</text>'
+            f'<circle cx="35.5" cy="32" r="7" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.4"/>'
+            f'<path d="M35.5 28.6V35.4M32.1 32H38.9" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>'
+        ),
+        # 60: OTO 360 — red 360 orbit ring around charcoal car
+        "oto_360": (
+            f'<path d="M9.5 20A15.5 15.5 0 0 1 38.5 20" fill="none" stroke="{_RED}" stroke-width="2.6" stroke-linecap="round"/>'
+            f'<polyline points="34.5,14.5 39,20.5 33,21.5" fill="none" stroke="{_RED}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M38.5 29A15.5 15.5 0 0 1 9.5 29" fill="none" stroke="{_RED}" stroke-width="2.6" stroke-linecap="round"/>'
+            f'<polyline points="13.5,34.5 9,28.5 15,27.5" fill="none" stroke="{_RED}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M14.5 25.5L17 20.5H29L32 25.5V29.5H14.5V25.5Z" fill="{_BLK}"/>'
+        ),
+        # 61: Driver Passenger Protector — protective dome/umbrella over driver & passenger + red shield
+        "driver_passenger_protector": (
+            f'<path d="M8 22A16 16 0 0 1 40 22Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<circle cx="18" cy="29" r="3" fill="{_BLK}"/>'
+            f'<circle cx="30" cy="29" r="3" fill="{_BLK}"/>'
+            f'<path d="M13 37C13 34 15.2 32.5 18 32.5C20.8 32.5 23 34 23 37M25 37C25 34 27.2 32.5 30 32.5C32.8 32.5 35 34 35 37" fill="none" stroke="{_BLK}" stroke-width="2.2" stroke-linecap="round"/>'
+            f'<circle cx="24" cy="14.5" r="3.8" fill="{_RED}"/>'
+        ),
+        # 62: MotorShield Multi-Pack — bold twin crest shield (#1D1D1B) + red star core
+        "motorshield_bundle": (
+            f'<path d="M24 8.5L38 13.5V24C38 32.5 32 38 24 40.5C16 38 10 32.5 10 24V13.5L24 8.5Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.6" stroke-linejoin="round"/>'
+            f'<path d="M24 13.5L33.5 16.8V24C33.5 29.8 29.5 33.8 24 35.8C18.5 33.8 14.5 29.8 14.5 24V16.8L24 13.5Z" fill="{_BLK}"/>'
+            f'<path d="M24 18.5L25.8 22.5L30 23L26.8 25.8L27.8 30L24 27.8L20.2 30L21.2 25.8L18 23L22.2 22.5Z" fill="{_RED}"/>'
+        ),
+        # 63: SOMPO Motor N-hancer — car badge + red double boost chevrons
+        "sompo_motor_nhancer": (
+            f'<rect x="9.5" y="10.5" width="29" height="27" rx="5" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.5"/>'
+            f'<path d="M16.5 23L24 15.5L31.5 23" fill="none" stroke="{_RED}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M16.5 31L24 23.5L31.5 31" fill="none" stroke="{_BLK}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
+        ),
+        # 64: AutoBuddy — twin assistance badge (#1D1D1B) with red heart/handshake spark
+        "auto_buddy_malaysia": (
+            f'<circle cx="17.5" cy="18" r="4" fill="{_BLK}"/>'
+            f'<circle cx="30.5" cy="18" r="4" fill="{_BLK}"/>'
+            f'<path d="M10 34C10 28 13.2 25 17.5 25C20.2 25 22.5 26.5 24 28.8C25.5 26.5 27.8 25 30.5 25C34.8 25 38 28 38 34" fill="none" stroke="{_BLK}" stroke-width="2.5" stroke-linecap="round"/>'
+            f'<circle cx="24" cy="14" r="4.2" fill="{_RED}"/>'
+        ),
+        # 65: Motor Easy — winding road (#1D1D1B) + red 24h rescue pin
+        "motor_easy": (
+            f'<path d="M14 38L19.5 16H28.5L34 38Z" fill="#FFFFFF" stroke="{_BLK}" stroke-width="2.4" stroke-linejoin="round"/>'
+            f'<path d="M24 21V24.5M24 28.5V33" stroke="{_BLK}" stroke-width="2.4" stroke-linecap="round"/>'
+            f'<path d="M24 8.5C20.5 8.5 18 11 18 14.2C18 18.2 24 22.5 24 22.5C24 22.5 30 18.2 30 14.2C30 11 27.5 8.5 24 8.5Z" fill="{_RED}" stroke="#FFFFFF" stroke-width="1.3"/>'
+            f'<circle cx="24" cy="14" r="2" fill="#FFFFFF"/>'
         ),
         # Fallback shield icon
         "generic": (

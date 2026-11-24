@@ -163,14 +163,12 @@ def update_catalog_context(db, user, catalog_id: str, payload: dict) -> dict:
 
 def _offering(item: CatalogOffering) -> dict:
     disp_val = item.display_value
-    if disp_val:
+    if disp_val is not None:
         d_str = disp_val.strip()
-        has_digits = any(c.isdigit() for c in d_str)
-        is_unlimited = d_str.lower() == "unlimited"
-        if not has_digits and not is_unlimited:
+        if not d_str or d_str.lower() in {"included", "optional", "foc", "as quoted", "selected", "standard"}:
             disp_val = None
-        elif d_str.lower() in {"included", "optional", "foc", "as quoted", "selected", "standard"}:
-            disp_val = None
+        else:
+            disp_val = d_str
 
     return {
         "id": item.id,
@@ -491,12 +489,12 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
             if key == "description_override" and val is not None:
                 v_str = str(val).strip()
                 val = v_str if v_str else None
-            elif key == "display_value" and val:
+            elif key == "display_value" and val is not None:
                 v_str = str(val).strip()
-                if not any(c.isdigit() for c in v_str) and v_str.lower() != "unlimited":
+                if not v_str or v_str.lower() in {"optional", "as quoted", "selected"}:
                     val = None
-                elif v_str.lower() in {"included", "optional", "foc", "as quoted", "selected", "standard"}:
-                    val = None
+                else:
+                    val = v_str
             setattr(offering, key, val)
     if offering.applies_to_id is None:
         offering.applies_to_type = None

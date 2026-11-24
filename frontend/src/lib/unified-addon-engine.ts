@@ -38,7 +38,7 @@ export const CANONICAL_24_CATALOG: Array<{
       id: "windscreen",
       title: "Windscreen Coverage",
       description: "Covers windscreen, window glass and tint repair without affecting NCD.",
-      default_value: "RM 10,000.00",
+      default_value: "",
       icon_hint: "windscreen",
     },
     {
@@ -66,7 +66,7 @@ export const CANONICAL_24_CATALOG: Array<{
       id: "special_perils",
       title: "Special Perils",
       description: "Full cover for flood, storm, landslide, earthquake and fallen trees.",
-      default_value: "Full Coverage",
+      default_value: "",
       icon_hint: "special_perils",
     },
     {
@@ -100,8 +100,8 @@ export const CANONICAL_24_CATALOG: Array<{
     {
       id: "respray",
       title: "Vehicle Respray Cover",
-      description: "Reimburses full exterior vehicle spray painting up to RM1,000 after repairs.",
-      default_value: "RM 1,000.00",
+      description: "Reimburses full exterior vehicle spray painting after accident repairs.",
+      default_value: "",
       icon_hint: "respray",
     },
     {
@@ -135,15 +135,15 @@ export const CANONICAL_24_CATALOG: Array<{
     {
       id: "key_care",
       title: "Key Care Replacement",
-      description: "Reimburses key and lock replacement up to RM1,000 following theft or loss.",
-      default_value: "RM 1,000.00",
+      description: "Reimburses key and lock replacement following theft or loss.",
+      default_value: "",
       icon_hint: "key_care",
     },
     {
       id: "international_towing",
       title: "International Towing Assistance",
-      description: "Up to 50km from Malaysia border.",
-      default_value: "50 km",
+      description: "Emergency towing coverage beyond Malaysian borders.",
+      default_value: "",
       icon_hint: "international_towing",
     },
     {
@@ -577,17 +577,89 @@ function matchCatalogItem(item: any) {
   return null;
 }
 
+const CONCEPT_KEY_ICON_HINTS: Record<string, string> = {
+  "own-damage": "own_damage",
+  "third-party-bi": "third_party_bi",
+  "third-party-bodily-injury": "third_party_bi",
+  "third-party-property": "third_party_property",
+  "third-party-property-damage": "third_party_property",
+  "legal-costs-defense": "legal_defense",
+  "repair-workmanship-warranty": "repair_workmanship_warranty",
+  "agreed-value-market-value": "agreed_value",
+  "cashback-no-claim": "cashback_no_claim",
+  "increased-tppd": "increased_tppd",
+  "first-loss-flood": "first_loss_flood",
+  "car-detailing-cleanup": "car_detailing_cleanup",
+  "out-of-pocket-allowance": "out_of_pocket_allowance",
+  "cross-border": "cross_border",
+  "ferry-transit": "ferry_transit",
+  "child-car-seat": "child_car_seat",
+  "payd-telematics": "payd_telematics",
+  "natural-falling-objects": "natural_falling_objects",
+  "side-mirror-protection": "side_mirror_protection",
+  "document-replacement": "document_replacement",
+  "total-loss-theft-allowance": "total_loss_theft_allowance",
+  "flood-relief-allowance": "flood_relief_allowance",
+  "personal-belongings-theft": "personal_belongings_theft",
+  "legal-liability-to-pillion": "pillion",
+  "daily-hospital-income": "daily_hospital_income",
+  "double-indemnity": "double_indemnity",
+  "medical-expenses": "medical_expenses",
+  "permanent-disablement": "permanent_disablement",
+  "accidental-death": "pa",
+  "ev-charging-bodily-injury": "ev_charging_bodily_injury",
+  "ev-home-content-fire": "ev_home_content_fire",
+  "ev-battery-depletion-towing": "ev_towing",
+  "ev-home-charger-liability": "ev_liability",
+  "ev-wall-charger": "ev_charger",
+  "lonpac-ev-smart-pack": "lonpac_ev_smart_pack",
+  "attached-trailers": "attached_trailers",
+  "cargo-protection": "cargo_protection",
+  "commercial-driver-crew-pa": "commercial_driver_crew_pa",
+  "authorized-attendants": "non_fare_passenger",
+  "tool-of-trade": "third_party_working",
+  "private-car-365": "private_car_365",
+  "smart-driver-pa": "smart_driver_pa",
+  "motor-pa-plus": "motor_pa_plus",
+  "oto-360": "oto_360",
+  "driver-passenger-protector": "driver_passenger_protector",
+  "motorshield-bundle": "motorshield_bundle",
+  "sompo-motor-nhancer": "sompo_motor_nhancer",
+  "auto-buddy-malaysia": "auto_buddy_malaysia",
+  "motor-easy": "motor_easy",
+  windscreen: "windscreen",
+  "betterment-protection": "betterment",
+  "all-drivers": "all_drivers",
+  "special-perils": "special_perils",
+  "strike-riot-civil-commotion": "srcc",
+  "repaint-spray-paint": "respray",
+  "gas-conversion-kit": "gas_conversion",
+  "repair-allowance": "cart",
+  "vehicle-accessories": "accessories",
+  "ncd-relief": "ncd",
+  "key-replacement": "key_care",
+  "legal-liability-of-passengers": "llop",
+  "legal-liability-to-passengers": "llp",
+  "e-hailing-extension": "ehailing",
+  "boom-damage": "boom_damage",
+  overturning: "overturning",
+};
+
 function inferIconHint(item: any, matchedCat: any): string {
   const txt = `${item?.id || ""} ${item?.concept_key || ""} ${item?.title || item?.label || ""}`.toLowerCase();
   if (item?.icon_hint && item.icon_hint !== "generic") return String(item.icon_hint);
   if (txt.includes("towing") && txt.includes("unlimited") && !txt.includes("battery") && !txt.includes("international")) {
     return "unlimited_towing";
   }
+  const ckey = String(item?.concept_key || "").trim().toLowerCase();
+  if (ckey && CONCEPT_KEY_ICON_HINTS[ckey]) {
+    return CONCEPT_KEY_ICON_HINTS[ckey];
+  }
   if (matchedCat?.icon_hint) return String(matchedCat.icon_hint);
   if (txt.includes("ncd") || txt.includes("cashback")) return "ncd";
   if (txt.includes("detail") || txt.includes("clean") || txt.includes("respray") || txt.includes("paint")) return "respray";
   if (txt.includes("out of pocket") || txt.includes("cart") || txt.includes("allowance") || txt.includes("courtesy")) return "cart";
-  if (txt.includes("agreed value") || txt.includes("market value") || txt.includes("settlement")) return "ncd";
+  if (txt.includes("agreed value") || txt.includes("market value") || txt.includes("settlement")) return "agreed_value";
   if (txt.includes("child") || txt.includes("seat") || txt.split(/[^a-z0-9]/).includes("pa")) return "pa";
   if (txt.includes("tyre") || txt.includes("tire") || txt.includes("rim") || txt.includes("accessor")) return "accessories";
   return "generic";
@@ -666,22 +738,62 @@ export const PRIVATE_CAR_EXCLUDED_MATRIX_IDS = new Set([
   "overturning",
 ]);
 
+export const EV_ONLY_MATRIX_IDS = new Set([
+  "ev_wall_charger",
+  "ev_out_of_charge",
+  "ev_charger_liability",
+  "ev_battery_depletion_towing",
+  "ev_charging_bodily_injury",
+  "ev_home_content_fire",
+  "ev_home_charger_liability",
+  "lonpac_ev_smart_pack",
+]);
+
+export const ICE_ONLY_MATRIX_IDS = new Set([
+  "gas_conversion",
+  "gas_conversion_kit",
+]);
+
 export const ICE_EXCLUDED_MATRIX_IDS = new Set([
   "ev_wall_charger",
   "ev_out_of_charge",
   "ev_charger_liability",
 ]);
 
+function fieldScalar(fields: Record<string, any> | undefined, key: string): string {
+  if (!fields || typeof fields !== "object") return "";
+  const v = fields[key];
+  if (v && typeof v === "object") return String(v.value ?? "").trim();
+  return String(v ?? "").trim();
+}
+
 export function isEVVehicle(
   vehicleType: string = "",
   carModel: string = "",
   fields?: Record<string, any>
 ): boolean {
-  let raw = `${vehicleType || ""} ${carModel || ""}`.toLowerCase();
-  if (fields) {
-    raw += ` ${fields.vehicle_type || ""} ${fields.powertrain || ""} ${fields.engine_cc || ""}`.toLowerCase();
+  const eng = (fieldScalar(fields, "engine_type") || fieldScalar(fields, "powertrain")).toLowerCase();
+  if (eng) {
+    if (["ice", "petrol", "diesel", "gasoline"].includes(eng)) return false;
+    if (["ev", "electric", "bev", "zev"].includes(eng)) return true;
   }
-  return raw.includes("ev") || raw.includes("electric") || raw.includes("zev") || raw.includes("bev") || raw.includes("kw");
+  const rawJoined = [
+    vehicleType || "",
+    carModel || "",
+    fieldScalar(fields, "vehicle_type"),
+    fieldScalar(fields, "car_model"),
+    fieldScalar(fields, "engine_cc"),
+    fieldScalar(fields, "engine_capacity"),
+  ].join(" ");
+  const rawSplit = rawJoined
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase();
+  return (
+    /\b(?:ev|electric|zev|bev|tesla|zeekr|xpeng|leapmotor|e\.mas)\b/.test(rawSplit) ||
+    /\bbyd\s+(?:atto|seal|dolphin|m6)\b/.test(rawSplit) ||
+    /\b\d+(?:\.\d+)?\s*(?:kw|kwh|watts?)\b/.test(rawSplit)
+  );
 }
 
 export const COMMERCIAL_KEYWORDS = [
@@ -696,11 +808,16 @@ export function isCommercialVehicle(
   carModel: string = "",
   fields?: Record<string, any>
 ): boolean {
-  let raw = `${vehicleType || ""} ${carModel || ""}`.toLowerCase();
-  if (fields) {
-    raw += ` ${fields.vehicle_type || ""} ${fields.car_model || ""} ${fields.capacity || ""}`.toLowerCase();
-  }
-  return COMMERCIAL_KEYWORDS.some((k) => raw.includes(k)) || raw.includes("kg") || raw.includes("bdm");
+  const raw = [
+    vehicleType || "",
+    carModel || "",
+    fieldScalar(fields, "vehicle_type"),
+    fieldScalar(fields, "car_model"),
+    fieldScalar(fields, "capacity"),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return COMMERCIAL_KEYWORDS.some((k) => raw.includes(k)) || /\bkg\b|\bbdm\b/.test(raw);
 }
 
 export function extractFreeCoverageItems(
@@ -1074,6 +1191,18 @@ export function buildUnifiedMatrixCards(
   const processed: any[] = [];
   const seenInOutput = new Set<string>();
 
+  const isEngineMismatched = (card: any): boolean => {
+    if (!card || card.is_selected) return false;
+    const keys = [
+      normalizeCode(String(card.id || "")),
+      normalizeCode(String(card.code || "")),
+      normalizeCode(String(card.concept_key || "")),
+    ].filter(Boolean);
+    if (!isEv && keys.some((k) => EV_ONLY_MATRIX_IDS.has(k))) return true;
+    if (isEv && keys.some((k) => ICE_ONLY_MATRIX_IDS.has(k))) return true;
+    return false;
+  };
+
   // 1. Add provided canonical overrides (in canonical catalog sequence)
   for (const cat of CANONICAL_24_CATALOG) {
     if (isComm && excludedIds.has(cat.id) && !canonicalOverrides[cat.id]?.is_selected) {
@@ -1087,6 +1216,7 @@ export function buildUnifiedMatrixCards(
       continue;
     }
     if (canonicalOverrides[cat.id]) {
+      if (isEngineMismatched(canonicalOverrides[cat.id])) continue;
       seenInOutput.add(cat.id);
       processed.push(canonicalOverrides[cat.id]);
     }
@@ -1098,6 +1228,7 @@ export function buildUnifiedMatrixCards(
       if (isComm && excludedIds.has(cid) && !canonicalOverrides[cid]?.is_selected) {
         continue;
       }
+      if (isEngineMismatched(canonicalOverrides[cid])) continue;
       seenInOutput.add(cid);
       processed.push(canonicalOverrides[cid]);
     }
@@ -1110,6 +1241,7 @@ export function buildUnifiedMatrixCards(
       if (isComm && (String(cId).toLowerCase().includes("towing") || String(cId).toLowerCase().includes("roadside"))) {
         continue;
       }
+      if (isEngineMismatched(custom)) continue;
       seenInOutput.add(cId);
       processed.push(custom);
     }

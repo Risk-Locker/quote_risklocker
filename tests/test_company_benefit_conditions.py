@@ -438,7 +438,7 @@ def test_complete_7_tier_precedence():
     )
     assert res_t2["current_benefits"][0]["description"] == "Tier 2: Dynamic Conditional Upgrade"
 
-    # 3. Tier 3: Company baseline description beats catalog offering override (single source of truth)
+    # 3. Tier 3: Catalog offering override beats company master baseline description (1:1 catalog control)
     res_t3 = resolve_benefit_cards(
         selections=[sel_target_plain],  # No trigger selection
         offerings=[off_target, off_trigger],
@@ -448,10 +448,10 @@ def test_complete_7_tier_precedence():
         company_conditions=[condition],
         company_configs=[company_config],
     )
-    assert res_t3["current_benefits"][0]["description"] == "Tier 4: Company Master Baseline Description"
+    assert res_t3["current_benefits"][0]["description"] == "Tier 3: Catalog Offering Override"
 
-    # 4. Tier 4: Catalog Offering override (when company baseline description is None)
-    company_config.baseline_description = None
+    # 4. Tier 4: Company Master Baseline Description (when catalog offering override is None)
+    off_target.description_override = None
     res_t4 = resolve_benefit_cards(
         selections=[sel_target_plain],
         offerings=[off_target, off_trigger],
@@ -461,10 +461,10 @@ def test_complete_7_tier_precedence():
         company_conditions=[condition],
         company_configs=[company_config],
     )
-    assert res_t4["current_benefits"][0]["description"] == "Tier 3: Catalog Offering Override"
+    assert res_t4["current_benefits"][0]["description"] == "Tier 4: Company Master Baseline Description"
 
     # 5. Tier 6: Master Concept default (when both company baseline and offering override are None)
-    off_target.description_override = None
+    company_config.baseline_description = None
     res_t6 = resolve_benefit_cards(
         selections=[sel_target_plain],
         offerings=[off_target, off_trigger],

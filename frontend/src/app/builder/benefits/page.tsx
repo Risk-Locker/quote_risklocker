@@ -1006,9 +1006,9 @@ function BenefitsPageContent() {
     const pkgKind = String(cat.package?.package_kind || "").toLowerCase();
 
     if (filter === "comprehensive") {
-      if (covId === "d1111111-0000-4000-8000-000000000001" || covKey === "comprehensive" || pkgKind === "comprehensive") return true;
-      if (covId === "d1111111-0000-4000-8000-000000000002" || covId === "d1111111-0000-4000-8000-000000000003") return false;
+      if (covId === "d1111111-0000-4000-8000-000000000002" || covId === "d1111111-0000-4000-8000-000000000003" || covKey === "tpft" || covKey === "third_party") return false;
       if (catName.includes("tpft") || catName.includes("third party")) return false;
+      if (covId === "d1111111-0000-4000-8000-000000000001" || covKey === "comprehensive" || pkgKind === "comprehensive") return true;
       return true;
     }
     if (filter === "tpft") {
@@ -1085,12 +1085,25 @@ function BenefitsPageContent() {
         const carVehId = "b1111111-0000-4000-8000-000000000001";
         const targetVehicleId = selectedVehicleId || carVehId;
         const targetEngine = selectedEngineType || "ice";
+        const cachedComp = matchedComp || cached.workspace.company;
+        const isCachedMmip = Boolean(
+          cachedComp &&
+            ((cachedComp.slug || "").toLowerCase() === "mmip" ||
+              cachedComp.name.trim().toLowerCase() === "mmip")
+        );
+        const cachedCovFilter = isCachedMmip
+          ? "tpo"
+          : (builderCoverageFilter === "tpo" ? "comprehensive" : builderCoverageFilter);
 
         const matchingCatalogs = (cached.workspace.catalogs || []).filter((item) =>
-          (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
-          (!targetVehicleId || item.vehicle_category_id === targetVehicleId) &&
-          ((item.engine_type || "ice") === targetEngine) &&
-          matchesCoverage(item, builderCoverageFilter)
+          item.status !== "archived" &&
+          item.status !== "retired" &&
+          (isCachedMmip
+            ? matchesCoverage(item, "tpo")
+            : (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
+              (!targetVehicleId || item.vehicle_category_id === targetVehicleId) &&
+              ((item.engine_type || "ice") === targetEngine) &&
+              matchesCoverage(item, cachedCovFilter))
         );
 
         const catalog =
@@ -1128,13 +1141,26 @@ function BenefitsPageContent() {
         const carVehId = "b1111111-0000-4000-8000-000000000001";
         const targetVehicleId = selectedVehicleId || carVehId;
         const targetEngine = selectedEngineType || "ice";
+        const freshComp = matchedComp || result.workspace.company;
+        const isFreshMmip = Boolean(
+          freshComp &&
+            ((freshComp.slug || "").toLowerCase() === "mmip" ||
+              freshComp.name.trim().toLowerCase() === "mmip")
+        );
+        const freshCovFilter = isFreshMmip
+          ? "tpo"
+          : (builderCoverageFilter === "tpo" ? "comprehensive" : builderCoverageFilter);
 
-        // Filter catalogs matching current vehicle, engine, segment, and coverage preferences
+        // Filter products matching current vehicle, engine, segment, and coverage preferences
         const matchingCatalogs = (result.workspace.catalogs || []).filter((item) =>
-          (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
-          (!targetVehicleId || item.vehicle_category_id === targetVehicleId) &&
-          ((item.engine_type || "ice") === targetEngine) &&
-          matchesCoverage(item, builderCoverageFilter)
+          item.status !== "archived" &&
+          item.status !== "retired" &&
+          (isFreshMmip
+            ? matchesCoverage(item, "tpo")
+            : (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
+              (!targetVehicleId || item.vehicle_category_id === targetVehicleId) &&
+              ((item.engine_type || "ice") === targetEngine) &&
+              matchesCoverage(item, freshCovFilter))
         );
 
         const catalog =
@@ -1440,20 +1466,64 @@ ${aiMarkdownTable}`;
       });
   }, [concepts, companyConfigs, configsCategoryFilter, configsSearch]);
 
+  const selectedCompany = useMemo(() => companies.find((item) => item.id === selectedCompanyId) || null, [companies, selectedCompanyId]);
+  const selectedProduct = useMemo(() => companyWorkspace?.products.find((item) => item.id === selectedProductId) || null, [companyWorkspace, selectedProductId]);
+  const selectedSegment = useMemo(() => segments.find((item) => item.id === selectedSegmentId) || null, [segments, selectedSegmentId]);
+  const selectedVehicle = useMemo(() => vehicles.find((item) => item.id === selectedVehicleId) || null, [vehicles, selectedVehicleId]);
+
+  const isMmipSelected = useMemo(() => {
+    const comp = selectedCompany || companyWorkspace?.company || null;
+    if (!comp) return false;
+    return (
+      (comp.slug || "").toLowerCase() === "mmip" ||
+      comp.name.trim().toLowerCase() === "mmip"
+    );
+  }, [selectedCompany, companyWorkspace]);
+
+  useEffect(() => {
+    if (isMmipSelected) {
+      if (builderCoverageFilter !== "tpo") {
+        setBuilderCoverageFilter("tpo");
+      }
+    } else if (selectedCompanyId && companyWorkspace && builderCoverageFilter === "tpo") {
+      setBuilderCoverageFilter("comprehensive");
+    }
+  }, [isMmipSelected, selectedCompanyId, companyWorkspace, builderCoverageFilter]);
+
+  useEffect(() => {
+    if (
+      selectedSegment?.key === "private" &&
+      selectedVehicle &&
+      (selectedVehicle.key === "lorry" || selectedVehicle.name.toLowerCase().includes("lorry"))
+    ) {
+      const fallbackCar =
+        vehicles.find((v) => v.key === "car") ||
+        vehicles.find((v) => v.key !== "lorry" && !v.name.toLowerCase().includes("lorry"));
+      if (fallbackCar && fallbackCar.id !== selectedVehicleId) {
+        setSelectedVehicleId(fallbackCar.id);
+      }
+    }
+  }, [selectedSegment, selectedVehicle, vehicles, selectedVehicleId]);
+
   const productConfigs = useMemo(() => {
     const carVehId = "b1111111-0000-4000-8000-000000000001";
     const targetVehicleId = selectedVehicleId || carVehId;
+    const effectiveCovFilter = isMmipSelected
+      ? "tpo"
+      : (builderCoverageFilter === "tpo" ? "comprehensive" : builderCoverageFilter);
     const items = (companyWorkspace?.catalogs || []).filter(
       (item) =>
         item.status !== "archived" &&
         item.status !== "retired" &&
-        (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
-        (!targetVehicleId || !item.vehicle_category_id || item.vehicle_category_id === targetVehicleId) &&
-        ((item.engine_type || "ice") === selectedEngineType) &&
-        matchesCoverage(item, builderCoverageFilter)
+        (isMmipSelected
+          ? matchesCoverage(item, "tpo")
+          : (!selectedSegmentId || !item.segment_id || item.segment_id === selectedSegmentId) &&
+            (!targetVehicleId || !item.vehicle_category_id || item.vehicle_category_id === targetVehicleId) &&
+            ((item.engine_type || "ice") === selectedEngineType) &&
+            matchesCoverage(item, effectiveCovFilter))
     );
 
-    // If packaged catalogs exist for this company scenario, deduplicate and prioritize packaged catalogs
+    // If packaged configs exist for this company scenario, deduplicate and prioritize packaged configs
     const hasPackages = items.some((item) => Boolean(item.package));
     const finalItems = hasPackages ? items.filter((item) => Boolean(item.package)) : items;
 
@@ -1475,7 +1545,7 @@ ${aiMarkdownTable}`;
       const bName = b.package?.name || b.name || "";
       return aOrder - bOrder || aName.localeCompare(bName);
     });
-  }, [companyWorkspace, selectedSegmentId, selectedVehicleId, selectedEngineType, builderCoverageFilter, matchesCoverage]);
+  }, [companyWorkspace, selectedSegmentId, selectedVehicleId, selectedEngineType, builderCoverageFilter, isMmipSelected, matchesCoverage]);
 
   useEffect(() => {
     if (!productConfigs || productConfigs.length === 0) {
@@ -1613,15 +1683,29 @@ ${aiMarkdownTable}`;
     });
   }, [concepts, enabledConceptIds, activeConceptIdSet]);
 
+  const activeDefaultCount = useMemo(
+    () =>
+      defaultConcepts.filter((c) => {
+        const o = activeConceptIdSet.get(c.id);
+        return Boolean(o && effectiveRole(o) === "included");
+      }).length,
+    [defaultConcepts, activeConceptIdSet]
+  );
+
+  const activeAddonCount = useMemo(
+    () =>
+      addonConcepts.filter((c) => {
+        const o = activeConceptIdSet.get(c.id);
+        return Boolean(o && effectiveRole(o) === "addon_option");
+      }).length,
+    [addonConcepts, activeConceptIdSet]
+  );
+
   const bundles = useMemo(
     () => (catalogWorkspace?.packages || []).filter((item) => item && item.package_kind === "addon_bundle" && item.status === "active"),
     [catalogWorkspace]
   );
 
-  const selectedCompany = useMemo(() => companies.find((item) => item.id === selectedCompanyId) || null, [companies, selectedCompanyId]);
-  const selectedProduct = useMemo(() => companyWorkspace?.products.find((item) => item.id === selectedProductId) || null, [companyWorkspace, selectedProductId]);
-  const selectedSegment = useMemo(() => segments.find((item) => item.id === selectedSegmentId) || null, [segments, selectedSegmentId]);
-  const selectedVehicle = useMemo(() => vehicles.find((item) => item.id === selectedVehicleId) || null, [vehicles, selectedVehicleId]);
   const activeTemplate = useMemo(() => templates.find((t) => t.id === selectedTemplateId) || templates[0] || null, [templates, selectedTemplateId]);
 
   const previewVariableValues = useMemo(() => ({
@@ -1636,10 +1720,10 @@ ${aiMarkdownTable}`;
     insured_name: "Ahmad Bin Abdullah",
     id_number: "900101-XX-XXXX",
     postcode: "50480",
-    coverage_type: "Comprehensive",
+    coverage_type: builderCoverageFilter === "tpo" ? "Third Party" : builderCoverageFilter === "tpft" ? "Third Party, Fire & Theft" : "Comprehensive",
     sum_insured: "RM 55,000.00",
     total_premium: "RM 1,450.00",
-  }), [selectedCompany, selectedProduct, selectedVehicle, selectedSegment, isPackaged, activePackage]);
+  }), [selectedCompany, selectedProduct, selectedVehicle, selectedSegment, isPackaged, activePackage, builderCoverageFilter]);
 
   // Real template preview data (mirrors the sessions workspace benefit cards)
   const previewBenefitData = useMemo(
@@ -1989,11 +2073,8 @@ ${aiMarkdownTable}`;
   const cleanCoverageValue = (val?: string | null) => {
     if (!val) return "";
     const s = String(val).trim();
-    if (/\d/.test(s) || /^unlimited$/i.test(s)) {
-      if (/^(?:included|optional|foc|as quoted|selected|standard)$/i.test(s)) return "";
-      return s;
-    }
-    return "";
+    if (!s || /^(?:included|optional|foc|as quoted|selected|standard)$/i.test(s)) return "";
+    return s;
   };
 
   // ── Inline Display Value Editor (Optimistic UI, Zero Reload) ──────────
@@ -2006,7 +2087,7 @@ ${aiMarkdownTable}`;
       setError("");
       const prevWorkspace = currentWorkspace;
       const trimmed = newValue.trim();
-      const isValid = Boolean(trimmed && (/\d/.test(trimmed) || /^unlimited$/i.test(trimmed)) && !/^(?:included|optional|foc|as quoted|selected|standard)$/i.test(trimmed));
+      const isValid = Boolean(trimmed && !/^(?:included|optional|foc|as quoted|selected|standard)$/i.test(trimmed));
       const cleanVal = isValid ? trimmed : null;
       const nextRevision = (currentCatalog.revision || 1) + 1;
 
@@ -2831,8 +2912,8 @@ ${aiMarkdownTable}`;
                         const isCurrent = cfg.id === selectedCatalogId;
                         const isTopTier = idx === siblingPackageConfigs.length - 1;
                         const pkgName = cfg.package?.name || cfg.name;
-                        const defCount = isCurrent ? defaultOfferings.length : null;
-                        const addCount = isCurrent ? addonOfferings.length : null;
+                        const defCount = isCurrent ? activeDefaultCount : null;
+                        const addCount = isCurrent ? activeAddonCount : null;
 
                         return (
                           <button
@@ -2876,7 +2957,13 @@ ${aiMarkdownTable}`;
                       })
                     : comprehensivePackages.map((pkg, idx) => {
                         const isCurrent = pkg.id === (activePackage?.id || selectedPackageId);
-                        const pkgOfferings = allOfferings.filter((o) => o.status !== "retired" && o.applies_to_id === pkg.id);
+                        const pkgOfferings = allOfferings.filter(
+                          (o) =>
+                            o.status !== "retired" &&
+                            o.applies_to_id === pkg.id &&
+                            (!o.concept_id || !retiredConceptIdSet.has(o.concept_id)) &&
+                            (!enabledConceptIds || !o.concept_id || enabledConceptIds.has(o.concept_id))
+                        );
                         const defCount = pkgOfferings.filter((o) => effectiveRole(o) === "included").length;
                         const addCount = pkgOfferings.filter((o) => effectiveRole(o) === "addon_option").length;
                         const isTopTier = idx === comprehensivePackages.length - 1;
@@ -2934,11 +3021,20 @@ ${aiMarkdownTable}`;
                     <h2 className="text-base font-bold text-[var(--rl-text-strong)]">
                       {isPackaged && activePackage ? activePackage.name : selectedCatalog.name}
                     </h2>
-                    {isPackaged && activePackage && comprehensivePackages.findIndex((p) => p.id === activePackage.id) >= 0 && (
-                      <span className="rounded-[4px] bg-[var(--rl-black)] text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-                        Tier {comprehensivePackages.findIndex((p) => p.id === activePackage.id) + 1} of {comprehensivePackages.length}
-                      </span>
-                    )}
+                    {isPackaged && (() => {
+                      const tierIdx = hasMultiCatalogPackages
+                        ? siblingPackageConfigs.findIndex((c) => c.id === selectedCatalog?.id)
+                        : activePackage
+                        ? comprehensivePackages.findIndex((p) => p.id === activePackage.id)
+                        : -1;
+                      const tierTotal = hasMultiCatalogPackages ? siblingPackageConfigs.length : comprehensivePackages.length;
+                      if (tierIdx < 0) return null;
+                      return (
+                        <span className="rounded-[4px] bg-[var(--rl-black)] text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                          Tier {tierIdx + 1} of {tierTotal}
+                        </span>
+                      );
+                    })()}
                     {isPackaged && activePackage && (
                       <button
                         type="button"
@@ -2952,7 +3048,7 @@ ${aiMarkdownTable}`;
                   </div>
                   <p className="text-xs text-[var(--rl-text-muted)]">
                     {selectedCompany?.name} · {selectedSegment?.name || "Private"} · {selectedVehicle?.name || "Car"} ·{" "}
-                    {isPackaged ? "Package System" : "Add-on System"} · {defaultOfferings.length} Included Defaults · {addonOfferings.length} Available Add-ons
+                    {isPackaged ? "Package System" : "Add-on System"} · {activeDefaultCount} Included Defaults · {activeAddonCount} Available Add-ons
                   </p>
                 </div>
               </div>
@@ -3006,7 +3102,7 @@ ${aiMarkdownTable}`;
                   </p>
                 </div>
                 <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                  {defaultOfferings.length} / {defaultConcepts.length} Active in this tier
+                  {activeDefaultCount} / {defaultConcepts.length} Active in this tier
                 </span>
               </div>
 
@@ -3027,7 +3123,9 @@ ${aiMarkdownTable}`;
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div
-                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${isActive
+                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${concept.default_asset?.url
+                              ? "bg-white border-[var(--rl-border)]"
+                              : isActive
                               ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
                               : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
                               }`}
@@ -3065,6 +3163,7 @@ ${aiMarkdownTable}`;
                         {isActive ? (
                           <>
                             <input
+                              key={`${offering?.id || concept.id}-val-${cleanCoverageValue(offering?.display_value)}`}
                               type="text"
                               defaultValue={cleanCoverageValue(offering?.display_value)}
                               onClick={(e) => e.stopPropagation()}
@@ -3076,6 +3175,7 @@ ${aiMarkdownTable}`;
                               title="Coverage value / limit"
                             />
                             <input
+                              key={`${offering?.id || concept.id}-price-${JSON.stringify(offering?.optional_price || null)}`}
                               type="text"
                               defaultValue={
                                 offering?.optional_price?.type === "formula"
@@ -3140,7 +3240,7 @@ ${aiMarkdownTable}`;
                   </p>
                 </div>
                 <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                  {addonOfferings.length} / {addonConcepts.length} Active in this tier
+                  {activeAddonCount} / {addonConcepts.length} Active in this tier
                 </span>
               </div>
 
@@ -3163,7 +3263,9 @@ ${aiMarkdownTable}`;
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2.5 min-w-0">
                             <div
-                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${isActive
+                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${concept.default_asset?.url
+                                ? "bg-white border-[var(--rl-border)]"
+                                : isActive
                                 ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
                                 : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
                                 }`}
@@ -3232,6 +3334,7 @@ ${aiMarkdownTable}`;
                         {isActive ? (
                           <>
                             <input
+                              key={`${offering?.id || concept.id}-val-${cleanCoverageValue(offering?.display_value)}`}
                               type="text"
                               defaultValue={cleanCoverageValue(offering?.display_value)}
                               onClick={(e) => e.stopPropagation()}
@@ -3243,6 +3346,7 @@ ${aiMarkdownTable}`;
                               title="Coverage value / limit"
                             />
                             <input
+                              key={`${offering?.id || concept.id}-price-${JSON.stringify(offering?.optional_price || null)}`}
                               type="text"
                               defaultValue={
                                 offering?.optional_price?.type === "formula"
@@ -3384,14 +3488,14 @@ ${aiMarkdownTable}`;
               <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
                 <div>
                   <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
-                    Category 1: Default / Global Benefits (11 items)
+                    Category 1: Default / Global Benefits ({defaultConcepts.length} items)
                   </h3>
                   <p className="text-xs text-[var(--rl-text-muted)]">
                     Click any tile to toggle on/off standard included policy coverages for {isPackaged && activePackage ? activePackage.name : "this configuration"}.
                   </p>
                 </div>
                 <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                  {defaultOfferings.length} / 11 Active in this tier
+                  {activeDefaultCount} / {defaultConcepts.length} Active in this tier
                 </span>
               </div>
 
@@ -3412,7 +3516,9 @@ ${aiMarkdownTable}`;
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div
-                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${isActive
+                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${concept.default_asset?.url
+                              ? "bg-white border-[var(--rl-border)]"
+                              : isActive
                               ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
                               : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
                               }`}
@@ -3450,6 +3556,7 @@ ${aiMarkdownTable}`;
                         {isActive ? (
                           <>
                             <input
+                              key={`${offering?.id || concept.id}-val-${cleanCoverageValue(offering?.display_value)}`}
                               type="text"
                               defaultValue={cleanCoverageValue(offering?.display_value)}
                               onClick={(e) => e.stopPropagation()}
@@ -3461,6 +3568,7 @@ ${aiMarkdownTable}`;
                               title="Coverage value / limit"
                             />
                             <input
+                              key={`${offering?.id || concept.id}-price-${JSON.stringify(offering?.optional_price || null)}`}
                               type="text"
                               defaultValue={
                                 offering?.optional_price?.type === "formula"
@@ -3518,14 +3626,14 @@ ${aiMarkdownTable}`;
               <div className="mb-4 flex items-center justify-between border-b border-[var(--rl-border)] pb-3">
                 <div>
                   <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
-                    Category 2: Unique Add-ons & Multi-Plan Variations (23 items)
+                    Category 2: Unique Add-ons &amp; Multi-Plan Variations ({addonConcepts.length} items)
                   </h3>
                   <p className="text-xs text-[var(--rl-text-muted)]">
                     Click any tile to toggle on/off optional endorsements and select plan variations (Plan A/B/C/D, etc.) in 1 click.
                   </p>
                 </div>
                 <span className="text-xs font-bold text-[var(--rl-text-strong)]">
-                  {addonOfferings.length} / 23 Active in this tier
+                  {activeAddonCount} / {addonConcepts.length} Active in this tier
                 </span>
               </div>
 
@@ -3548,7 +3656,9 @@ ${aiMarkdownTable}`;
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2.5 min-w-0">
                             <div
-                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${isActive
+                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${concept.default_asset?.url
+                                ? "bg-white border-[var(--rl-border)]"
+                                : isActive
                                 ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
                                 : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
                                 }`}
@@ -3617,6 +3727,7 @@ ${aiMarkdownTable}`;
                         {isActive ? (
                           <>
                             <input
+                              key={`${offering?.id || concept.id}-val-${cleanCoverageValue(offering?.display_value)}`}
                               type="text"
                               defaultValue={cleanCoverageValue(offering?.display_value)}
                               onClick={(e) => e.stopPropagation()}
@@ -3628,6 +3739,7 @@ ${aiMarkdownTable}`;
                               title="Coverage value / limit"
                             />
                             <input
+                              key={`${offering?.id || concept.id}-price-${JSON.stringify(offering?.optional_price || null)}`}
                               type="text"
                               defaultValue={
                                 offering?.optional_price?.type === "formula"

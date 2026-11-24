@@ -94,9 +94,11 @@ export function BenefitConditionsTab({
             <Badge variant="default">
               {companyBundles.length} Bundle{companyBundles.length === 1 ? "" : "s"}
             </Badge>
-            <Badge variant="default">
-              {companyConditions.length} Simple Rule{companyConditions.length === 1 ? "" : "s"}
-            </Badge>
+            {companyConditions.length > 0 && (
+              <Badge variant="default">
+                {companyConditions.length} Simple Rule{companyConditions.length === 1 ? "" : "s"}
+              </Badge>
+            )}
           </div>
           <p className="mt-1 text-xs text-[var(--rl-text-muted)]">
             Configure Bundled Benefits (&quot;Mystery Box&quot; packages with plan versions like Plan 1–4 that stay in Box 2, remove Box 1 base defaults, and unlock upgraded Box 2 benefits) alongside simple conditional overrides.
@@ -269,6 +271,7 @@ export function BenefitConditionsTab({
       </div>
 
       {/* Secondary Section: Legacy / Simple Conditional Rules (Collapsible) */}
+      {companyConditions.length > 0 && (
       <div className="rounded-[var(--rl-radius)] border border-[var(--rl-border)] bg-[var(--rl-surface)] shadow-sm overflow-hidden">
         <button
           type="button"
@@ -391,6 +394,7 @@ export function BenefitConditionsTab({
           </div>
         )}
       </div>
+      )}
 
       <BundleEditorDialog
         open={bundleDialogOpen}

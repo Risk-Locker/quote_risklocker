@@ -716,8 +716,8 @@ def _card(
 
     # Resolve description through 7-tier precedence:
     # 1. Selection override (typed_value_override["description"] or manual edit)
-    # 2. Dynamic conditional upgrade (company_benefit_conditions when trigger benefit/plan is active)
-    # 3. Scenario catalog offering override (CatalogOffering.description_override)
+    # 2. Dynamic conditional upgrade (company_benefit_conditions / bundle when trigger is active)
+    # 3. Scenario catalog offering override (CatalogOffering.description_override — Tier Custom in Catalog Builder)
     # 4. Company master baseline description (CompanyBenefitConfig.baseline_description)
     # 5. Insurer matrix catalog fallback (benefit_catalog_matrix.py)
     # 6. Master concept default (BenefitConcept.description)
@@ -735,10 +735,10 @@ def _card(
         final_desc = str(sel_desc).strip()
     elif cond_desc and cond_desc.strip():
         final_desc = cond_desc.strip()
-    elif comp_base_desc and comp_base_desc.strip():
-        final_desc = comp_base_desc.strip()
     elif offering_desc and str(offering_desc).strip():
         final_desc = str(offering_desc).strip()
+    elif comp_base_desc and comp_base_desc.strip():
+        final_desc = comp_base_desc.strip()
     elif cat_desc and str(cat_desc).strip():
         final_desc = cat_desc.strip()
     elif concept_desc and str(concept_desc).strip():

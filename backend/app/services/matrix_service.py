@@ -76,7 +76,7 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
     products = list(
         db.scalars(
             select(InsuranceProduct)
-            .where(InsuranceProduct.company_id == company_id)
+            .where(InsuranceProduct.company_id == company_id, InsuranceProduct.status != "archived")
             .order_by(InsuranceProduct.sort_order if hasattr(InsuranceProduct, "sort_order") else InsuranceProduct.name)
         ).all()
     )
@@ -85,7 +85,7 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
     catalogs = list(
         db.scalars(
             select(BenefitCatalog)
-            .where(BenefitCatalog.company_id == company_id)
+            .where(BenefitCatalog.company_id == company_id, BenefitCatalog.status != "archived")
             .order_by(BenefitCatalog.name)
         ).all()
     )
@@ -199,7 +199,11 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
         defaults = []
         addons = []
         for o in offerings:
+            if getattr(o, "status", "active") == "retired":
+                continue
             conc = concepts.get(o.concept_id)
+            if conc and getattr(conc, "status", "active") == "retired":
+                continue
             c_key = conc.concept_key if conc else o.offering_key
             c_label = o.label_override or (conc.label if conc else o.offering_key)
             off_desc = getattr(o, "description_override", None)
