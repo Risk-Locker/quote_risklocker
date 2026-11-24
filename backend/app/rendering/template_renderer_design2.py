@@ -159,23 +159,16 @@ def render_design2_html(
     disc_pct_raw = _get_val(draft_fields, "motor_discount_pct", "")
     disc_flat_raw = _get_val(draft_fields, "quotation_discount", "")
     disc_bd = calculate_motor_discount(premium, disc_pct_raw or 0, disc_flat_raw or 0)
-    has_discount = disc_bd.effective_discount > Decimal("0.00") or disc_bd.motor_discount_pct > Decimal("0.00")
+    has_discount = disc_bd.effective_discount > Decimal("0.00")
     prem_label_width = "214px" if has_discount else "186px"
     discount_row_html = ""
     if has_discount:
-        pct_num = float(disc_bd.motor_discount_pct)
-        pct_str = f"{int(pct_num) if pct_num.is_integer() else pct_num:g}%"
-        if pct_num > 0 and disc_bd.flat_discount_amount > Decimal("0.00"):
-            discount_display = f"{pct_str} + {_format_money(f'{disc_bd.flat_discount_amount:.2f}')}"
-        elif pct_num > 0:
-            discount_display = pct_str
-        else:
-            discount_display = _format_money(f"{disc_bd.flat_discount_amount:.2f}")
+        discount_display = _format_money(f"{disc_bd.effective_discount:.2f}")
         discount_label = "Discount" if is_english_only else "Discount / 折扣"
         discount_row_html = (
             f'<div class="spec-row"><div class="spec-label" style="width: {prem_label_width};">{escape(discount_label)}</div>'
             f'<div class="spec-colon">:</div>'
-            f'<div class="spec-value">{escape(discount_display)}</div></div>'
+            f'<div class="spec-value" style="white-space: nowrap;">{escape(discount_display)}</div></div>'
         )
     displayed_premium = f"{disc_bd.net_motor_premium:.2f}" if has_discount else premium
 

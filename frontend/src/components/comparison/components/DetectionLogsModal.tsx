@@ -258,7 +258,7 @@ export function DetectionLogsModal({
               <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100">
                 <span className="text-[#6e6e73] block text-[10px]">Propulsion</span>
                 <strong className="text-xs font-bold text-[#1b1717]">
-                  {detectionLogs?.vehicle?.propulsion || "ICE"}
+                  {detectionLogs?.vehicle?.propulsion || "Petrol"}
                 </strong>
               </div>
               <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100">

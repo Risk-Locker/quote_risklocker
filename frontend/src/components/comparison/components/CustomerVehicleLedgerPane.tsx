@@ -188,7 +188,7 @@ export function CustomerVehicleLedgerPane({
       setUnitPrompt({
         targetUnit: "cc",
         targetVehicleType: "Car",
-        targetVehicleLabel: "Private Car (ICE)",
+        targetVehicleLabel: "Private Car (Petrol)",
       });
     } else {
       handleRecalculateRoadTax(num, newUnit, vehicleTypeInput);
@@ -550,7 +550,7 @@ export function CustomerVehicleLedgerPane({
                               ? "bg-[#1b1717] text-white"
                               : "text-[#6e6e73] hover:text-[#1b1717] hover:bg-neutral-200"
                           }`}
-                          title={u === "cc" ? "ICE (Petrol/Diesel CC)" : u === "kw" ? "Electric Vehicle (kW)" : "Commercial (BDM/BTM KG)"}
+                          title={u === "cc" ? "Petrol (CC)" : u === "kw" ? "Electric Vehicle (kW)" : "Commercial (BDM/BTM KG)"}
                         >
                           {u}
                         </button>

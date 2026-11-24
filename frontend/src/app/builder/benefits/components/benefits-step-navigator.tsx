@@ -396,7 +396,7 @@ export function BenefitsStepNavigator({
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
                   3. Engine:
                 </span>
-                <Tooltip content="Filter policy products for internal combustion (ICE) or electric vehicles (EV)">
+                <Tooltip content="Filter policy products for petrol or electric vehicles (EV)">
                   <Info size={11} className="text-[var(--rl-text-muted)]" />
                 </Tooltip>
               </div>
@@ -414,7 +414,7 @@ export function BenefitsStepNavigator({
                       }`}
                     >
                       {eng === "ev" && <Lightning size={12} weight="fill" className="text-amber-500" />}
-                      <span>{eng === "ice" ? "ICE (Petrol/Diesel)" : "EV (Electric)"}</span>
+                      <span>{eng === "ice" ? "Petrol" : "EV (Electric)"}</span>
                     </button>
                   );
                 })}

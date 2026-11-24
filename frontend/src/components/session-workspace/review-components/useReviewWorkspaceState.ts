@@ -349,10 +349,18 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
       fields["authorised_driver"] = resolvedDriver;
     }
 
+    if (workspace?.discount_summary) {
+      fields["motor_discount_pct"] = workspace.discount_summary.motor_discount_pct;
+      fields["motor_discount_amount"] = workspace.discount_summary.pct_discount_amount;
+      fields["quotation_discount"] = workspace.discount_summary.flat_discount_amount;
+      fields["effective_discount"] = workspace.discount_summary.effective_discount;
+      fields["net_motor_premium"] = workspace.discount_summary.net_motor_premium;
+    }
+
     fields["total_amount"] = effTotal;
     fields["total_premium_adjusted"] = effTotal;
     return fields;
-  }, [workspace?.fields, workspace?.total_premium_adjusted, workspace?.extras, workspace?.pinned_names?.company_name, workspace?.display_options, formValues, roundTotal]);
+  }, [workspace?.fields, workspace?.discount_summary, workspace?.total_premium_adjusted, workspace?.extras, workspace?.pinned_names?.company_name, workspace?.display_options, formValues, roundTotal]);
 
   function commitField(field: FormField, explicitValue?: string) {
     const current = explicitValue !== undefined ? explicitValue : formValues[field.name];

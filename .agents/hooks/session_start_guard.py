@@ -61,7 +61,7 @@ def main() -> int:
     summary = (
         "[Risklocker Session Context] "
         + " | ".join(parts)
-        + ". Read AGENTS.md + docs/core/START-HERE.md; keep CEO -> Default Agent -> PM (01) -> Specialist Leads workflow active."
+        + ". Read AGENTS.md + docs/core/START-HERE.md; apply the 3-Tier Depth Policy (Quick / Standard / Deep Audit-Refactor)."
     )
     payload = {
         "injectSteps": [

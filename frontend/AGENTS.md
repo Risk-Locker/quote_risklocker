@@ -13,6 +13,7 @@
    - Benchmark real product layouts via **Mobbin** (`mobbin_mobbin` when paid plan active, or `browser`/screenshots otherwise), verify accessible primitives via **`risklocker-ui-shadcn` MCP** (`.agents/plugins/risklocker-ui/`) + existing `frontend/src/components/ui/`, and lock strictly to Risklocker semantic `--rl-*` CSS tokens (`#f5f5f7`, `#ffffff`, `#1b1717`, `#ed1c24`, `8px`/`6px` radius, no pills, no random hex colors, Phosphor icons where specified, accessible Radix dialogs/tooltips).
    - **Ban native browser popups (`window.alert`, `window.confirm`, `window.prompt`).** Use accessible `Dialog` and `useToast()` components.
    - **Ban `localStorage` as primary business persistence.** All catalogs, presets, and drafts must round-trip through verified backend APIs.
+   - **Zero Dead UI / Silent Failures:** Every button or action calling `api(...)` MUST show loading feedback, handle errors visibly (`useToast()` or inline alert — never `catch (e) { console.error(e); }`), and point to a verified backend route.
 4. **PDF Preview & Download Parity**:
    - Never generate official downloads via client `jsPDF` PNG raster screenshots or stale static `<svg>` mockups. Use the backend Playwright Chromium PDF endpoint (`/generate` / artifact download) and exact Design 2 HTML/React component parity.
 5. **Security & Route Guards**:

@@ -1314,10 +1314,10 @@ export function GlobalAiCopilot() {
               </button>
               <button
                 type="button"
-                onClick={() => handleSelectPrompt(`For ${activeCompany?.name || "AmAssurance"} Private Car ICE: `)}
+                onClick={() => handleSelectPrompt(`For ${activeCompany?.name || "AmAssurance"} Private Car Petrol: `)}
                 className="px-2 py-0.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-surface-muted)] hover:bg-white text-[10px] whitespace-nowrap"
               >
-                🚗 ICE Scope
+                🚗 Petrol Scope
               </button>
               <button
                 type="button"

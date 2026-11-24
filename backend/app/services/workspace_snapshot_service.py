@@ -476,6 +476,7 @@ def build_workspace_snapshot(db, user, session_id: str) -> dict:
         "gross_motor_premium": f"{disc_bd.gross_motor_premium:.2f}",
         "net_motor_premium": f"{disc_bd.net_motor_premium:.2f}",
     }
+    raw_fields["motor_discount_amount"] = {"value": discount_summary["pct_discount_amount"], "status": "ready", "message": ""}
     raw_fields["effective_discount"] = {"value": discount_summary["effective_discount"], "status": "ready", "message": ""}
     raw_fields["net_motor_premium"] = {"value": discount_summary["net_motor_premium"], "status": "ready", "message": ""}
     draft_fields_for_summary = cast(

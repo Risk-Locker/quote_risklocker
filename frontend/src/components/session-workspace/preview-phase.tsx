@@ -260,6 +260,15 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
 
   const design2Fields: Record<string, unknown> = {
     ...workspace.fields,
+    ...(workspace.discount_summary
+      ? {
+          motor_discount_pct: workspace.discount_summary.motor_discount_pct,
+          motor_discount_amount: workspace.discount_summary.pct_discount_amount,
+          quotation_discount: workspace.discount_summary.flat_discount_amount,
+          effective_discount: workspace.discount_summary.effective_discount,
+          net_motor_premium: workspace.discount_summary.net_motor_premium,
+        }
+      : {}),
     ...(effPremStr ? { premium: effPremStr, coverage_premium: effPremStr } : {}),
     ...(effTotalStr ? { total_amount: effTotalStr, total_premium_adjusted: effTotalStr } : {}),
   };

@@ -1,14 +1,52 @@
 {
   "risklocker-session-context": {
-    "enabled": false
-  },
-  "risklocker-freeze-and-path-guard": {
-    "enabled": false
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python ./hooks/session_start_guard.py",
+        "timeout": 10
+      }
+    ]
   },
   "risklocker-static-tripwire": {
-    "enabled": false
+    "enabled": true,
+    "PostToolUse": [
+      {
+        "matcher": "write_file|edit_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python ./hooks/static_security_tripwire.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   },
   "risklocker-brain-stop-guard": {
-    "enabled": false
+    "enabled": false,
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python ./hooks/brain_stop_guard.py",
+        "timeout": 15
+      }
+    ]
+  },
+  "risklocker-freeze-and-path-guard": {
+    "enabled": false,
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python ./hooks/freeze_and_path_guard.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

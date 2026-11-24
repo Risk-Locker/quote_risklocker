@@ -1920,7 +1920,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "vehicle": {
                 "model": veh_model or detected_model or "Motor Vehicle",
                 "engine_capacity": (f"{final_cc} kW" if is_detected_ev else f"{final_cc} CC") if final_cc else (veh_engine_cc or "1496 CC"),
-                "propulsion": "Electric Vehicle (ZEV)" if is_detected_ev else "Internal Combustion Engine (ICE)",
+                "propulsion": "Electric Vehicle (ZEV)" if is_detected_ev else "Petrol Vehicle",
                 "vehicle_type": resolved_vtype,
                 "entity_type": entity_type,
                 "region": "Peninsular (West Malaysia)",

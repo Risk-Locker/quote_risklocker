@@ -50,6 +50,18 @@ def _normalize_token(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
+def _infer_powertrain_from_text(text: str) -> str:
+    """Resolve powertrain filter ('ice', 'ev', or 'all') from natural language."""
+    lower = text.lower()
+    has_petrol = any(kw in lower for kw in ("ice", "petrol", "diesel"))
+    has_ev = "ev" in lower
+    if has_petrol and not has_ev:
+        return "ice"
+    if has_ev and not has_petrol:
+        return "ev"
+    return "all"
+
+
 def parse_catalog_intent(
     db: Session,
     query: str,
@@ -91,7 +103,7 @@ def parse_catalog_intent(
     q_norm = re.sub(r"\btier\s*3\b", "premier", q_norm)
 
     # Scoping context extracted from natural language
-    global_powertrain = "ice" if ("ice" in q_lower and "ev" not in q_lower) else ("ev" if ("ev" in q_lower and "ice" not in q_lower) else "all")
+    global_powertrain = _infer_powertrain_from_text(q_lower)
     global_vehicle = "commercial" if ("lorry" in q_lower or "commercial" in q_lower) else ("motorcycle" if ("motor" in q_lower or "bike" in q_lower) else ("car" if ("car" in q_lower or "saloon" in q_lower) else "all"))
     global_segment = "private" if "private" in q_lower else ("commercial" if ("commercial" in q_lower and "lorry" not in q_lower) else "all")
 
@@ -169,7 +181,7 @@ def parse_catalog_intent(
             elif g3:
                 val = f"RM {g3}"
 
-        powertrain = "ice" if "ice" in q_lower and "ev" not in q_lower else ("ev" if "ev" in q_lower and "ice" not in q_lower else "all")
+        powertrain = _infer_powertrain_from_text(q_lower)
         veh_cat = "car" if ("car" in q_lower or "saloon" in q_lower) else ("all" if "all" in q_lower else "car")
 
         is_add = bool(re.search(r"\badd\b.*?\bwindscreen\b|\bwindscreen\b.*?\badd\b", q_lower)) or "add" in q_lower
@@ -210,7 +222,7 @@ def parse_catalog_intent(
         if matched_c:
             veh_cat = "commercial" if "lorry" in scope or "commercial" in scope else ("car" if "car" in scope else "all")
             cov_type = "tpft" if "tpft" in scope else ("comprehensive" if "comp" in scope else "all")
-            powertrain = "ev" if "ev" in scope else ("ice" if "ice" in scope else "all")
+            powertrain = _infer_powertrain_from_text(scope)
             operations.append({
                 "action": "remove_offering",
                 "concept_key": matched_c.concept_key,

@@ -83,7 +83,7 @@ interface AiCatalogSidebarProps {
 
 const EXAMPLE_PROMPTS = [
   "Change AmAssurance towing tier 1 to 200km and tier 2 to 300km",
-  "Add windscreen RM 500 as addon for all ICE saloon cars",
+  "Add windscreen RM 500 as addon for all Petrol saloon cars",
   "Update QBE main benefit description to 'Comprehensive roadside assistance with unlimited towing'",
   "Set towing to 100 km for private cars",
 ];

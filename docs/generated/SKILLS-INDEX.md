@@ -4,18 +4,20 @@
 
 ## Budget Snapshot
 
-- **Active Mounted Skills (`.agents/skills/`):** `4` / `50` soft budget (`~256` estimated boot prompt tokens)
-- **Cold Vault Skills (`.agents/skills-vault/`):** `37` (`0` boot prompt tokens until mounted)
-- **Universal Scope Skills (`init-ai-factory.py`):** `38`
+- **Active Mounted Skills (`.agents/skills/`):** `6` / `50` soft budget (`~369` estimated boot prompt tokens)
+- **Cold Vault Skills (`.agents/skills-vault/`):** `43` (`0` boot prompt tokens until mounted)
+- **Universal Scope Skills (`init-ai-factory.py`):** `46`
 
 ## Active Mounted Skills
 
 | Skill | Category | Scope | Source | Est. Tokens |
 | :--- | :--- | :--- | :--- | ---: |
 | `design2-pdf-parity` | `domain` | `project` | `risklocker-custom` | ~70 |
-| `lean-context` | `general` | `universal` | `local-repo` | ~40 |
 | `malaysian-motor-insurance` | `domain` | `project` | `risklocker-custom` | ~80 |
 | `postgres-ledger-migrations` | `backend-db` | `project` | `risklocker-custom` | ~66 |
+| `shadcn` | `frontend` | `universal` | `risklocker-custom+radix` | ~46 |
+| `software-architecture` | `architecture` | `universal` | `local-repo` | ~59 |
+| `supabase-postgres-best-practices` | `backend-db` | `universal` | `local-repo` | ~48 |
 
 ## Cold Vault Skills
 
@@ -26,7 +28,9 @@
 | `better-ui` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/better-ui` |
 | `brainstorming` | `general` | `universal` | `obra/superpowers+risklocker` | `.agents/skills-vault/general/brainstorming` |
 | `building-components` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/building-components` |
+| `clean-code` | `architecture` | `universal` | `local-repo` | `.agents/skills-vault/architecture/clean-code` |
 | `company-dispatch` | `general` | `universal` | `risklocker-custom` | `.agents/skills-vault/general/company-dispatch` |
+| `deep-refactor-architect` | `architecture` | `universal` | `local-repo` | `.agents/skills-vault/architecture/deep-refactor-architect` |
 | `design-systems-frontend-architecture` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/design-systems-frontend-architecture` |
 | `design-taste-frontend` | `frontend` | `universal` | `curated-global` | `.agents/skills-vault/frontend/design-taste-frontend` |
 | `deslopify` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/deslopify` |
@@ -39,6 +43,8 @@
 | `forms-inputs-checkout` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/forms-inputs-checkout` |
 | `frontend-design` | `frontend` | `universal` | `curated-global` | `.agents/skills-vault/frontend/frontend-design` |
 | `gsap-framer-scroll-animation` | `frontend` | `universal` | `curated-global` | `.agents/skills-vault/frontend/gsap-framer-scroll-animation` |
+| `house-inspector-audit` | `architecture` | `universal` | `local-repo` | `.agents/skills-vault/architecture/house-inspector-audit` |
+| `impeccable` | `design` | `universal` | `local-repo` | `.agents/skills-vault/design/impeccable` |
 | `kami` | `design` | `universal` | `local-repo` | `.agents/skills-vault/design/kami` |
 | `live-reality-and-deprecation-gate` | `general` | `universal` | `risklocker-custom` | `.agents/skills-vault/general/live-reality-and-deprecation-gate` |
 | `operational-enterprise-ai` | `architecture` | `universal` | `local-repo` | `.agents/skills-vault/architecture/operational-enterprise-ai` |
@@ -50,9 +56,11 @@
 | `react-doctor` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/react-doctor` |
 | `receiving-code-review` | `general` | `universal` | `obra/superpowers` | `.agents/skills-vault/general/receiving-code-review` |
 | `requesting-code-review` | `general` | `universal` | `obra/superpowers` | `.agents/skills-vault/general/requesting-code-review` |
+| `security-review` | `security` | `universal` | `local-repo` | `.agents/skills-vault/security/security-review` |
 | `security-threat-model` | `security` | `universal` | `curated-global` | `.agents/skills-vault/security/security-threat-model` |
 | `subagent-driven-development` | `general` | `universal` | `local-repo` | `.agents/skills-vault/general/subagent-driven-development` |
 | `tailwindcss` | `frontend` | `universal` | `local-repo` | `.agents/skills-vault/frontend/tailwindcss` |
+| `ui-ux-pro-max` | `design` | `universal` | `local-repo` | `.agents/skills-vault/design/ui-ux-pro-max` |
 | `using-superpowers` | `general` | `universal` | `obra/superpowers+risklocker` | `.agents/skills-vault/general/using-superpowers` |
 | `verification-before-completion` | `general` | `universal` | `obra/superpowers` | `.agents/skills-vault/general/verification-before-completion` |
 | `web-design-guidelines` | `design` | `universal` | `vercel+risklocker` | `.agents/skills-vault/design/web-design-guidelines` |

@@ -510,6 +510,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     pct_for_disc = to_decimal_clean(_field_text(fields, "motor_discount_pct"))
     flat_for_disc = to_decimal_clean(_field_text(fields, "quotation_discount"))
     disc_bd = calculate_motor_discount(prem_for_disc, pct_for_disc, flat_for_disc)
+    fields["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready", "message": ""}
     fields["effective_discount"] = {"value": f"{disc_bd.effective_discount:.2f}", "status": "ready", "message": ""}
     fields["net_motor_premium"] = {"value": f"{disc_bd.net_motor_premium:.2f}", "status": "ready", "message": ""}
     canvas = config.get("canvas") or {}

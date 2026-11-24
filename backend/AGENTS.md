@@ -10,6 +10,7 @@
 2. **RBAC & HTTP Purity**:
    - Every `/admin/*`, `/settings/*`, `/users/*`, or mutation endpoint MUST enforce explicit `Depends(require_role(...))`—no implicit authenticated defaults.
    - **HTTP `GET` handlers MUST NEVER write, auto-create, repair, or commit DB transactions.** Side-effect initialization belongs strictly in explicit `POST`/`PATCH` endpoints.
+   - **Explicit Commits on Mutations:** Every mutating route/service MUST call `db.commit()` (and `sqlalchemy.orm.attributes.flag_modified(...)` when mutating `JSON`/`JSONB` dicts/lists) before returning; `db.flush()` alone rolls back silently under `autocommit=False`.
 3. **Storage & Worker Integrity**:
    - Production workers (`render_worker.py`, `extraction_worker.py`) must fail fast or enforce private Supabase Storage when `APP_ENV=production`—never silently fall back to `.qc-tmp/stateless_generated/`.
 4. **Scalability & Queries**:

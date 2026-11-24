@@ -503,7 +503,7 @@ export function PolicyFieldsCard({
                           pinCatalog(workspace.pinned.company_id as string, matchingEv.id, null, { stageOnly: true });
                           setSyncHighlight({
                             field: "product_package",
-                            prev: currentProd ? formatProductLabel(currentProd.name) : "ICE Package",
+                            prev: currentProd ? formatProductLabel(currentProd.name) : "Petrol Package",
                             next: formatProductLabel(matchingEv.name),
                             timestamp: Date.now(),
                           });
@@ -549,7 +549,7 @@ export function PolicyFieldsCard({
                         : "text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
                     }`}
                   >
-                    {eng === "ICE" ? "ICE (Petrol / Diesel)" : "EV (Electric)"}
+                    {eng === "ICE" ? "Petrol" : "EV (Electric)"}
                   </button>
                 );
               })}

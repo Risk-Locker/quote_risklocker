@@ -318,7 +318,8 @@ def test_motor_discount_pct_syncs_across_comparison_covernote_draft_whatsapp_and
     assert adjusted_total_text(q1_draft.fields, [], round_total=True) == "1,010.00"
     html = render_design2_html(q1_draft.fields, template_config={}, db=db_session)
     assert "Discount / 折扣" in html
-    assert "10%" in html
+    assert ">RM 100.00<" in html
+    assert ">10%<" not in html
     assert "Insurance Premium / 保费 (after discount)" in html
     assert "RM 900.00" in html
     assert "RM 1,010.00" in html

@@ -334,19 +334,13 @@ export function Design2CanvasView({
   const roadtax = getVal(fields, "roadtax", "40.00");
   const runner = getVal(fields, "runner_fee", "0.00");
   const totalPayable = getVal(fields, "total_amount", "5447.30");
-  const motorDiscountPct = parseFloat(String(getVal(fields, "motor_discount_pct", "0")).replace(/[^0-9.]/g, "") || "0");
   const effectiveDiscountAmt = parseFloat(String(getVal(fields, "effective_discount", "0")).replace(/[^0-9.]/g, "") || "0");
   const flatDiscountAmt = parseFloat(String(getVal(fields, "quotation_discount", "0")).replace(/[^0-9.]/g, "") || "0");
   const netMotorPrem = getVal(fields, "net_motor_premium", "");
-  const hasDiscount = effectiveDiscountAmt > 0 || motorDiscountPct > 0 || flatDiscountAmt > 0;
+  const resolvedDiscountAmt = effectiveDiscountAmt > 0 ? effectiveDiscountAmt : flatDiscountAmt;
+  const hasDiscount = resolvedDiscountAmt > 0;
   const premLabelWidth = hasDiscount ? "214px" : "186px";
-  const pctStr = `${motorDiscountPct % 1 === 0 ? motorDiscountPct.toFixed(0) : motorDiscountPct}%`;
-  const discountDisplay =
-    motorDiscountPct > 0 && flatDiscountAmt > 0
-      ? `${pctStr} + ${formatMoney(flatDiscountAmt.toFixed(2))}`
-      : motorDiscountPct > 0
-        ? pctStr
-        : formatMoney(flatDiscountAmt.toFixed(2));
+  const discountDisplay = formatMoney(resolvedDiscountAmt.toFixed(2));
   const displayedPremium = hasDiscount && netMotorPrem ? netMotorPrem : premium;
 
   const rtCombined = useMemo(() => {
@@ -574,7 +568,7 @@ export function Design2CanvasView({
                       {isEnglishOnly ? "Discount" : "Discount / 折扣"}
                     </div>
                     <div style={{ width: "14px", textAlign: "center", color: "#475569", flexShrink: 0, paddingBottom: "2px" }}>:</div>
-                    <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2 }}>
+                    <div style={{ fontSize: "10.8px", fontWeight: 600, color: "#0F172A", flexGrow: 1, borderBottom: "1px solid #334155", paddingBottom: "2px", lineHeight: 1.2, whiteSpace: "nowrap" }}>
                       {discountDisplay}
                     </div>
                   </div>

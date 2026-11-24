@@ -233,6 +233,7 @@ def test_workspace_discount_syncs_bidirectionally_and_resets_cleanly(db_session)
     snap = build_workspace_snapshot(db_session, user, s1.id)
     assert snap["discount_summary"]["motor_discount_pct"] == "5.00"
     assert snap["discount_summary"]["net_motor_premium"] == "1202.95"
+    assert snap["fields"]["motor_discount_amount"]["value"] == "63.31"
 
     # Reset back to 0% -> zeroes out discount cleanly everywhere
     res_zero = apply_workspace_patch(
@@ -279,16 +280,64 @@ def test_design2_html_and_pdf_discount_parity_bilingual_and_english(db_session, 
     prem_idx = html_bi.index("Insurance Premium / 保费 (after discount)")
     rt_idx = html_bi.index("Roadtax and Runner Fee / 路税及服务费")
     assert disc_idx < prem_idx < rt_idx
-    assert "5%" in html_bi
+    assert ">RM 63.31<" in html_bi
+    assert ">5%<" not in html_bi
     assert "RM 1,202.95" in html_bi
     assert "RM 140.00" in html_bi
     assert "width: 214px;" in html_bi
+    assert "white-space: nowrap;" in html_bi
 
     html_en = render_design2_html(fields_5pct, template_config={"language_mode": "en"}, db=db_session)
     assert "Discount / 折扣" not in html_en
     assert ">Discount<" in html_en
+    assert ">RM 63.31<" in html_en
+    assert ">5%<" not in html_en
     assert "Insurance Premium (after discount)" in html_en
     assert "width: 214px;" in html_en
+
+    # TPO Half-Page variants (Bilingual & English Only) also display monetary RM discount cleanly
+    html_tpo_bi = render_design2_html(
+        fields_5pct,
+        template_config={"language_mode": "bilingual", "hide_addon_upgrades": True, "page_profile": {"height": 580}},
+        db=db_session,
+    )
+    assert "794px 580px" in html_tpo_bi
+    assert "Discount / 折扣" in html_tpo_bi
+    assert ">RM 63.31<" in html_tpo_bi
+    assert ">5%<" not in html_tpo_bi
+
+    html_tpo_en = render_design2_html(
+        fields_5pct,
+        template_config={"language_mode": "en", "hide_addon_upgrades": True, "page_profile": {"height": 580}},
+        db=db_session,
+    )
+    assert "794px 580px" in html_tpo_en
+    assert ">Discount<" in html_tpo_en
+    assert ">RM 63.31<" in html_tpo_en
+    assert ">5%<" not in html_tpo_en
+
+    # Exact user example: RM 7,360.00 motor premium with 5% discount -> RM 368.00
+    fields_368 = {
+        **d1.fields,
+        "premium": {"value": "7360.00"},
+        "motor_discount_pct": {"value": "5.00"},
+        "total_amount": {"value": "7132.00"},
+    }
+    html_368 = render_design2_html(fields_368, template_config={"language_mode": "bilingual"}, db=db_session)
+    assert ">RM 368.00<" in html_368
+    assert ">5%<" not in html_368
+    assert "RM 6,992.00" in html_368
+
+    # Combined % + flat discount -> single combined RM amount
+    fields_combo = {
+        **fields_368,
+        "quotation_discount": {"value": "32.00"},
+        "total_amount": {"value": "7100.00"},
+    }
+    html_combo = render_design2_html(fields_combo, template_config={"language_mode": "en"}, db=db_session)
+    assert ">RM 400.00<" in html_combo
+    assert ">5%<" not in html_combo
+    assert "RM 6,960.00" in html_combo
 
     # 0% discount case: Discount row omitted, standard label & 186px width
     html_zero = render_design2_html(d1.fields, template_config={"language_mode": "bilingual"}, db=db_session)
@@ -298,12 +347,16 @@ def test_design2_html_and_pdf_discount_parity_bilingual_and_english(db_session, 
     assert "RM 1,266.26" in html_zero
     assert "width: 214px;" not in html_zero
 
-    # Playwright Chromium PDF generation succeeds cleanly for both 0% and 5%
+    # Playwright Chromium PDF generation succeeds cleanly for Full A4 (0% & 5%) and TPO Half-Page
     pdf5_path = tmp_path / "design2_5pct.pdf"
     pdf0_path = tmp_path / "design2_0pct.pdf"
+    pdf_tpo_path = tmp_path / "design2_tpo_5pct.pdf"
     html_to_pdf(html_bi, pdf5_path, width=794, height=1123)
     html_to_pdf(html_zero, pdf0_path, width=794, height=1123)
+    html_to_pdf(html_tpo_bi, pdf_tpo_path, width=794, height=580)
     pdf_5 = pdf5_path.read_bytes()
     pdf_0 = pdf0_path.read_bytes()
+    pdf_tpo = pdf_tpo_path.read_bytes()
     assert pdf_5.startswith(b"%PDF-") and len(pdf_5) > 5000
     assert pdf_0.startswith(b"%PDF-") and len(pdf_0) > 5000
+    assert pdf_tpo.startswith(b"%PDF-") and len(pdf_tpo) > 5000

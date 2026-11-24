@@ -12,16 +12,6 @@
       "est_boot_tokens": 70,
       "updated_at": "2026-11-11T16:02:03+08:00"
     },
-    "lean-context": {
-      "location": "active",
-      "path": ".agents/skills/lean-context",
-      "category": "general",
-      "scope": "universal",
-      "source": "local-repo",
-      "description_chars": 123,
-      "est_boot_tokens": 40,
-      "updated_at": "2026-11-19T15:33:29+08:00"
-    },
     "malaysian-motor-insurance": {
       "location": "active",
       "path": ".agents/skills/malaysian-motor-insurance",
@@ -42,6 +32,56 @@
       "est_boot_tokens": 66,
       "updated_at": "2026-11-11T12:58:06+08:00"
     },
+    "shadcn": {
+      "location": "active",
+      "path": ".agents/skills/shadcn",
+      "category": "frontend",
+      "scope": "universal",
+      "source": "risklocker-custom+radix",
+      "description_chars": 154,
+      "est_boot_tokens": 46,
+      "updated_at": "2026-11-23T18:59:33+08:00"
+    },
+    "software-architecture": {
+      "location": "active",
+      "path": ".agents/skills/software-architecture",
+      "category": "architecture",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 190,
+      "est_boot_tokens": 59,
+      "updated_at": "2026-11-23T18:59:33+08:00"
+    },
+    "supabase-postgres-best-practices": {
+      "location": "active",
+      "path": ".agents/skills/supabase-postgres-best-practices",
+      "category": "backend-db",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 138,
+      "est_boot_tokens": 48,
+      "updated_at": "2026-11-23T18:59:33+08:00"
+    },
+    "clean-code": {
+      "location": "vault/architecture",
+      "path": ".agents/skills-vault/architecture/clean-code",
+      "category": "architecture",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 153,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-24T01:17:53+08:00"
+    },
+    "deep-refactor-architect": {
+      "location": "vault/architecture",
+      "path": ".agents/skills-vault/architecture/deep-refactor-architect",
+      "category": "architecture",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 141,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-24T01:17:53+08:00"
+    },
     "domain-interrogation-and-reality-gate": {
       "location": "vault/architecture",
       "path": ".agents/skills-vault/architecture/domain-interrogation-and-reality-gate",
@@ -51,6 +91,16 @@
       "description_chars": 167,
       "est_boot_tokens": 0,
       "updated_at": "2026-11-12T18:11:27+08:00"
+    },
+    "house-inspector-audit": {
+      "location": "vault/architecture",
+      "path": ".agents/skills-vault/architecture/house-inspector-audit",
+      "category": "architecture",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 141,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-24T01:17:53+08:00"
     },
     "operational-enterprise-ai": {
       "location": "vault/architecture",
@@ -92,6 +142,16 @@
       "est_boot_tokens": 0,
       "updated_at": "2026-11-12T18:11:40+08:00"
     },
+    "impeccable": {
+      "location": "vault/design",
+      "path": ".agents/skills-vault/design/impeccable",
+      "category": "design",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 183,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-24T01:17:53+08:00"
+    },
     "kami": {
       "location": "vault/design",
       "path": ".agents/skills-vault/design/kami",
@@ -101,6 +161,16 @@
       "description_chars": 230,
       "est_boot_tokens": 0,
       "updated_at": "2026-11-13T21:44:51+08:00"
+    },
+    "ui-ux-pro-max": {
+      "location": "vault/design",
+      "path": ".agents/skills-vault/design/ui-ux-pro-max",
+      "category": "design",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 143,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-24T01:17:53+08:00"
     },
     "web-design-guidelines": {
       "location": "vault/design",
@@ -351,6 +421,16 @@
       "description_chars": 84,
       "est_boot_tokens": 0,
       "updated_at": "2026-11-17T16:16:22+08:00"
+    },
+    "security-review": {
+      "location": "vault/security",
+      "path": ".agents/skills-vault/security/security-review",
+      "category": "security",
+      "scope": "universal",
+      "source": "local-repo",
+      "description_chars": 133,
+      "est_boot_tokens": 0,
+      "updated_at": "2026-11-24T01:17:53+08:00"
     },
     "security-threat-model": {
       "location": "vault/security",
