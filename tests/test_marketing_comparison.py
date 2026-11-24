@@ -1693,7 +1693,7 @@ def test_road_tax_can_be_zero_and_persisted_without_jpj_overwrite(db_session: Se
     db_session.add(tenure)
 
     entry = TenureComparisonEntry(
-        id=new_id(),
+        id="41856910-3824-4156-8342-07312961e805",
         tenure_id=tenure.id,
         company_name="Allianz",
         sum_insured=35000.0,

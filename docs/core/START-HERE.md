@@ -27,7 +27,7 @@ External chat tools without workspace access should be given this file plus the 
 | Extraction or review values | `docs/domain/BUSINESS-RULES.md`, `docs/architecture/ARCHITECTURE.md` | extraction modules, fixtures, regression tests |
 | Templates or PDF generation | `docs/domain/BUSINESS-RULES.md`, `docs/architecture/ARCHITECTURE.md`, `docs/architecture/DESIGN-SYSTEM.md`, `docs/architecture/REFERENCES.md` | renderer, template config, builder, assets |
 | Database, Supabase, storage, migrations | `docs/architecture/ARCHITECTURE.md`, `docs/architecture/OPERATIONS.md` | models, migrations, storage services |
-| Insurer benefit catalogs, packages, matrix | `docs/domain/benefits/BENEFITS-CONFIGURATION.md`, `docs/domain/benefits/INSURER-CATALOG-DETAILS.md`, `docs/benefits/concise/all_benefits.md`, `docs/benefits/concise/company_all_benefits-v4.md` | seed scripts, benefit_setup_service, builder |
+| Insurer benefit catalogs, packages, matrix | `docs/domain/benefits/BENEFITS-CONFIGURATION.md`, `docs/domain/benefits/CATALOG-AUDIT-REPORT.md`, `docs/domain/benefits/INSURER-CATALOG-DETAILS.md`, `docs/benefits/concise/all_benefits.md`, `docs/benefits/concise/company_all_benefits-v4.md` | seed scripts, benefit_setup_service, builder |
 | Testing, failures, regression coverage | `docs/architecture/TESTING.md` | relevant tests and implementation |
 | Environment, local run, deployment, retention | `docs/architecture/OPERATIONS.md`, `docs/architecture/SETUP.md` | config and command scripts |
 | Deployment, VPS, subdomains, infrastructure | `docs/architecture/SETUP.md` | `docs/architecture/OPERATIONS.md` env tables |
@@ -72,6 +72,7 @@ External chat tools without workspace access should be given this file plus the 
 | `docs/domain/PROJECT-CONTEXT.md` | Product vision, user roles, supported workflows | Product scope or target user requirements change |
 | `docs/domain/PROJECT-DIAGRAM.md` | Visual user workflow & system boundary diagram | Major user flows or system integrations change |
 | `docs/domain/benefits/BENEFITS-CONFIGURATION.md` | Canonical 51-concept insurer & vehicle matrix | Insurer benefit configurations or seed lists change |
+| `docs/domain/benefits/CATALOG-AUDIT-REPORT.md` | Live DB motor catalog, bundle & Design 2 vector icon audit (`v31.2`) | Insurer catalogs, bundles, or benefit icons change |
 | `docs/domain/benefits/INSURER-CATALOG-DETAILS.md` | Detailed breakdown per insurer plan and rider | In-depth insurer plan details change |
 | `docs/domain/benefits/COMMERCIAL-LORRY-CATALOG-COMPARISON.md` | Commercial lorry/truck vs private car benefit catalog comparison | Commercial vehicle benefit rules change |
 | `docs/benefits/concise/all_benefits.md` | Master normalized 79-benefit catalog across all 7 insurers | Expanded benefit catalogs change |

@@ -8,7 +8,14 @@ from uuid import uuid4
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+@compiles(UUID, "sqlite")
+def _compile_uuid_sqlite(type_, compiler, **kw) -> str:
+    """Compile UUID columns to CHAR(32) on SQLite so hex scientific notation is never stored as float."""
+    return "CHAR(32)"
 
 from app.models.enums import AccountStatus, InsuranceType, RecordStatus, Role, StorageStatus
 
