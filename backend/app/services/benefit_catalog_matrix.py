@@ -11,7 +11,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "concept_key": "own-damage",
                 "label": "Own Damage",
                 "category": "default",
-                "coverage_formula": "vehicle_sum_insured",
                 "cost_formula": "0.00",
                 "description": "Accidental collision, overturning, fire, explosion & theft protection."
             },
@@ -35,7 +34,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "concept_key": "special-perils",
                 "label": "Special Perils",
                 "category": "addon",
-                "coverage_formula": "vehicle_sum_insured",
                 "cost_formula": "0.0025 * vehicle_sum_insured",
                 "description": "Full protection against floods, typhoons, landslides, fallen trees & tempests."
             },
@@ -43,7 +41,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "concept_key": "legal-liability-to-passengers",
                 "label": "Legal Liability to Passengers",
                 "category": "addon",
-                "coverage_formula": "statutory_unlimited",
                 "cost_formula": "max(0.00, 5.00 * (total_seats - 1))",
                 "description": "Legal protection against third-party negligence lawsuits by passengers."
             },
@@ -51,7 +48,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "concept_key": "legal-liability-of-passengers",
                 "label": "Legal Liability of Passengers",
                 "category": "addon",
-                "coverage_formula": "statutory_limit",
                 "cost_formula": "7.50",
                 "description": "Protects you against legal liability incurred by your passengers."
             }
@@ -62,7 +58,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "concept_key": "own-damage",
                 "label": "Own Damage",
                 "category": "default",
-                "coverage_formula": "vehicle_sum_insured",
                 "cost_formula": "0.00",
                 "description": "Accidental collision, overturning, fire, explosion & theft protection."
             }
@@ -75,7 +70,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "concept_key": "own-damage",
                 "label": "Own Damage",
                 "category": "default",
-                "coverage_formula": "vehicle_sum_insured",
                 "cost_formula": "0.00",
                 "description": "Accidental collision, overturning, fire, explosion & theft protection."
             },
@@ -91,7 +85,6 @@ BENEFIT_CATALOGS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
                 "concept_key": "special-perils",
                 "label": "Special Perils",
                 "category": "addon",
-                "coverage_formula": "vehicle_sum_insured",
                 "cost_formula": "0.0020 * vehicle_sum_insured", # Etiqa might have 0.20% instead of 0.25%
                 "description": "Full protection against floods, typhoons, landslides, fallen trees & tempests."
             }
