@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE, CLIENT_TAB_ID, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
-export type RealtimeScope = "ledger" | "comparison" | "workspace" | "sessions" | "clients";
+export type RealtimeScope = "ledger" | "comparison" | "workspace" | "sessions" | "clients" | "upload_runs";
 
 export interface RealtimeEditor {
   scope: RealtimeScope;

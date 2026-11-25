@@ -250,30 +250,38 @@ def parse_catalog_intent(
                     '[{"action": "update_plan_item", "concept_key": "towing", "tier_filter": "plus", "value": "200 km"}, '
                     '{"action": "update_description", "concept_key": "own-damage", "description": "New description"}]'
                 )
-                settings = get_settings()
-                api_key = pool.get_next_key()
-                model_name = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                from app.services.ai_fleet_gateway import get_fleet_gateway
+
                 payload = {
                     "system_instruction": {"parts": [{"text": system_instruction}]},
                     "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                     "generationConfig": {"temperature": 0.0, "maxOutputTokens": 400},
                 }
-                with httpx.Client(timeout=6.0) as client:
-                    res = client.post(url, json=payload)
-                    if res.status_code == 200:
-                        raw_reply = res.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                        clean_json = re.sub(r"```json|```", "", raw_reply).strip()
-                        ai_ops = json.loads(clean_json)
-                        if isinstance(ai_ops, list):
-                            # Merge operations without duplicates
-                            seen_keys = {(op.get("action"), op.get("concept_key"), op.get("tier_filter")) for op in operations}
-                            for op in ai_ops:
-                                if isinstance(op, dict):
-                                    sig = (op.get("action"), op.get("concept_key"), op.get("tier_filter"))
-                                    if sig not in seen_keys:
-                                        operations.append(op)
-                                        seen_keys.add(sig)
+
+                def _parse_ops(data: dict[str, Any]) -> list[dict[str, Any]] | None:
+                    raw_reply = (data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", ""))
+                    clean_json = re.sub(r"```json|```", "", raw_reply).strip()
+                    parsed_ops = json.loads(clean_json)
+                    return parsed_ops if isinstance(parsed_ops, list) else None
+
+                ai_ops = get_fleet_gateway().execute_gemini_request(
+                    payload=payload,
+                    timeout_seconds=6.0,
+                    max_attempts=2,
+                    max_wait_seconds=6.0,
+                    purpose="catalog_ops",
+                    priority=10,
+                    allow_quota_raise=False,
+                    parse_fn=_parse_ops,
+                )
+                if isinstance(ai_ops, list):
+                    seen_keys = {(op.get("action"), op.get("concept_key"), op.get("tier_filter")) for op in operations}
+                    for op in ai_ops:
+                        if isinstance(op, dict):
+                            sig = (op.get("action"), op.get("concept_key"), op.get("tier_filter"))
+                            if sig not in seen_keys:
+                                operations.append(op)
+                                seen_keys.add(sig)
             except Exception as exc:
                 logger.warning("Gemini intent parsing fallback to deterministic: %s", exc)
 

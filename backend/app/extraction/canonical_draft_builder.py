@@ -108,6 +108,10 @@ def run_orchestrator_vision_step(
     warnings: list[str],
     gemini_telemetry: list[dict[str, Any]],
     augment_liberty_fn: Any,
+    enable_dual_model_consensus: bool = True,
+    job_id: str | None = None,
+    upload_run_id: str | None = None,
+    priority: int = 100,
 ) -> tuple[dict[str, Any] | None, AccountingProofVerdict | None]:
     """Execute Upload-path Multi-Zoom Vision extraction + 400-DPI Decimal Proof Gate."""
     from app.core.errors import AIExtractionUnavailableException
@@ -189,8 +193,11 @@ def run_orchestrator_vision_step(
             prompt_override=prompt_override,
             batch_item_index=item_idx,
             pass1_precomputed=precomputed_p1,
-            enable_dual_model_consensus=True,
+            enable_dual_model_consensus=enable_dual_model_consensus,
             is_covernote=is_cn_doc,
+            job_id=job_id,
+            upload_run_id=upload_run_id,
+            priority=priority,
         )
         gemini_res = mv_res.gemini_res
         accounting_verdict = mv_res.accounting_verdict
@@ -215,6 +222,9 @@ def run_orchestrator_vision_step(
             inject_document_text=False,
             batch_item_index=item_idx,
             telemetry_log=gemini_telemetry,
+            job_id=job_id,
+            upload_run_id=upload_run_id,
+            priority=priority,
         )
         if gemini_res:
             accounting_verdict = verify_quotation_accounting(gemini_res, is_covernote=is_cn_doc)
@@ -246,6 +256,9 @@ def run_orchestrator_vision_step(
                         extra_prompt_guidance=guidance,
                         batch_item_index=item_idx + 1,
                         telemetry_log=gemini_telemetry,
+                        job_id=job_id,
+                        upload_run_id=upload_run_id,
+                        priority=priority,
                     )
                     if ref_res:
                         gemini_res = _merge_reconciled_result(gemini_res, ref_res)

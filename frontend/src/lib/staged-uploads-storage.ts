@@ -4,9 +4,10 @@
 export interface StoredStagedItem {
   id: string;
   file: File;
-  status: "staged" | "uploading" | "processing" | "completed" | "failed";
+  status: "staged" | "uploading" | "processing" | "paused_quota" | "paused_user" | "completed" | "failed";
   progress: number;
   phase?: string;
+  pausedReason?: string;
   sessionId?: string;
   jobId?: string;
   tenureId?: string;

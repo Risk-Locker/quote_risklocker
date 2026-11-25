@@ -35,10 +35,9 @@ module.exports = {
         PYTHONPATH: BACKEND,
         PYTHONDONTWRITEBYTECODE: "1",
         APP_ENV,
-        // Enable embedded worker in the API so uploads are processed immediately
-        // even if rl-quote-worker is not running. Row-level leases (SKIP LOCKED)
-        // ensure zero duplication.
-        ENABLE_EMBEDDED_WORKER: "1",
+        // Dedicated rl-quote-worker owns heavy extraction & Playwright rendering (1G RAM)
+        // so rl-quote-api stays lightweight and responsive (600M RAM) without competing.
+        ENABLE_EMBEDDED_WORKER: "0",
       },
       max_memory_restart: "600M",
       kill_timeout: 15000,
@@ -56,6 +55,7 @@ module.exports = {
         PYTHONPATH: BACKEND,
         PYTHONDONTWRITEBYTECODE: "1",
         APP_ENV,
+        WORKER_CONCURRENCY: "3",
       },
       max_memory_restart: "1G",
       kill_timeout: 30000,

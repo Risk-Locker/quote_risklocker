@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import multiprocessing
 import sys
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Any
 from app.core.errors import AIExtractionUnavailableException
 
 
-EXTRACTION_TIMEOUT_SECONDS = 120
+EXTRACTION_TIMEOUT_SECONDS = 180
 EXTRACTION_MEMORY_BYTES = 1024 * 1024 * 1024
 
 
@@ -50,7 +51,14 @@ def _worker(
 
         load_dotenv(override=True)
         _apply_process_limits()
+        try:
+            from app.db.session import engine
+
+            engine.dispose(close=False)
+        except Exception:
+            pass
         from app.extraction.orchestrator import ExtractionOrchestrator
+        from app.services.ai_fleet_gateway import QuotaExhaustedError
 
         result = ExtractionOrchestrator().extract_file(
             Path(path),
@@ -67,6 +75,19 @@ def _worker(
             **kwargs,
         )
         connection.send(("ok", result))
+    except QuotaExhaustedError as exc:
+        connection.send(
+            (
+                "quota_exhausted",
+                {
+                    "reason": exc.reason,
+                    "is_daily_exhausted": exc.is_daily_exhausted,
+                    "wait_seconds": exc.wait_seconds,
+                    "resume_at_iso": exc.resume_at_utc.isoformat() if exc.resume_at_utc else None,
+                    "status_code": exc.status_code,
+                },
+            )
+        )
     except AIExtractionUnavailableException as exc:
         connection.send(("ai_unavailable", str(exc)))
     except Exception as exc:
@@ -140,6 +161,18 @@ def extract_with_limits(
             raise TimeoutError("PDF extraction exceeded the allowed time.")
         status, payload = parent.recv()
         process.join(timeout=5)
+        if status == "quota_exhausted" and isinstance(payload, dict):
+            from app.services.ai_fleet_gateway import QuotaExhaustedError
+
+            resume_iso = payload.get("resume_at_iso")
+            resume_dt = datetime.fromisoformat(resume_iso) if resume_iso else None
+            raise QuotaExhaustedError(
+                str(payload.get("reason") or "Gemini quota exhausted"),
+                is_daily_exhausted=bool(payload.get("is_daily_exhausted")),
+                wait_seconds=float(payload.get("wait_seconds") or 0.0),
+                resume_at_utc=resume_dt,
+                status_code=int(payload.get("status_code") or 429),
+            )
         if status == "ai_unavailable":
             raise AIExtractionUnavailableException(reason=str(payload), status_code=429)
         if status != "ok":

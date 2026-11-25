@@ -70,7 +70,7 @@ def create_app() -> FastAPI:
             import socket
             from app.workers.extraction_worker import run_one_job
 
-            concurrency = int(os.getenv("WORKER_CONCURRENCY", "10"))
+            concurrency = max(1, min(int(os.getenv("WORKER_CONCURRENCY", "2") or "2"), 4))
 
             async def _embedded_worker_pool():
                 async def _worker_slot(slot_idx: int):

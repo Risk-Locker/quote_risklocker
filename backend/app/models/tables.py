@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -274,6 +274,7 @@ class Session(Base, TimestampMixin):
     batch_session_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     document_type: Mapped[str] = mapped_column(String(50), nullable=False, default="quotation", server_default=text("'quotation'"), index=True)
     policy_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    upload_run_id: Mapped[str | None] = mapped_column(ForeignKey("upload_runs.id", ondelete="SET NULL"), nullable=True, index=True)
 
     owner: Mapped[User] = relationship(foreign_keys=[owner_id])
     last_edited_by: Mapped[User | None] = relationship(foreign_keys=[last_edited_by_id])
@@ -1257,6 +1258,7 @@ class Job(Base, TimestampMixin):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True, index=True)
     uploaded_file_id: Mapped[str | None] = mapped_column(ForeignKey("uploaded_files.id", ondelete="CASCADE"), nullable=True, index=True)
+    upload_run_id: Mapped[str | None] = mapped_column(ForeignKey("upload_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     job_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     state: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
@@ -1276,6 +1278,7 @@ class Job(Base, TimestampMixin):
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
 class WorkerHeartbeat(Base):
@@ -1614,4 +1617,72 @@ class JournalLine(Base):
 
     entry: Mapped["JournalEntry"] = relationship(back_populates="lines")
     account: Mapped["LedgerAccount"] = relationship(back_populates="lines")
+
+
+class UploadRun(Base, TimestampMixin):
+    __tablename__ = "upload_runs"
+    __table_args__ = (
+        Index("ix_upload_runs_owner_created", "owner_id", "created_at"),
+        Index("ix_upload_runs_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    mode: Mapped[str] = mapped_column(String(30), nullable=False, default="bulk", server_default=text("'bulk'"))
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active", server_default=text("'active'"))
+    tenure_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="SET NULL"), nullable=True)
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+
+    owner: Mapped["User"] = relationship(foreign_keys=[owner_id])
+
+
+class AIFleetLane(Base):
+    __tablename__ = "ai_fleet_lanes"
+    __table_args__ = (Index("ix_ai_fleet_lanes_account_model", "account_id", "model"),)
+
+    lane_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    api_key_masked: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    rpm_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=13, server_default=text("13"))
+    tpm_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=200000, server_default=text("200000"))
+    rpd_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=480, server_default=text("480"))
+    in_flight_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    in_flight_meta: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    recent_calls_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    recent_tokens_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    rpd_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    pt_cycle_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    last_dispatched_at: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
+    cooling_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    global_pause_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="ready", server_default=text("'ready'"))
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class AIFleetEvent(Base):
+    __tablename__ = "ai_fleet_events"
+    __table_args__ = (
+        Index("ix_ai_fleet_events_created_at", "created_at"),
+        Index("ix_ai_fleet_events_upload_run_id", "upload_run_id"),
+        Index("ix_ai_fleet_events_job_id", "job_id"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    level: Mapped[str] = mapped_column(String(20), nullable=False, default="info", server_default=text("'info'"))
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    lane_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    account_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    job_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    upload_run_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
 

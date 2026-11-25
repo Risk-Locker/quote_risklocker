@@ -390,42 +390,30 @@ def verify_brand_logo_with_vision(
         },
     }
 
-    settings = get_settings()
-    model_name = settings.gemini_model or "gemini-3.1-flash-lite"
-    slot = pool.acquire_parallel_slot(batch_item_index=0)
-    api_key: str | None
-    if slot:
-        api_key, model_name, slot_id = slot
-    else:
-        api_key = pool.get_next_key()
-        slot_id = f"logo::{model_name}"
-    if not api_key:
-        return None
+    from app.services.ai_fleet_gateway import get_fleet_gateway
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-    try:
-        with httpx.Client(timeout=max(timeout_seconds, 12.0), http2=False) as client:
-            resp = client.post(url, json=payload)
-        if resp.status_code != 200:
-            if slot:
-                pool.record_slot_failure(slot_id, resp.status_code, resp.text[:200])
-            return None
-        data = resp.json()
+    def _parse_logo(data: dict[str, Any]) -> dict[str, Any] | None:
         parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
         if not parts:
             return None
         parsed = json.loads(parts[0].get("text", "{}"))
-        if slot:
-            usage = data.get("usageMetadata", {})
-            pool.record_slot_success(
-                slot_id,
-                prompt_tokens=usage.get("promptTokenCount", 0),
-                candidate_tokens=usage.get("candidatesTokenCount", 0),
-                total_tokens=usage.get("totalTokenCount", 0),
-            )
-        canonical = _match_canonical_brand(str(parsed.get("insurance_company") or ""), db_companies)
-        parsed["canonical_company"] = canonical
+        if not isinstance(parsed, dict):
+            return None
+        parsed["canonical_company"] = _match_canonical_brand(str(parsed.get("insurance_company") or ""), db_companies)
         return parsed
+
+    try:
+        return get_fleet_gateway().execute_gemini_request(
+            payload=payload,
+            timeout_seconds=max(timeout_seconds, 12.0),
+            max_attempts=2,
+            max_wait_seconds=20.0,
+            purpose="logo_vision",
+            filename=source_filename,
+            priority=20,
+            allow_quota_raise=False,
+            parse_fn=_parse_logo,
+        )
     except Exception as exc:
         logger.debug("Logo vision verification failed: %s", exc)
         return None

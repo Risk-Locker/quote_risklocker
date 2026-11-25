@@ -41,7 +41,7 @@ from app.models.tables import (
     VehicleModel,
     new_id,
 )
-from app.services.job_service import claim_next_job, complete_job, fail_job, heartbeat_job
+from app.services.job_service import claim_next_job, complete_job, fail_job, heartbeat_job, requeue_job_for_quota
 from app.services.catalog_review_service import auto_apply_extracted_benefits
 from app.storage.supabase import SupabaseStorage
 from app.workers.render_worker import JobProcessingError as RenderJobProcessingError, process_render_job
@@ -311,42 +311,39 @@ def process_extraction_job(
     except Exception:
         staged_count = 1
 
-    # Sync active slot count into PacerSentinel from Gemini pool
-    try:
-        from app.services.gemini_account_service import get_key_pool
-        active_slots = [e for e in get_key_pool().get_fleet_endpoints() if not e.get("is_paused")]
-        if pacer is None and active_slots:
-            get_pacer_sentinel(slot_count=len(active_slots))
-    except Exception:
-        pass
-
-    # Autonomous Living Eye pacing before LLM extraction
-    active_pacer = pacer or get_pacer_sentinel()
-    slot_idx, pacing_delay = active_pacer.acquire(
-        estimated_tokens=estimated_tokens,
-        staged_count=staged_count,
-    )
-    if pacing_delay > 0:
-        logger.info(
-            "Job %s: PacerSentinel applied %.2fs breathing delay (slot=%d, staged=%d, tokens=%d)",
-            job.id,
-            pacing_delay,
-            slot_idx,
-            staged_count,
-            estimated_tokens,
+    # Only run caller-provided PacerSentinel if explicitly injected (e.g. unit tests);
+    # otherwise GeminiFleetGateway handles 2D lane pacing DB-free inside execute_gemini_request.
+    slot_idx = 0
+    pacing_delay = 0.0
+    if pacer is not None:
+        slot_idx, pacing_delay = pacer.acquire(
+            estimated_tokens=estimated_tokens,
+            staged_count=staged_count,
         )
-    _trace(
-        10,
-        "preflight_and_pacing",
-        f"Preflight ~{estimated_tokens:,} tokens across {token_info.get('page_count', 0)} page(s); PacerSentinel slot {slot_idx} applied {pacing_delay:.2f}s delay (staged_queue={staged_count}).",
-        {
-            "estimated_tokens": estimated_tokens,
-            "page_count": token_info.get("page_count", 0),
-            "staged_count": staged_count,
-            "pacer_slot": slot_idx,
-            "pacing_delay_s": round(pacing_delay, 2),
-        },
-    )
+        _trace(
+            10,
+            "preflight_and_pacing",
+            f"Preflight ~{estimated_tokens:,} tokens across {token_info.get('page_count', 0)} page(s); PacerSentinel slot {slot_idx} applied {pacing_delay:.2f}s delay (staged_queue={staged_count}).",
+            {
+                "estimated_tokens": estimated_tokens,
+                "page_count": token_info.get("page_count", 0),
+                "staged_count": staged_count,
+                "pacer_slot": slot_idx,
+                "pacing_delay_s": round(pacing_delay, 2),
+            },
+        )
+    else:
+        _trace(
+            10,
+            "preflight_and_pacing",
+            f"Preflight ~{estimated_tokens:,} tokens across {token_info.get('page_count', 0)} page(s); queued={staged_count}, priority={getattr(job, 'priority', 100)} (routed to GeminiFleetGateway).",
+            {
+                "estimated_tokens": estimated_tokens,
+                "page_count": token_info.get("page_count", 0),
+                "staged_count": staged_count,
+                "priority": getattr(job, "priority", 100),
+            },
+        )
 
     # Check cancellation after pacing delay
     db.refresh(job)
@@ -359,11 +356,14 @@ def process_extraction_job(
     session_id = str(session.id)
     draft_id = str(draft.id)
     batch_id = str(batch.id)
+    upload_run_id = str(getattr(job, "upload_run_id", None) or "") or None
+    job_priority = int(getattr(job, "priority", 100) or 100)
+    enable_dual_consensus = job_priority < 50
     source_filename = str(uploaded.original_filename or "")
 
     context = context_loader(db)
     heartbeat_job(db, job, worker_id=worker_id, progress=15, phase="extracting", lease_seconds=300)
-    logger.info("Job %s: executing extraction pipeline (enhanced_reading=%s)", job_id, enhanced_reading)
+    logger.info("Job %s: executing extraction pipeline (enhanced_reading=%s, dual_consensus=%s)", job_id, enhanced_reading, enable_dual_consensus)
     _release_db_before_blocking_io(db)
     with qc_temp_directory("extract-") as directory:
         source_path = (directory / "source.pdf").resolve()
@@ -373,6 +373,10 @@ def process_extraction_job(
             enhanced_reading=enhanced_reading,
             source_filename=source_filename,
             fail_closed=True,
+            enable_dual_model_consensus=enable_dual_consensus,
+            job_id=job_id,
+            upload_run_id=upload_run_id,
+            priority=job_priority,
             **context,
         )
 
@@ -1048,6 +1052,15 @@ def process_extraction_job(
         {"session_id": session.id, "draft_id": draft.id, "tenure_id": tenure_id_out},
     )
 
+    if getattr(job, "upload_run_id", None):
+        try:
+            from app.services.upload_run_service import sync_upload_run_status
+
+            sync_upload_run_status(db, str(job.upload_run_id))
+            db.commit()
+        except Exception:
+            pass
+
     if tenure_id_out:
         try:
             from app.services.marketing_comparison.materialize import materialize_comparison_entries
@@ -1059,11 +1072,14 @@ def process_extraction_job(
     try:
         from app.services.realtime_hub import build_session_sync_targets, publish_realtime_update
 
+        targets = build_session_sync_targets(session)
+        if getattr(job, "upload_run_id", None):
+            targets = [*targets, ("upload_runs", str(job.upload_run_id)), ("upload_runs", "all")]
         publish_realtime_update(
             scope="workspace",
             resource_id=str(draft.id),
             summary="Extraction completed",
-            targets=build_session_sync_targets(session),
+            targets=targets,
         )
     except Exception:
         pass
@@ -1096,6 +1112,54 @@ def process_extraction_job(
 
 
 
+def _promote_ephemeral_uploads_for_pause(db, settings, *, primary_uploaded_id: str | None, upload_run_id: str | None) -> None:
+    """Promote local_ephemeral PDFs to Supabase Storage before a long daily-quota pause."""
+    try:
+        target_files: list[UploadedFile] = []
+        if primary_uploaded_id:
+            uf = db.get(UploadedFile, primary_uploaded_id)
+            if uf and uf.storage_provider == "local_ephemeral":
+                target_files.append(uf)
+        if upload_run_id:
+            sibling_jobs = db.scalars(
+                select(Job).where(
+                    Job.upload_run_id == upload_run_id,
+                    Job.state.in_(["queued", "paused_quota"]),
+                ).limit(25)
+            ).all()
+            seen = {uf.id for uf in target_files}
+            for sj in sibling_jobs:
+                if sj.uploaded_file_id and sj.uploaded_file_id not in seen:
+                    uf = db.get(UploadedFile, sj.uploaded_file_id)
+                    if uf and uf.storage_provider == "local_ephemeral":
+                        target_files.append(uf)
+                        seen.add(uf.id)
+        if not target_files:
+            return
+        import httpx as _httpx
+        with _httpx.Client(timeout=_httpx.Timeout(30.0, connect=10.0)) as _http:
+            _sc = SupabaseStorage(settings, client=_http)
+            _uploader = getattr(_sc, "upload_source_pdf", getattr(_sc, "upload_pdf", None))
+            if _uploader is None:
+                return
+            now = datetime.now(timezone.utc)
+            for uf in target_files:
+                local_path = resolve_qc_path(uf.storage_path)
+                if not local_path.exists():
+                    continue
+                data = local_path.read_bytes()
+                obj_key = f"source/{now:%Y}/{now:%m}/{uf.id}/{uf.original_filename}"
+                stored = _uploader(obj_key, data)
+                uf.storage_path = stored.object_key
+                uf.storage_provider = "supabase"
+                uf.storage_bucket = getattr(stored, "bucket", None)
+                uf.storage_etag = getattr(stored, "etag", None)
+                db.commit()
+                local_path.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning("Pre-pause Supabase promotion skipped/partial: %s", exc)
+
+
 def run_one_job(
     db,
     settings,
@@ -1103,6 +1167,7 @@ def run_one_job(
     worker_id: str,
     storage: SupabaseStorage | None = None,
     pacer: PacerSentinel | None = None,
+    job_types: list[str] | tuple[str, ...] | None = None,
 ) -> Job | None:
     """Claim and synchronously run at most one heavy task."""
     if storage is None:
@@ -1111,12 +1176,13 @@ def run_one_job(
         except Exception:
             storage = None
 
-    job = claim_next_job(db, worker_id=worker_id, lease_seconds=300)
+    job = claim_next_job(db, worker_id=worker_id, lease_seconds=300, job_types=job_types)
     if job is None:
         return None
     # Capture plain strings before slow extraction may release/reacquire the DB session.
     job_id = str(job.id)
     job_type = str(job.job_type)
+    upload_run_id = str(getattr(job, "upload_run_id", None) or "") or None
     returned_job: Job = job
     logger.info(
         "Worker [%s] claimed job %s (type=%s, attempt=%s/%s)",
@@ -1126,6 +1192,8 @@ def run_one_job(
         job.attempt,
         job.max_attempts,
     )
+    from app.services.ai_fleet_gateway import QuotaExhaustedError, compute_next_pt_midnight_utc, get_fleet_gateway
+
     try:
         if job_type == "extract_pdf":
             process_extraction_job(db, settings, job, worker_id=worker_id, storage=storage, pacer=pacer)
@@ -1134,6 +1202,58 @@ def run_one_job(
         else:
             raise JobProcessingError("unsupported_job", "This background task is not supported.")
         logger.info("Job %s (%s) finished successfully", job_id, job_type)
+    except QuotaExhaustedError as exc:
+        db.rollback()
+        fresh_job = db.get(Job, job_id)
+        if fresh_job is not None:
+            if exc.is_daily_exhausted:
+                _promote_ephemeral_uploads_for_pause(
+                    db,
+                    settings,
+                    primary_uploaded_id=fresh_job.uploaded_file_id,
+                    upload_run_id=upload_run_id,
+                )
+                resume_at = exc.resume_at_utc or compute_next_pt_midnight_utc()
+                requeue_job_for_quota(
+                    db,
+                    fresh_job,
+                    worker_id=worker_id,
+                    resume_at=resume_at,
+                    pause_daily=True,
+                    reason=exc.reason,
+                )
+                get_fleet_gateway().record_fleet_event(
+                    level="warn",
+                    event_type="paused_quota",
+                    job_id=job_id,
+                    upload_run_id=upload_run_id,
+                    message=f"Paused job {job_id} until PT midnight ({resume_at.isoformat()}): {exc.reason}",
+                    db=db,
+                )
+                db.commit()
+            else:
+                wait_s = max(5.0, min(float(exc.wait_seconds or 15.0), 120.0))
+                resume_at = datetime.now(timezone.utc) + timedelta(seconds=wait_s)
+                requeue_job_for_quota(
+                    db,
+                    fresh_job,
+                    worker_id=worker_id,
+                    resume_at=resume_at,
+                    pause_daily=False,
+                    reason=exc.reason,
+                )
+            try:
+                from app.services.realtime_hub import publish_realtime_update
+
+                publish_realtime_update(
+                    scope="upload_runs",
+                    resource_id=upload_run_id or "all",
+                    summary="Batch paused on Gemini quota" if exc.is_daily_exhausted else "Job waiting for rate limit window",
+                    targets=[("upload_runs", "all")],
+                )
+            except Exception:
+                pass
+            returned_job = fresh_job
     except JobProcessingError as exc:
         logger.error(
             "Job %s (%s) failed with JobProcessingError: [%s] %s",
@@ -1146,6 +1266,14 @@ def run_one_job(
         fresh_job = db.get(Job, job_id)
         if fresh_job is not None:
             fail_job(db, fresh_job, worker_id=worker_id, code=exc.code, message=exc.safe_message)
+            if upload_run_id:
+                try:
+                    from app.services.upload_run_service import sync_upload_run_status
+
+                    sync_upload_run_status(db, upload_run_id)
+                    db.commit()
+                except Exception:
+                    pass
             returned_job = fresh_job
     except AIExtractionUnavailableException as exc:
         logger.error(
@@ -1164,6 +1292,14 @@ def run_one_job(
                 code="ai_quota_exhausted",
                 message=exc.message,
             )
+            if upload_run_id:
+                try:
+                    from app.services.upload_run_service import sync_upload_run_status
+
+                    sync_upload_run_status(db, upload_run_id)
+                    db.commit()
+                except Exception:
+                    pass
             returned_job = fresh_job
     except RenderJobProcessingError as exc:
         logger.error(
@@ -1190,5 +1326,13 @@ def run_one_job(
                 code="processing_failed",
                 message="The background task failed safely and will be retried.",
             )
+            if upload_run_id:
+                try:
+                    from app.services.upload_run_service import sync_upload_run_status
+
+                    sync_upload_run_status(db, upload_run_id)
+                    db.commit()
+                except Exception:
+                    pass
             returned_job = fresh_job
     return returned_job

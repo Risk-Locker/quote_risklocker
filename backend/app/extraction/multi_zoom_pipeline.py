@@ -326,6 +326,9 @@ def run_multi_zoom_vision_pipeline(
     brand_verifier: Callable[..., dict[str, Any] | None] | None = None,
     enable_dual_model_consensus: bool = True,
     is_covernote: bool = False,
+    job_id: str | None = None,
+    upload_run_id: str | None = None,
+    priority: int = 100,
 ) -> MultiZoomPipelineResult:
     """Execute multi-zoom Vision extraction with cross-model consensus and Decimal accounting proof."""
     ctx = db_context or {}
@@ -433,6 +436,9 @@ def run_multi_zoom_vision_pipeline(
             batch_item_index=batch_item_index + item_offset,
             timeout_seconds=35.0,
             telemetry_log=telemetry_log,
+            job_id=job_id,
+            upload_run_id=upload_run_id,
+            priority=priority,
         )
 
     res_a: dict[str, Any] | None = None
@@ -441,8 +447,28 @@ def run_multi_zoom_vision_pipeline(
         with ThreadPoolExecutor(max_workers=2) as executor:
             fut_a = executor.submit(_call_vision, "gemini-3.1-flash-lite", 0, vision_imgs, brand_hint)
             fut_b = executor.submit(_call_vision, "gemini-3.5-flash-lite", 1, vision_imgs, brand_hint)
-            res_a = fut_a.result()
-            res_b = fut_b.result()
+            quota_exc: Exception | None = None
+            try:
+                res_a = fut_a.result()
+            except Exception as exc:
+                from app.core.errors import AIExtractionUnavailableException
+
+                if isinstance(exc, AIExtractionUnavailableException):
+                    quota_exc = exc
+                else:
+                    raise
+            try:
+                res_b = fut_b.result()
+            except Exception as exc:
+                from app.core.errors import AIExtractionUnavailableException
+
+                if isinstance(exc, AIExtractionUnavailableException):
+                    if quota_exc is None:
+                        quota_exc = exc
+                else:
+                    raise
+            if not res_a and not res_b and quota_exc is not None:
+                raise quota_exc
         passes_used += 2 if (res_a and res_b) else 1
     else:
         res_a = _call_vision(None, 0, vision_imgs, brand_hint)
@@ -472,7 +498,36 @@ def run_multi_zoom_vision_pipeline(
         is_covernote=is_covernote,
     )
 
+    if not use_dual and not conflicts and verdict.passed:
+        try:
+            from app.services.ai_fleet_gateway import get_fleet_gateway
+
+            get_fleet_gateway().record_fleet_event(
+                level="info",
+                event_type="proof_pass",
+                job_id=job_id,
+                upload_run_id=upload_run_id,
+                filename=source_filename,
+                message=f"Proof-First 1-pass exact-cent verification passed for {source_filename}",
+            )
+        except Exception:
+            pass
+
     if conflicts or verdict.discrepancies:
+        if not use_dual:
+            try:
+                from app.services.ai_fleet_gateway import get_fleet_gateway
+
+                get_fleet_gateway().record_fleet_event(
+                    level="warn",
+                    event_type="proof_escalate",
+                    job_id=job_id,
+                    upload_run_id=upload_run_id,
+                    filename=source_filename,
+                    message=f"Proof-First escalated {source_filename} to 400-DPI Referee ({len(conflicts)} conflict(s), {len(verdict.discrepancies)} math check(s))",
+                )
+            except Exception:
+                pass
         _emit(
             on_progress,
             "cross_verify_and_audit",
@@ -504,7 +559,8 @@ def run_multi_zoom_vision_pipeline(
             "Ignore post-total RM 400.00 compulsory excess footnotes.\n"
             f"<untrusted_document_content>\n{payload_str}\n</untrusted_document_content>"
         )
-        verified_res = _call_vision(None, 2, zoom_crops or vision_imgs, referee_guidance)
+        alt_model = "gemini-3.5-flash-lite" if (not use_dual and telemetry_log and telemetry_log[-1].get("model") == "gemini-3.1-flash-lite") else None
+        verified_res = _call_vision(alt_model, 2, zoom_crops or vision_imgs, referee_guidance)
         primary_res = _merge_reconciled_result(primary_res, verified_res)
         verdict = verify_quotation_accounting(primary_res, is_covernote=is_covernote)
         passes_used += 1

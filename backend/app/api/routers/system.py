@@ -1039,12 +1039,16 @@ def settings_gemini_add_key(
     db.commit()
     db.refresh(setting)
 
-    # Hot reload into in-memory manager
+    # Hot reload into in-memory manager and immediately wake paused_quota jobs
     pool.sync_accounts(db=db)
+    from app.services.job_service import resume_paused_quota_jobs
+
+    resumed_count = resume_paused_quota_jobs(db, reason=f"Added verified key {new_account['label']}")
 
     return {
         "ok": True,
         "message": f"API Key verified live with Google ({probe_res.get('latency_ms', 0)}ms). Account added to pool.",
+        "resumed_jobs_count": resumed_count,
         "account": {
             "id": new_id,
             "label": new_account["label"],
@@ -1116,6 +1120,26 @@ def settings_gemini_timeline(
     return get_fleet_timeline_data(db=db)
 
 
+@router.get("/settings/gemini/fleet-telemetry")
+def settings_gemini_fleet_telemetry(
+    upload_run_id: str | None = None,
+    limit: int = Query(default=150, ge=1, le=300),
+    level: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Strictly read-only live 2D fleet lane state, active PDF assignments, ETA, and event logs."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.ai_fleet_gateway import get_fleet_gateway
+
+    return get_fleet_gateway().get_fleet_telemetry(
+        db,
+        upload_run_id=upload_run_id,
+        limit=limit,
+        level=level,
+    )
+
+
 @router.post("/settings/gemini/keys/{key_id}/toggle-pause")
 def settings_gemini_toggle_pause(
     key_id: str,
@@ -1171,11 +1195,17 @@ def settings_gemini_toggle_pause(
     pool = get_key_pool()
     pool.set_account_paused(key_id, paused=is_paused_now)
     pool.sync_accounts(db=db)
+    resumed_count = 0
+    if not is_paused_now:
+        from app.services.job_service import resume_paused_quota_jobs
+
+        resumed_count = resume_paused_quota_jobs(db, reason=f"Unpaused key {key_id}")
 
     return {
         "ok": True,
         "key_id": key_id,
         "is_paused": is_paused_now,
+        "resumed_jobs_count": resumed_count,
         "gemini": pool.get_quota_stats(),
     }
 
