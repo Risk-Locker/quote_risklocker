@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from re import fullmatch
 
-from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.requests import cookie_parser
 
 from app.core.client_address import resolve_client_ip
 from app.core.security import keyed_hash
@@ -87,40 +85,57 @@ def consume_rate_limit(db, scope: str, key_hash: str, policy: RateLimitPolicy) -
     )
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
+class RateLimitMiddleware:
+    """Pure ASGI rate-limiting middleware safe for SSE and streaming responses."""
+
     def __init__(self, app, *, settings, session_factory, consumer=consume_rate_limit):
-        super().__init__(app)
+        self.app = app
         self.settings = settings
         self.session_factory = session_factory
         self.consumer = consumer
 
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        policy = policy_for_request(request.method, request.url.path, self.settings)
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = (scope.get("method") or "GET").upper()
+        path = scope.get("path", "")
+        policy = policy_for_request(method, path, self.settings)
         if policy is None:
-            return await call_next(request)
-        peer = request.client.host if request.client else None
-        client_ip = resolve_client_ip(peer, request.headers.get("x-forwarded-for"), self.settings.trusted_proxy_ips)
-        subject = request.cookies.get(self.settings.session_cookie_name) or client_ip
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        cookies = cookie_parser(headers.get("cookie", ""))
+        peer = scope["client"][0] if scope.get("client") else None
+        client_ip = resolve_client_ip(peer, headers.get("x-forwarded-for"), self.settings.trusted_proxy_ips)
+        subject = cookies.get(self.settings.session_cookie_name) or client_ip
         key_hash = keyed_hash(f"rate:{policy.scope}:{subject}", self.settings.auth_hash_secret)
         try:
             with self.session_factory() as db:
                 result = self.consumer(db, policy.scope, key_hash, policy)
         except Exception:
-            return JSONResponse(
+            resp = JSONResponse(
                 status_code=503,
                 content={"error": {"code": "dependency_unavailable", "message": "Request protection is temporarily unavailable."}},
                 headers={"Retry-After": "30"},
             )
+            await resp(scope, receive, send)
+            return
+
         if not result.allowed:
-            return JSONResponse(
+            resp = JSONResponse(
                 status_code=429,
                 content={"error": {"code": "rate_limited", "message": "Too many requests. Try again later."}},
                 headers={"Retry-After": str(result.retry_after)},
             )
-        response = await call_next(request)
-        response.headers["X-RateLimit-Remaining"] = str(result.remaining)
-        return response
+            await resp(scope, receive, send)
+            return
+
+        async def send_wrapper(message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["X-RateLimit-Remaining"] = str(result.remaining)
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)

@@ -8,6 +8,19 @@ export type LedgerSortColumn =
 
 export type LedgerDensity = "comfortable" | "compact";
 export type LedgerOptionalColumn = "last_activity" | "created_at" | "pic";
+export type LedgerAnchor = "all" | "expiring" | "starting";
+
+export interface MonthSummaryByNum {
+  month_num: number;
+  month: string;
+  total: number;
+  start_count: number;
+  end_count: number;
+  cars: number;
+  hit: number;
+  miss: number;
+  pending: number;
+}
 
 export interface YoYStatItem {
   year: string;
@@ -94,6 +107,11 @@ export interface TenureRow {
     previous_policy_year?: number | null;
   } | null;
   is_covernote_issued?: boolean;
+  has_selected_winner?: boolean;
+  is_upcoming_renewal?: boolean;
+  upcoming_renewal_start?: string | null;
+  upcoming_renewal_end?: string | null;
+  previous_tenure_id?: string | null;
   sourced_quotes: Array<{
     session_id: string;
     company: string;

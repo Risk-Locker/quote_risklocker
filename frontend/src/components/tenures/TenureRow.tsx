@@ -180,8 +180,8 @@ export function TenureRowComponent({
         </td>
       )}
 
-      {/* 7. Actions */}
-      <td className={`text-right ${layout.cellPadding} ${layout.widths.actions}`}>
+      {/* 7. Actions (Sticky Right) */}
+      <td className={`text-right sticky right-0 z-20 border-l border-neutral-200/80 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.05)] ${stickyBg} ${layout.cellPadding} ${layout.widths.actions}`}>
         <RowActionsCell
           tenure={mainTenure}
           isCompact={layout.isCompact}

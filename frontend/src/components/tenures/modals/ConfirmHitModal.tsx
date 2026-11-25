@@ -87,10 +87,16 @@ export function HitConfirmModal({
                     const newStart = e.target.value;
                     setHitConfirmedStartDate(newStart);
                     if (newStart) {
-                      const d = new Date(newStart);
-                      d.setFullYear(d.getFullYear() + 1);
-                      d.setDate(d.getDate() - 1);
-                      setHitConfirmedEndDate(d.toISOString().split("T")[0]);
+                      const [yy, mm, dd] = newStart.split("T")[0].split("-").map(Number);
+                      if (yy && mm && dd) {
+                        if (mm === 2 && dd === 29) {
+                          setHitConfirmedEndDate(`${yy + 1}-02-28`);
+                        } else {
+                          const d = new Date(Date.UTC(yy + 1, mm - 1, dd));
+                          d.setUTCDate(d.getUTCDate() - 1);
+                          setHitConfirmedEndDate(d.toISOString().split("T")[0]);
+                        }
+                      }
                     }
                   }}
                   className="w-full h-8 px-2.5 text-xs rounded border border-neutral-300 focus:outline-none focus:border-neutral-900 font-mono"

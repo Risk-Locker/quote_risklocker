@@ -7,6 +7,7 @@ import type { RealtimeEditor, RealtimeUpdateEvent } from "@/hooks/useRealtimeSyn
 
 interface RealtimePresenceBannerProps {
   connected: boolean;
+  syncMode?: "live" | "polling" | "connecting";
   otherEditors: RealtimeEditor[];
   pendingUpdate: RealtimeUpdateEvent | null;
   onRefreshNow?: () => void;
@@ -16,12 +17,21 @@ interface RealtimePresenceBannerProps {
 
 export function RealtimePresenceBanner({
   connected,
+  syncMode,
   otherEditors,
   pendingUpdate,
   onRefreshNow,
   onDismissPending,
   className = "",
 }: RealtimePresenceBannerProps) {
+  const mode = syncMode ?? (connected ? "live" : "connecting");
+  const modeLabel = mode === "live" ? "Live sync" : mode === "polling" ? "Polling sync" : "Syncing...";
+  const dotColor =
+    mode === "live"
+      ? "bg-emerald-500 animate-pulse"
+      : mode === "polling"
+        ? "bg-sky-500"
+        : "bg-neutral-400";
   const editorText = otherEditors
     .slice(0, 3)
     .map((ed) => {
@@ -34,14 +44,10 @@ export function RealtimePresenceBanner({
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
-      <Badge variant={connected ? "success" : "info"} className="gap-1.5 font-medium">
-        <span
-          className={`inline-block size-2 rounded-full ${
-            connected ? "bg-emerald-500 animate-pulse" : "bg-neutral-400"
-          }`}
-        />
+      <Badge variant={mode === "live" ? "success" : "info"} className="gap-1.5 font-medium">
+        <span className={`inline-block size-2 rounded-full ${dotColor}`} />
         <Broadcast size={13} weight="bold" />
-        <span>{connected ? "Live sync" : "Syncing..."}</span>
+        <span>{modeLabel}</span>
       </Badge>
 
       {otherEditors.length > 0 && (

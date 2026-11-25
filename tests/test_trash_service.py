@@ -224,7 +224,7 @@ def test_trash_list_categorized_shape():
     data = trash_service.list_trash_categorized(db, _user(), 14)
 
     assert data["retention_policy"] == "manual_reference_aware_purge"
-    assert set(data.keys()) == {"retention_policy", "sessions", "templates", "our_specials", "our_special_variants", "client_records", "assets"}
+    assert set(data.keys()) == {"retention_policy", "sessions", "tenures", "templates", "our_specials", "our_special_variants", "client_records", "assets"}
     assert data["templates"] == []  # nothing deleted yet
     trash_service.delete_template(db, _settings(), _user(), template.id)
     trash_service.delete_special(db, _settings(), _user(), special.id)

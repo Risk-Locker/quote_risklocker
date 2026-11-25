@@ -40,6 +40,7 @@ type Listener = {
   onPresence: (payload: RealtimePresenceEvent) => void;
   onUpdated: (payload: RealtimeUpdateEvent) => void;
   onConnectionChange: (connected: boolean) => void;
+  onErrorCountChange?: (consecutiveErrors: number) => void;
 };
 
 // Shared singleton EventSource + BroadcastChannel fan-out across 10+ browser tabs.
@@ -51,11 +52,13 @@ class RealtimeClientSingleton {
   private listeners = new Set<Listener>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffMs = 1000;
+  private consecutiveErrors = 0;
   private isConnected = false;
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     listener.onConnectionChange(this.isConnected);
+    listener.onErrorCountChange?.(this.consecutiveErrors);
     this.ensureBroadcastChannel();
     this.ensureConnected();
     return () => {
@@ -112,6 +115,8 @@ class RealtimeClientSingleton {
 
       es.addEventListener("connected", (ev: MessageEvent) => {
         this.backoffMs = 1000;
+        this.consecutiveErrors = 0;
+        this.listeners.forEach((l) => l.onErrorCountChange?.(0));
         this.setConnected(true);
         try {
           const data = JSON.parse(ev.data || "{}");
@@ -146,6 +151,8 @@ class RealtimeClientSingleton {
       });
 
       es.onerror = () => {
+        this.consecutiveErrors += 1;
+        this.listeners.forEach((l) => l.onErrorCountChange?.(this.consecutiveErrors));
         this.setConnected(false);
         this.es?.close();
         this.es = null;
@@ -203,6 +210,8 @@ export function useRealtimeSync({
 }: UseRealtimeSyncOptions) {
   const { user } = useAuth();
   const [connected, setConnected] = useState(false);
+  const [sseDegraded, setSseDegraded] = useState(false);
+  const [presenceHealthy, setPresenceHealthy] = useState(false);
   const [activeEditors, setActiveEditors] = useState<RealtimeEditor[]>([]);
   const [pendingUpdate, setPendingUpdate] = useState<RealtimeUpdateEvent | null>(null);
 
@@ -240,6 +249,7 @@ export function useRealtimeSync({
       if (Array.isArray(res?.active_editors)) {
         setActiveEditors(res.active_editors);
       }
+      setPresenceHealthy(true);
       if (typeof res?.version === "number" && res.version > lastVersionRef.current) {
         const prev = lastVersionRef.current;
         lastVersionRef.current = res.version;
@@ -275,6 +285,7 @@ export function useRealtimeSync({
 
     const unsubscribe = singleton.subscribe({
       onConnectionChange: (isConn) => setConnected(isConn),
+      onErrorCountChange: (count) => setSseDegraded(count >= 2),
       onConnected: (payload) => {
         if (payload?.user_id && !currentUserIdRef.current) {
           currentUserIdRef.current = payload.user_id;
@@ -392,8 +403,15 @@ export function useRealtimeSync({
     setPendingUpdate(null);
   }, []);
 
+  const syncMode: "live" | "polling" | "connecting" = connected
+    ? "live"
+    : sseDegraded && presenceHealthy
+      ? "polling"
+      : "connecting";
+
   return {
     connected,
+    syncMode,
     otherEditors,
     pendingUpdate,
     reportEditing,

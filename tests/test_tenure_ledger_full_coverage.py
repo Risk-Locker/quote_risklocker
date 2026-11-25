@@ -51,7 +51,7 @@ def test_month_stats_start_and_end_counts(db_session: Session):
     )
     db_session.commit()
 
-    res = list_tenure_months(show_hidden=False, db=db_session, user=dummy_user)
+    res = list_tenure_months(anchor="all", show_hidden=False, db=db_session, user=dummy_user)
     months = res["months"]
     may_2027 = next((m for m in months if m["month"] == "2027-05"), None)
 
@@ -59,9 +59,22 @@ def test_month_stats_start_and_end_counts(db_session: Session):
     # In May 2027: 2 starting (Customer 1 & 3), 1 ending (Customer 2)
     assert may_2027["start_count"] == 2
     assert may_2027["end_count"] == 1
-    # Total tenures belonging to May 2027 ledger is 2 (anchored strictly on starting date)
-    assert may_2027["total"] == 2
     assert may_2027["cars"] == 3
+    # Unified anchor="all" counts starting + non-duplicated expiring = 3
+    assert may_2027["total"] == 3
+
+    res_start = list_tenure_months(anchor="starting", show_hidden=False, db=db_session, user=dummy_user)
+    may_start = next(m for m in res_start["months"] if m["month"] == "2027-05")
+    assert may_start["total"] == 2
+
+    res_exp = list_tenure_months(anchor="expiring", show_hidden=False, db=db_session, user=dummy_user)
+    may_exp = next(m for m in res_exp["months"] if m["month"] == "2027-05")
+    assert may_exp["total"] == 1
+
+    # Exact parity with list_tenures for each anchor lens
+    assert list_tenures(month="2027-05", anchor="all", db=db_session, user=dummy_user)["total"] == 3
+    assert list_tenures(month="2027-05", anchor="starting", db=db_session, user=dummy_user)["total"] == 2
+    assert list_tenures(month="2027-05", anchor="expiring", db=db_session, user=dummy_user)["total"] == 1
 
 
 def test_yoy_stats_car_and_period_counts(db_session: Session):

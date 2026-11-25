@@ -517,6 +517,14 @@ def trash_asset_restore(asset_id: str, db: Session = Depends(get_db), user: User
     return {"status": "Ready"}
 
 
+@router.post("/trash/tenures/{tenure_id}/restore")
+def trash_tenure_restore(tenure_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.trash_service import restore_tenure
+    restore_tenure(db, user, tenure_id)
+    return {"status": "Ready"}
+
+
 
 @router.post("/trash/purge-expired")
 def trash_purge(user: User = Depends(current_user)) -> dict:
@@ -543,6 +551,7 @@ def trash_delete_forever(payload: TrashDeleteForeverRequest, db: Session = Depen
         "our_special_variant": lambda: trash_service.permanent_delete_special_variant(db, user, payload.entity_id),
         "client_record": lambda: trash_service.permanent_delete_client_record(db, user, payload.entity_id),
         "template_asset": lambda: trash_service.permanent_delete_template_asset(db, user, payload.entity_id),
+        "insurance_tenure": lambda: trash_service.permanent_delete_tenure(db, user, payload.entity_id, SupabaseStorage(settings)),
     }
     handler = handlers.get(payload.entity_type)
     if not handler:

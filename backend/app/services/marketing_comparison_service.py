@@ -2846,7 +2846,9 @@ def select_winner_and_generate_draft(
                     tenure.expiry_month = cand_en.strftime("%Y-%m")
                     s_primary.coverage_end_date = cand_en
                 elif cand_st:
-                    tenure.coverage_end_date = cand_st + timedelta(days=364)
+                    from app.services.insurance_tenure_service import _calculate_policy_end_date
+
+                    tenure.coverage_end_date = _calculate_policy_end_date(cand_st)
                     tenure.expiry_month = tenure.coverage_end_date.strftime("%Y-%m")
                     s_primary.coverage_end_date = tenure.coverage_end_date
     else:

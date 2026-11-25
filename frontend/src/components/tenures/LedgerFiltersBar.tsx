@@ -13,7 +13,7 @@ import {
   Table,
   Plus,
 } from "@phosphor-icons/react";
-import type { YoYStatItem, TenureRow } from "./types";
+import type { LedgerAnchor, YoYStatItem, TenureRow } from "./types";
 import { TenureBulkActions } from "./TenureBulkActions";
 import { LedgerSearchInput } from "./LedgerSearchInput";
 
@@ -32,6 +32,8 @@ export interface LedgerFiltersBarProps {
   onSelectYear: (year: string) => void;
   selectedMonth: string;
   onSelectMonth: (month: string) => void;
+  anchor: LedgerAnchor;
+  onSelectAnchor: (anchor: LedgerAnchor) => void;
   availableYears: string[];
   monthsOfYear: MonthDisplayItem[];
   allYearsSummary: { total: number; cars: number; active: number; lost: number } | null;
@@ -91,6 +93,8 @@ export function LedgerFiltersBar({
   onSelectYear,
   selectedMonth,
   onSelectMonth,
+  anchor,
+  onSelectAnchor,
   availableYears,
   monthsOfYear,
   allYearsSummary,
@@ -282,12 +286,41 @@ export function LedgerFiltersBar({
           </div>
         </div>
 
-        {/* Row 2: 12 Months Tabs with Start/End Hover Tooltip */}
+        {/* Row 2: 12 Months Tabs with Start/End Hover Tooltip + Anchor Lens */}
         <div className="space-y-1.5 pt-2 border-t border-[#f2f2f7]">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
-              Step 2: Filter by Month
-            </span>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
+                Step 2: Filter by Month
+              </span>
+              <div
+                className="inline-flex items-center rounded-[var(--rl-radius-sm)] border border-[#e5e5ea] bg-[#f5f5f7] p-0.5"
+                role="group"
+                aria-label="Date lens"
+              >
+                {(
+                  [
+                    { id: "all", label: "All", tip: "Policies starting or expiring without a renewal deal yet" },
+                    { id: "expiring", label: "Expiring", tip: "Policies expiring in this period (renewal pipeline)" },
+                    { id: "starting", label: "Starting", tip: "Policies starting in this period" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onSelectAnchor(opt.id)}
+                    title={opt.tip}
+                    className={`px-2 py-0.5 rounded-[var(--rl-radius-sm)] text-[10.5px] font-semibold transition-all cursor-pointer ${
+                      anchor === opt.id
+                        ? "bg-[#1b1717] text-white shadow-2xs font-bold"
+                        : "text-neutral-600 hover:text-neutral-900"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <span className="text-[10px] text-neutral-400">
               Hover over a month to see starting vs expiring breakdown
             </span>
@@ -318,8 +351,8 @@ export function LedgerFiltersBar({
                 const isActive = selectedMonth === m.month;
                 const isCurrent = m.month === currentMonthKey;
                 const tooltipText = `${m.label} ${
-                  selectedYear === "all" ? currentYear : selectedYear
-                }\n• ${m.start_count} Starting\n• ${m.end_count} Expiring\n${m.total} Total Policies · ${
+                  selectedYear === "all" ? "(All Years)" : selectedYear
+                }\n• ${m.start_count} Starting\n• ${m.end_count} Expiring\n${m.total} Matching Deals · ${
                   m.cars
                 } Cars`;
 
@@ -337,13 +370,13 @@ export function LedgerFiltersBar({
                     title={tooltipText}
                   >
                     <span>{m.label}</span>
-                    {(m.total > 0 || m.cars > 0) && (
+                    {m.total > 0 && (
                       <span
                         className={`px-1.5 py-0.2 rounded text-[10px] font-bold font-mono ${
                           isActive ? "bg-white/20 text-white" : "bg-[#e5e5ea] text-[#1b1717]"
                         }`}
                       >
-                        ({m.total > 0 ? m.total : m.cars})
+                        ({m.total})
                       </span>
                     )}
                   </button>
