@@ -1110,7 +1110,7 @@ def chat_with_copilot(
         except Exception as e:
             logger.warning(f"Error computing catalog diff plan: {e}")
 
-    if all_keys:
+    if all_keys or "get_next_key" in getattr(pool, "__dict__", {}):
         try:
             active_cat_name = profile_facts.get("catalog_profiles", {}).get("active_profile_name", "Master Unified Profile")
             active_vis_name = profile_facts.get("visual_profiles", {}).get("active_profile_name", "gb v3 2d no bg")
@@ -1165,49 +1165,64 @@ def chat_with_copilot(
                 "catalog_diff_plan": diff_plan,
             }
 
-            from app.extraction.pacer_sentinel import get_pacer_sentinel
             from app.core.config import resolve_active_gemini_model
-            import time
+            from app.services.ai_fleet_gateway import get_fleet_gateway
+            from app.services.gemini_account_service import GeminiAccountManager
 
-            api_key = pool.get_next_key()
-            if api_key:
-                model_name = resolve_active_gemini_model()
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            contents: list[dict[str, Any]] = []
+            if history:
+                for h in history[-6:]:
+                    contents.append({
+                        "role": "user" if h.get("role") == "user" else "model",
+                        "parts": [{"text": h.get("content", "")}],
+                    })
 
-                contents: list[dict[str, Any]] = []
-                if history:
-                    for h in history[-6:]:
-                        contents.append({
-                            "role": "user" if h.get("role") == "user" else "model",
-                            "parts": [{"text": h.get("content", "")}],
-                        })
+            contents.append({
+                "role": "user",
+                "parts": [{"text": f"GROUND TRUTH CONTEXT:\n{json.dumps(context_payload, indent=2, default=str)}\n\nUSER QUESTION: {cleaned_query}"}],
+            })
 
-                contents.append({
-                    "role": "user",
-                    "parts": [{"text": f"GROUND TRUTH CONTEXT:\n{json.dumps(context_payload, indent=2, default=str)}\n\nUSER QUESTION: {cleaned_query}"}],
-                })
+            payload = {
+                "system_instruction": {"parts": [{"text": system_prompt}]},
+                "contents": contents,
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600},
+            }
 
-                payload = {
-                    "system_instruction": {"parts": [{"text": system_prompt}]},
-                    "contents": contents,
-                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600},
-                }
-
-                estimated_tokens = len(json.dumps(context_payload, default=str)) // 4
-                sentinel = get_pacer_sentinel()
-                sentinel.acquire(estimated_tokens=estimated_tokens)
-
-                start_t = time.perf_counter()
-                with httpx.Client(timeout=8.0) as client:
-                    res = client.post(url, json=payload)
-                    duration = time.perf_counter() - start_t
-                    if res.status_code == 200:
-                        data = res.json()
-                        candidates = data.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            if parts:
-                                reply_text = parts[0].get("text", "").strip()
+            estimated_tokens = len(json.dumps(context_payload, default=str)) // 4
+            has_patched_get_next = "get_next_key" in getattr(pool, "__dict__", {})
+            if isinstance(pool, GeminiAccountManager) and pool.get_accounts() and not has_patched_get_next:
+                reply_text = get_fleet_gateway().execute_gemini_request(
+                    payload=payload,
+                    estimated_tokens=estimated_tokens,
+                    timeout_seconds=8.0,
+                    max_attempts=2,
+                    max_wait_seconds=8.0,
+                    purpose="copilot",
+                    priority=10,
+                    allow_quota_raise=False,
+                    parse_fn=lambda data: (
+                        (
+                            ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [{}]
+                        )[0]
+                        .get("text", "")
+                        .strip()
+                        or None
+                    ),
+                ) or ""
+            else:
+                api_key = pool.get_next_key()
+                if api_key:
+                    model_name = resolve_active_gemini_model()
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                    with httpx.Client(timeout=8.0) as client:
+                        res = client.post(url, json=payload)
+                        if res.status_code == 200:
+                            data = res.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    reply_text = parts[0].get("text", "").strip()
         except Exception as err:
             logger.warning(f"Gemini conversational API call failed: {err}")
 

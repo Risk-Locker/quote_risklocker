@@ -125,12 +125,15 @@ def get_session_tab_counts(db: Session) -> dict[str, int]:
         or 0
     )
     quote_cnt = max(0, live_cnt - cn_cnt)
+    from app.models.tables import UploadRun
+    runs_cnt = db.scalar(select(func.count(UploadRun.id))) or 0
     return {
         "all": all_cnt,
         "live": live_cnt,
         "quotations": quote_cnt,
         "covernotes": cn_cnt,
         "test": test_cnt,
+        "staging_batches": int(runs_cnt),
     }
 
 

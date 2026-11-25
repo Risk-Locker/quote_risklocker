@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quota-meter";
+import { LiveFleetInspector } from "@/components/upload/LiveFleetInspector";
 import { QueueProgressBanner } from "@/components/upload/queue-progress-banner";
 import { useUploadQueuePoller } from "@/components/upload/useUploadQueuePoller";
 import { api } from "@/lib/api";
@@ -56,9 +57,10 @@ type UploadLimits = {
 type UploadResult = { session_id: string; job_id: string; uploaded_file_id: string; created: boolean };
 
 type JobStatus = {
-  state: "queued" | "processing" | "completed" | "failed" | "cancelled";
+  state: "queued" | "processing" | "paused_quota" | "paused_user" | "completed" | "failed" | "cancelled";
   progress: number;
   phase?: string;
+  paused_reason?: string;
   heartbeat_at?: string | null;
   elapsed_seconds?: number;
   queue_position?: number;
@@ -70,9 +72,10 @@ type JobStatus = {
 interface BulkFileItem {
   id: string;
   file: File;
-  status: "staged" | "uploading" | "processing" | "completed" | "failed";
+  status: "staged" | "uploading" | "processing" | "paused_quota" | "paused_user" | "completed" | "failed";
   progress: number;
   phase?: string;
+  pausedReason?: string;
   sessionId?: string;
   jobId?: string;
   queuePosition?: number;
@@ -236,6 +239,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   const [bulkFiles, setBulkFiles] = useState<BulkFileItem[]>([]);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [bulkNotice, setBulkNotice] = useState("");
+  const [activeUploadRunId, setActiveUploadRunId] = useState<string | null>(null);
   const [redetectingItemId, setRedetectingItemId] = useState<string | null>(null);
   const { openInNewTab, setOpenInNewTab } = useOpenInNewTabPreference();
 
@@ -452,12 +456,14 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     activeJobId.current = result.job_id;
     pollingStartedAt.current = Date.now();
     while (mounted.current && !cancelRequested.current) {
-      if (Date.now() - pollingStartedAt.current > MAX_JOB_WAIT_MS) {
-        throw new Error("Preparation is taking longer than expected. The job is still safe; open Sessions to check it.");
-      }
       const response = await api<{ job: JobStatus }>(`/jobs/${result.job_id}`);
       if (!mounted.current || cancelRequested.current) return;
       setJob(response.job);
+      if (response.job.state !== "paused_quota" && response.job.state !== "paused_user") {
+        if (Date.now() - pollingStartedAt.current > MAX_JOB_WAIT_MS) {
+          throw new Error("Preparation is taking longer than expected. The job is still safe; open Sessions to check it.");
+        }
+      }
       if (response.job.state === "completed") {
         const targetUrl = isTestUpload
           ? `/sessions/sandbox/${result.session_id}`
@@ -500,7 +506,32 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     form.append("file", file);
     form.append("enhanced_reading", String(enhanced));
     form.append("is_test", String(isTestUpload));
+    form.append("upload_mode", mode);
     try {
+      let runId = activeUploadRunId;
+      if (!runId) {
+        try {
+          const runRes = await api<{ run: { id: string } }>("/upload-runs", {
+            method: "POST",
+            body: JSON.stringify({
+              title: file.name || "Single Quotation",
+              mode,
+              tenure_id: existingTenureId || null,
+              is_test: isTestUpload,
+              total_files: 1,
+            }),
+          });
+          if (runRes?.run?.id) {
+            runId = runRes.run.id;
+            setActiveUploadRunId(runId);
+          }
+        } catch {
+          // Non-blocking: upload proceeds even if run creation fails
+        }
+      }
+      if (runId) {
+        form.append("upload_run_id", runId);
+      }
       const result = await api<UploadResult>("/uploads", {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey.current },
@@ -687,6 +718,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   function clearBulkFiles() {
     if (bulkProcessing) return;
     setBulkFiles([]);
+    setActiveUploadRunId(null);
     setBulkNotice("");
     clearStagedQueue().catch(() => { });
   }
@@ -713,6 +745,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     );
     setBulkProcessing(false);
     setBulkFiles([]);
+    setActiveUploadRunId(null);
     setBulkNotice("Batch stopped. Cancelled sessions have been deleted.");
     clearStagedQueue().catch(() => { });
     for (const item of activeItems) {
@@ -754,6 +787,33 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     const CHUNK_SIZE = 3;
     let queuedCount = 0;
 
+    let batchRunId = activeUploadRunId;
+    if (!batchRunId) {
+      try {
+        const firstFileName = stagedItems[0]?.file?.name || "Batch Upload";
+        const defaultTitle =
+          stagedItems.length === 1
+            ? firstFileName
+            : `${mode === "comparison" ? "Comparison" : "Fleet"} Batch (${stagedItems.length} PDFs) · ${firstFileName}`;
+        const runRes = await api<{ run: { id: string } }>("/upload-runs", {
+          method: "POST",
+          body: JSON.stringify({
+            title: defaultTitle,
+            mode,
+            tenure_id: existingTenureId || null,
+            is_test: isTestUpload,
+            total_files: stagedItems.length,
+          }),
+        });
+        if (runRes?.run?.id) {
+          batchRunId = runRes.run.id;
+          setActiveUploadRunId(batchRunId);
+        }
+      } catch {
+        // Non-blocking fallback
+      }
+    }
+
     try {
       for (let c = 0; c < stagedItems.length; c += CHUNK_SIZE) {
         if (!mounted.current || cancelRequested.current) break;
@@ -772,6 +832,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                 form.append("file", item.file);
                 form.append("enhanced_reading", String(enhanced));
                 form.append("is_test", String(isTestUpload));
+                form.append("upload_mode", mode);
+                if (batchRunId) {
+                  form.append("upload_run_id", batchRunId);
+                }
                 if (existingTenureId) {
                   form.append("tenure_id", existingTenureId);
                 }
@@ -1083,6 +1147,15 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
 
           {/* Mode Switcher & New Tab Toggle */}
           <div className="shrink-0 self-start lg:self-center flex flex-wrap items-center gap-2">
+            <LiveFleetInspector uploadRunId={activeUploadRunId} />
+            {activeUploadRunId ? (
+              <Link
+                href={`/upload/batches/${activeUploadRunId}` as Route}
+                className="text-[11px] font-semibold text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] underline"
+              >
+                Saved to Staging Batches · Safe to close tab
+              </Link>
+            ) : null}
             <OpenInNewTabToggle checked={openInNewTab} onChange={setOpenInNewTab} />
             <div className="flex items-center gap-1 rounded-lg border border-[var(--rl-border)] bg-[var(--rl-bg-surface)] p-1 shadow-2xs">
             <button
@@ -1769,6 +1842,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                 {bulkFiles.map((item, idx) => {
                   const isDone = item.status === "completed";
                   const isFailed = item.status === "failed";
+                  const isPausedQuota = item.status === "paused_quota" || item.status === "paused_user";
                   const isWorking = item.status === "uploading" || item.status === "processing";
 
                   return (
@@ -1863,6 +1937,14 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                               </button>
                             )}
                           </>
+                        )}
+
+                        {isPausedQuota && (
+                          <div className="flex items-center gap-2">
+                            <Badge variant="warning" className="text-[10px]">
+                              {item.status === "paused_quota" ? "Paused · Quota (Auto-Resume)" : "Paused"}
+                            </Badge>
+                          </div>
                         )}
 
                         {isWorking && (
@@ -1998,10 +2080,18 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
 
                   {bulkProcessing && (
                     <div className="flex flex-wrap items-center gap-3">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-[var(--rl-text-strong)]">
-                        <CircleNotch size={16} weight="bold" className="animate-spin text-[var(--rl-black)]" />
-                        Extracting batch in parallel ({completedCount} of {bulkFiles.length} ready)...
-                      </div>
+                      {bulkFiles.some((f) => f.status === "paused_quota") &&
+                      !bulkFiles.some((f) => f.status === "uploading" || f.status === "processing") ? (
+                        <div className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+                          <ClockCountdown size={16} weight="bold" className="text-amber-700" />
+                          Daily quota reached — {bulkFiles.filter((f) => f.status === "paused_quota").length} file(s) paused safely (auto-resumes at 4:00 PM MYT).
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sm font-semibold text-[var(--rl-text-strong)]">
+                          <CircleNotch size={16} weight="bold" className="animate-spin text-[var(--rl-black)]" />
+                          Extracting batch in parallel ({completedCount} of {bulkFiles.length} ready)...
+                        </div>
+                      )}
                       <Button
                         type="button"
                         variant="danger"
@@ -2062,6 +2152,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                         variant="ghost"
                         onClick={() => {
                           setBulkFiles([]);
+                          setActiveUploadRunId(null);
                           setBulkNotice("");
                         }}
                         className="text-xs font-medium text-[var(--rl-text-muted)] cursor-pointer"

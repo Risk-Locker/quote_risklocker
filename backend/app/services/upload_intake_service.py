@@ -88,6 +88,9 @@ async def create_queued_upload(
     is_test: bool = False,
     tenure_id: str | None = None,
     document_type: str | None = None,
+    upload_run_id: str | None = None,
+    priority: int = 100,
+    replace_session_id: str | None = None,
     storage: SupabaseStorage | None = None,
     quarantine: Callable[[bytes, Settings], ContextManager[tuple[Any, dict]]] = quarantined_pdf,
 ) -> QueuedUpload:
@@ -224,15 +227,18 @@ async def create_queued_upload(
             is_test=is_test,
             tenure_id=tenure_id,
             document_type=document_type or "quotation",
+            upload_run_id=upload_run_id,
         )
         job = Job(
             id=job_id,
             owner_id=owner_id,
             session_id=session_id,
             uploaded_file_id=uploaded_file_id,
+            upload_run_id=upload_run_id,
             job_type="extract_pdf",
             idempotency_key=key,
             state="queued",
+            priority=int(priority),
             payload={
                 "enhanced_reading": enhanced_reading,
                 "is_test": is_test,
@@ -241,6 +247,7 @@ async def create_queued_upload(
                 "tenure_id": tenure_id,
                 "token_estimate": token_estimate,
                 "page_count": pdf_page_count,
+                "upload_run_id": upload_run_id,
             },
             result={},
             safe_error={},
@@ -249,6 +256,24 @@ async def create_queued_upload(
             max_attempts=3,
             available_at=now,
         )
+        if replace_session_id:
+            old_sess = db.get(QuotationSession, replace_session_id)
+            if old_sess is not None:
+                old_sess.status = "trash"
+                old_jobs = list(
+                    db.scalars(
+                        select(Job).where(
+                            Job.session_id == old_sess.id,
+                            Job.state.in_(["queued", "paused_quota", "paused_user"]),
+                            Job.cancelled_at.is_(None),
+                        )
+                    ).all()
+                )
+                for oj in old_jobs:
+                    oj.state = "cancelled"
+                    oj.phase = "replaced"
+                    oj.cancelled_at = now
+                    oj.completed_at = now
         # Insert in explicit dependency order. The session unit-of-work can
         # otherwise emit INSERTs in table-name order (batches, jobs, ...) and
         # violate the jobs->sessions foreign key.

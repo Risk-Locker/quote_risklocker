@@ -6,9 +6,10 @@ import { api } from "@/lib/api";
 export interface PollableBulkItem {
   id: string;
   file: File;
-  status: "staged" | "uploading" | "processing" | "completed" | "failed";
+  status: "staged" | "uploading" | "processing" | "paused_quota" | "paused_user" | "completed" | "failed";
   progress: number;
   phase?: string;
+  pausedReason?: string;
   sessionId?: string;
   jobId?: string;
   queuePosition?: number;
@@ -27,9 +28,10 @@ export interface PollableBulkItem {
 
 interface BatchJobInfo {
   id: string;
-  state: "queued" | "processing" | "completed" | "failed" | "cancelled";
+  state: "queued" | "processing" | "paused_quota" | "paused_user" | "completed" | "failed" | "cancelled";
   progress: number;
   phase?: string;
+  paused_reason?: string;
   queue_position?: number;
   other_users_count?: number;
   error?: { message?: string } | null;
@@ -63,7 +65,12 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
   }, []);
 
   const hasActiveJobs = bulkFiles.some(
-    (item) => (item.status === "processing" || item.status === "uploading") && Boolean(item.jobId)
+    (item) =>
+      (item.status === "processing" ||
+        item.status === "uploading" ||
+        item.status === "paused_quota" ||
+        item.status === "paused_user") &&
+      Boolean(item.jobId)
   );
   const hasUnhydratedCompleted = bulkFiles.some(
     (item) => item.status === "completed" && Boolean(item.sessionId) && !item.tenureId
@@ -166,7 +173,12 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
       }
 
       const activeItems = filesRef.current.filter(
-        (item) => (item.status === "processing" || item.status === "uploading") && Boolean(item.jobId)
+        (item) =>
+          (item.status === "processing" ||
+            item.status === "uploading" ||
+            item.status === "paused_quota" ||
+            item.status === "paused_user") &&
+          Boolean(item.jobId)
       );
       if (activeItems.length === 0) return;
 
@@ -194,7 +206,13 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
 
         setBulkFiles((prev) =>
           prev.map((item) => {
-            if (!item.jobId || (item.status !== "processing" && item.status !== "uploading")) {
+            if (
+              !item.jobId ||
+              (item.status !== "processing" &&
+                item.status !== "uploading" &&
+                item.status !== "paused_quota" &&
+                item.status !== "paused_user")
+            ) {
               return item;
             }
             const jobInfo = mergedJobs[item.jobId];
@@ -208,6 +226,7 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
                   status: "processing",
                   progress: 98,
                   phase: "Linking comparison workspace...",
+                  pausedReason: undefined,
                   error: undefined,
                 };
               }
@@ -217,6 +236,7 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
                 progress: 100,
                 tenureId: item.tenureId || existingTenureId || undefined,
                 phase: undefined,
+                pausedReason: undefined,
                 error: undefined,
               };
             }
@@ -224,7 +244,17 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
               return {
                 ...item,
                 status: "failed",
+                pausedReason: undefined,
                 error: jobInfo.error?.message || "Extraction failed.",
+              };
+            }
+            if (jobInfo.state === "paused_quota" || jobInfo.state === "paused_user") {
+              return {
+                ...item,
+                status: jobInfo.state,
+                progress: Math.max(item.progress, jobInfo.progress || 15),
+                phase: jobInfo.phase || (jobInfo.state === "paused_quota" ? "paused_daily_quota" : "paused_by_user"),
+                pausedReason: jobInfo.paused_reason || undefined,
               };
             }
             return {
@@ -232,6 +262,7 @@ export function useUploadQueuePoller<T extends PollableBulkItem>({
               status: "processing",
               progress: Math.max(item.progress, jobInfo.progress || 25),
               phase: jobInfo.phase || item.phase,
+              pausedReason: undefined,
               queuePosition: jobInfo.queue_position ?? item.queuePosition,
               otherUsersCount: jobInfo.other_users_count ?? item.otherUsersCount,
             };

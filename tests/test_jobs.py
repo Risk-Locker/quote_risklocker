@@ -270,3 +270,140 @@ def test_cancel_job_detaches_session_and_remains_serializable():
     assert serialized["state"] == "cancelled"
     assert serialized["cancelled_at"] is not None
 
+
+def _sqlite_session():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.models.tables import Base
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
+
+def test_sql_fair_share_interleaving_and_fast_lane_priority():
+    from app.models.tables import User, new_id
+
+    db = _sqlite_session()
+    try:
+        u_a = User(id=new_id(), email="a@risklocker.test", role="staff")
+        u_b = User(id=new_id(), email="b@risklocker.test", role="staff")
+        u_c = User(id=new_id(), email="c@risklocker.test", role="staff")
+        db.add_all([u_a, u_b, u_c])
+        db.commit()
+
+        base_t = datetime.now(timezone.utc) - timedelta(minutes=5)
+        for i in range(3):
+            db.add(make_job(id=new_id(), idempotency_key=f"a-{i}", owner_id=u_a.id, session_id=None, uploaded_file_id=None, priority=100, available_at=base_t + timedelta(seconds=i), created_at=base_t + timedelta(seconds=i)))
+        for i in range(2):
+            db.add(make_job(id=new_id(), idempotency_key=f"b-{i}", owner_id=u_b.id, session_id=None, uploaded_file_id=None, priority=100, available_at=base_t + timedelta(seconds=10 + i), created_at=base_t + timedelta(seconds=10 + i)))
+        # Fast-lane interactive job (priority=10) arrives last, must claim first
+        db.add(make_job(id=new_id(), idempotency_key="c-fast", owner_id=u_c.id, session_id=None, uploaded_file_id=None, priority=10, available_at=base_t + timedelta(seconds=30), created_at=base_t + timedelta(seconds=30)))
+        db.commit()
+
+        claimed_owners = []
+        while True:
+            c = claim_next_job(db, worker_id="w-1", lease_seconds=120)
+            if c is None:
+                break
+            claimed_owners.append(c.owner_id)
+
+        assert claimed_owners[0] == u_c.id
+        # Next two bulk jobs must interleave u_a and u_b (not u_a, u_a, u_a before u_b)
+        assert set(claimed_owners[1:3]) == {u_a.id, u_b.id}
+        assert len(claimed_owners) == 6
+    finally:
+        db.close()
+
+
+def test_requeue_job_for_quota_preserves_attempts_and_resumes_on_key_add():
+    from app.models.tables import User, new_id
+    from app.services.job_service import requeue_job_for_quota, resume_paused_quota_jobs
+
+    db = _sqlite_session()
+    try:
+        u = User(id=new_id(), email="quota@risklocker.test", role="staff")
+        db.add(u)
+        db.commit()
+
+        j = make_job(id=new_id(), idempotency_key="q-1", owner_id=u.id, session_id=None, uploaded_file_id=None, attempt=0, max_attempts=3)
+        db.add(j)
+        db.commit()
+
+        claimed = claim_next_job(db, worker_id="w-1", lease_seconds=120)
+        assert claimed is not None and claimed.attempt == 1
+
+        future_reset = datetime.now(timezone.utc) + timedelta(hours=6)
+        requeue_job_for_quota(
+            db,
+            claimed,
+            worker_id="w-1",
+            resume_at=future_reset,
+            pause_daily=True,
+            reason="All lanes reached 480 RPD",
+        )
+        assert claimed.attempt == 0
+        assert claimed.state == "paused_quota"
+        assert claim_next_job(db, worker_id="w-1", lease_seconds=120) is None
+
+        woken = resume_paused_quota_jobs(db, reason="Added backup key")
+        assert woken == 1
+        reclaimed = claim_next_job(db, worker_id="w-1", lease_seconds=120)
+        assert reclaimed is not None and reclaimed.id == claimed.id
+    finally:
+        db.close()
+
+
+def test_upload_run_lifecycle_and_retry_failed_only():
+    from app.models.tables import User, new_id
+    from app.services.upload_run_service import (
+        create_upload_run,
+        get_upload_run_detail,
+        list_upload_runs,
+        pause_upload_run,
+        resume_upload_run,
+        retry_failed_upload_run,
+    )
+
+    db = _sqlite_session()
+    try:
+        user = User(id=new_id(), email="batch@risklocker.test", role="staff")
+        db.add(user)
+        db.commit()
+
+        run = create_upload_run(db, owner_id=user.id, title="Lunch Batch 120", mode="bulk", total_files=3)
+        j_done = make_job(id=new_id(), idempotency_key="r-done", owner_id=user.id, upload_run_id=run.id, state="completed", progress=100, session_id=None, uploaded_file_id=None)
+        j_fail = make_job(id=new_id(), idempotency_key="r-fail", owner_id=user.id, upload_run_id=run.id, state="failed", attempt=3, safe_error={"message": "Timeout"}, session_id=None, uploaded_file_id=None)
+        j_q = make_job(id=new_id(), idempotency_key="r-q", owner_id=user.id, upload_run_id=run.id, state="queued", session_id=None, uploaded_file_id=None)
+        db.add_all([j_done, j_fail, j_q])
+        db.commit()
+
+        paused = pause_upload_run(db, run_id=run.id, user=user)
+        assert paused["paused_count"] == 1
+        db.refresh(j_q)
+        assert j_q.state == "paused_user"
+
+        resumed = resume_upload_run(db, run_id=run.id, user=user)
+        assert resumed["resumed_count"] == 1
+        db.refresh(j_q)
+        assert j_q.state == "queued"
+
+        retried = retry_failed_upload_run(db, run_id=run.id, user=user)
+        assert retried["retried_count"] == 1
+        db.refresh(j_fail)
+        db.refresh(j_done)
+        assert j_fail.state == "queued" and j_fail.attempt == 0
+        assert j_done.state == "completed"
+
+        listed = list_upload_runs(db, user=user)
+        assert listed["total"] == 1
+        detail = get_upload_run_detail(db, run_id=run.id, user=user)
+        assert len(detail["items"]) == 3
+    finally:
+        db.close()
+

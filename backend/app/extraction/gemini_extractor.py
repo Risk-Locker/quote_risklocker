@@ -498,8 +498,12 @@ def extract_with_gemini_sync(
     batch_item_index: int | None = None,
     timeout_seconds: float = 35.0,
     telemetry_log: list[dict[str, Any]] | None = None,
+    job_id: str | None = None,
+    upload_run_id: str | None = None,
+    priority: int = 100,
+    purpose: str = "extraction",
 ) -> dict[str, Any] | None:
-    """Extract quotation fields using Gemini Vision AI with 8-slot multi-model parallel dispatching."""
+    """Extract quotation fields using Gemini Vision AI routed through the unified 2D Fleet Gateway."""
     pool = get_key_pool()
     all_keys = pool.get_all_keys()
     if not all_keys:
@@ -603,368 +607,66 @@ def extract_with_gemini_sync(
     # Timeout: ensure sufficient time for complete multimodal Vision JSON extraction
     effective_timeout = max(timeout_seconds or 35.0, 25.0)
 
-    from app.extraction.pacer_sentinel import get_pacer_sentinel
-    sentinel = get_pacer_sentinel()
+    def _parse_extraction_json(data: dict[str, Any]) -> dict[str, Any] | None:
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return None
+        c_parts = candidates[0].get("content", {}).get("parts") or []
+        if not c_parts:
+            return None
+        raw_text = c_parts[0].get("text", "")
+        parsed = json.loads(raw_text)
+        return parsed if isinstance(parsed, dict) else None
 
-    # 1. PARALLEL FLEET DISPATCHING: Acquire dedicated (key, model, slot)
-    try:
-        slot_info = pool.acquire_parallel_slot(
-            batch_item_index=batch_item_index,
+    if isinstance(pool, GeminiAccountManager):
+        from app.services.ai_fleet_gateway import get_fleet_gateway
+
+        gateway = get_fleet_gateway()
+        return gateway.execute_gemini_request(
+            payload=payload,
             requested_model=requested_model,
             exclude_slot_ids=exclude_slot_ids,
+            batch_item_index=batch_item_index,
+            timeout_seconds=effective_timeout,
+            max_attempts=4,
+            max_wait_seconds=90.0 if priority >= 50 else 30.0,
+            purpose=purpose,
+            filename=source_filename,
+            job_id=job_id,
+            upload_run_id=upload_run_id,
+            priority=priority,
+            telemetry_log=telemetry_log,
+            allow_quota_raise=True,
+            parse_fn=_parse_extraction_json,
         )
-    except TypeError:
-        try:
-            slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index, requested_model=requested_model)
-        except TypeError:
-            slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index)
-    if slot_info:
-        slot_key, slot_model, slot_id = slot_info
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{slot_model}:generateContent?key={slot_key}"
-        start_t = time.perf_counter()
-        try:
-            with httpx.Client(timeout=effective_timeout, http2=False) as client:
-                response = client.post(url, json=payload)
-                latency_ms = int((time.perf_counter() - start_t) * 1000)
-                if response.status_code == 200:
-                    data = response.json()
-                    candidates = data.get("candidates") or []
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts") or []
-                        if parts:
-                            raw_text = parts[0].get("text", "")
-                            parsed = json.loads(raw_text)
-                            usage = data.get("usageMetadata", {})
-                            p_tok = usage.get("promptTokenCount", 0)
-                            c_tok = usage.get("candidatesTokenCount", 0)
-                            t_tok = usage.get("totalTokenCount", p_tok + c_tok)
-                            pool.record_slot_success(slot_id, prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, latency_ms=latency_ms)
-                            sentinel.record_outcome(latency_sec=latency_ms / 1000.0, is_rate_limited=False)
-                            if telemetry_log is not None:
-                                telemetry_log.append({
-                                    "stage": "primary_slot",
-                                    "model": slot_model,
-                                    "slot_id": slot_id,
-                                    "status_code": 200,
-                                    "is_success": True,
-                                    "prompt_tokens": p_tok,
-                                    "candidate_tokens": c_tok,
-                                    "total_tokens": t_tok,
-                                    "latency_ms": latency_ms,
-                                })
-                            logger.info("Gemini AI parallel extraction succeeded on [%s] with %s (tokens: %d prompt, %d candidate, %dms).", slot_id, slot_model, p_tok, c_tok, latency_ms)
-                            return parsed
-                elif response.status_code == 429:
-                    err_msg = ""
-                    try:
-                        err_msg = response.json().get("error", {}).get("message", "")
-                    except Exception:
-                        err_msg = response.text[:200]
-                    pool.record_slot_failure(slot_id, 429, err_msg or "Rate limit exceeded (429)", latency_ms=latency_ms)
-                    sentinel.record_outcome(latency_sec=latency_ms / 1000.0, is_rate_limited=True)
-                    if telemetry_log is not None:
-                        telemetry_log.append({
-                            "stage": "primary_slot",
-                            "model": slot_model,
-                            "slot_id": slot_id,
-                            "status_code": 429,
-                            "is_success": False,
-                            "latency_ms": latency_ms,
-                            "error": err_msg or "Rate limit exceeded (429)",
-                        })
-                    logger.warning("Gemini model %s on slot %s hit rate limit (429); cooling slot for 65s and trying spillover.", slot_model, slot_id)
-                else:
-                    err_msg = response.text[:200]
-                    pool.record_slot_failure(slot_id, response.status_code, err_msg, latency_ms=latency_ms)
-                    sentinel.record_outcome(latency_sec=latency_ms / 1000.0, is_rate_limited=False)
-                    if telemetry_log is not None:
-                        telemetry_log.append({
-                            "stage": "primary_slot",
-                            "model": slot_model,
-                            "slot_id": slot_id,
-                            "status_code": response.status_code,
-                            "is_success": False,
-                            "latency_ms": latency_ms,
-                            "error": err_msg,
-                        })
-                    logger.warning("Gemini parallel slot %s returned %d; spilling over.", slot_id, response.status_code)
-        except Exception as exc:
-            latency_ms = int((time.perf_counter() - start_t) * 1000)
-            pool.record_slot_failure(slot_id, 500, str(exc)[:200], latency_ms=latency_ms)
-            if telemetry_log is not None:
-                telemetry_log.append({
-                    "stage": "primary_slot",
-                    "model": slot_model,
-                    "slot_id": slot_id,
-                    "status_code": 500,
-                    "is_success": False,
-                    "latency_ms": latency_ms,
-                    "error": str(exc)[:200],
-                })
-            logger.warning("Gemini parallel slot %s threw exception: %s", slot_id, exc)
 
-    # 2. SPILLOVER / FALLBACK: If slot was rate-limited or unavailable, fall back strictly across verified lite models
-    candidate_models = [
-        configured_model,
-        "gemini-3.1-flash-lite",
-        "gemini-3.5-flash-lite",
-    ]
-    seen_models: set[str] = set()
-    models_to_try = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
-
-    api_key = pool.get_next_key()
-    if not api_key:
-        logger.info("No active Gemini API key available or safety cap reached; falling back to native extraction.")
+    # Compatibility path only when unit tests monkeypatch get_key_pool() with a mock FakePool
+    slot_info = pool.acquire_parallel_slot(
+        batch_item_index=batch_item_index,
+        requested_model=requested_model,
+    )
+    if not slot_info:
         return None
-
-    last_failure_reason = ""
-    for m_name in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={api_key}"
-        start_t = time.perf_counter()
-        try:
-            with httpx.Client(timeout=effective_timeout, http2=False) as client:
-                response = client.post(url, json=payload)
-                latency_ms = int((time.perf_counter() - start_t) * 1000)
-                if response.status_code == 200:
-                    data = response.json()
-                    candidates = data.get("candidates") or []
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts") or []
-                        if parts:
-                            raw_text = parts[0].get("text", "")
-                            parsed = json.loads(raw_text)
-                            usage = data.get("usageMetadata", {})
-                            p_tok = usage.get("promptTokenCount", 0)
-                            c_tok = usage.get("candidatesTokenCount", 0)
-                            t_tok = usage.get("totalTokenCount", p_tok + c_tok)
-                            pool.record_success(prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, key=api_key)
-                            pool.persist_account_call_log(
-                                key=api_key,
-                                model=m_name,
-                                endpoint_slot=f"spillover::{m_name}",
-                                status_code=200,
-                                is_success=True,
-                                prompt_tokens=p_tok,
-                                candidate_tokens=c_tok,
-                                total_tokens=t_tok,
-                                latency_ms=latency_ms,
-                            )
-                            sentinel.record_outcome(latency_sec=latency_ms / 1000.0, is_rate_limited=False)
-                            if telemetry_log is not None:
-                                telemetry_log.append({
-                                    "stage": "spillover",
-                                    "model": m_name,
-                                    "slot_id": f"spillover::{m_name}",
-                                    "status_code": 200,
-                                    "is_success": True,
-                                    "prompt_tokens": p_tok,
-                                    "candidate_tokens": c_tok,
-                                    "total_tokens": t_tok,
-                                    "latency_ms": latency_ms,
-                                })
-                            logger.info("Gemini AI extraction succeeded with %s (tokens: %d prompt, %d candidate).", m_name, p_tok, c_tok)
-                            return parsed
-                elif response.status_code in (500, 502, 503, 504):
-                    err_msg = f"Server error {response.status_code}"
-                    pool.record_failure(response.status_code, err_msg, key=api_key)
-                    pool.persist_account_call_log(
-                        key=api_key,
-                        model=m_name,
-                        endpoint_slot=f"spillover::{m_name}",
-                        status_code=response.status_code,
-                        is_success=False,
-                        latency_ms=latency_ms,
-                        error_message=err_msg,
-                    )
-                    if telemetry_log is not None:
-                        telemetry_log.append({
-                            "stage": "spillover",
-                            "model": m_name,
-                            "slot_id": f"spillover::{m_name}",
-                            "status_code": response.status_code,
-                            "is_success": False,
-                            "latency_ms": latency_ms,
-                            "error": err_msg,
-                        })
-                    logger.warning("Gemini model %s returned server error (%d), trying fallback.", m_name, response.status_code)
-                    last_failure_reason = err_msg
-                    continue
-                elif response.status_code == 429:
-                    err_msg = ""
-                    try:
-                        err_msg = response.json().get("error", {}).get("message", "")
-                    except Exception:
-                        err_text = response.text[:200]
-                        err_msg = err_text
-                    pool.record_failure(429, err_msg or "Rate limit / quota exceeded", key=api_key)
-                    pool.persist_account_call_log(
-                        key=api_key,
-                        model=m_name,
-                        endpoint_slot=f"spillover::{m_name}",
-                        status_code=429,
-                        is_success=False,
-                        latency_ms=latency_ms,
-                        error_message=err_msg or "Rate limit exceeded (429)",
-                    )
-                    sentinel.record_outcome(latency_sec=latency_ms / 1000.0, is_rate_limited=True)
-                    if telemetry_log is not None:
-                        telemetry_log.append({
-                            "stage": "spillover",
-                            "model": m_name,
-                            "slot_id": f"spillover::{m_name}",
-                            "status_code": 429,
-                            "is_success": False,
-                            "latency_ms": latency_ms,
-                            "error": err_msg or "Rate limit exceeded (429)",
-                        })
-                    logger.warning("Gemini model %s returned rate-limit (429), rotating key or fallback.", m_name)
-                    last_failure_reason = err_msg or "Rate limit exceeded (429)"
-                    next_key = pool.get_next_key()
-                    if next_key and next_key != api_key:
-                        api_key = next_key
-                    continue
-                elif response.status_code in (401, 403):
-                    err_msg = ""
-                    try:
-                        err_msg = response.json().get("error", {}).get("message", "")
-                    except Exception:
-                        err_msg = response.text[:200]
-                    pool.record_failure(response.status_code, err_msg, key=api_key)
-                    pool.persist_account_call_log(
-                        key=api_key,
-                        model=m_name,
-                        endpoint_slot=f"spillover::{m_name}",
-                        status_code=response.status_code,
-                        is_success=False,
-                        latency_ms=latency_ms,
-                        error_message=err_msg or f"HTTP {response.status_code}",
-                    )
-                    if telemetry_log is not None:
-                        telemetry_log.append({
-                            "stage": "spillover",
-                            "model": m_name,
-                            "slot_id": f"spillover::{m_name}",
-                            "status_code": response.status_code,
-                            "is_success": False,
-                            "latency_ms": latency_ms,
-                            "error": err_msg or f"HTTP {response.status_code}",
-                        })
-                    logger.warning(
-                        "Gemini API returned %d (%s) on %s: %s. Google Cloud project access denied for this key.",
-                        response.status_code,
-                        "PERMISSION_DENIED" if response.status_code == 403 else "UNAUTHENTICATED",
-                        m_name,
-                        err_msg or response.text[:200],
-                    )
-                    last_failure_reason = err_msg or f"HTTP {response.status_code}: Project access denied"
-                    next_key = pool.get_next_key()
-                    if next_key and next_key != api_key:
-                        api_key = next_key
-                    continue
-                elif response.status_code == 404:
-                    err_msg = f"Model {m_name} not available (404)"
-                    pool.record_failure(404, err_msg, key=api_key)
-                    pool.persist_account_call_log(
-                        key=api_key,
-                        model=m_name,
-                        endpoint_slot=f"spillover::{m_name}",
-                        status_code=404,
-                        is_success=False,
-                        latency_ms=latency_ms,
-                        error_message=err_msg,
-                    )
-                    if telemetry_log is not None:
-                        telemetry_log.append({
-                            "stage": "spillover",
-                            "model": m_name,
-                            "slot_id": f"spillover::{m_name}",
-                            "status_code": 404,
-                            "is_success": False,
-                            "latency_ms": latency_ms,
-                            "error": err_msg,
-                        })
-                    logger.warning("Gemini model %s returned 404, trying fallback.", m_name)
-                    last_failure_reason = err_msg
-                    continue
-                else:
-                    err_msg = f"Status {response.status_code}: {response.text[:150]}"
-                    pool.record_failure(response.status_code, err_msg, key=api_key)
-                    pool.persist_account_call_log(
-                        key=api_key,
-                        model=m_name,
-                        endpoint_slot=f"spillover::{m_name}",
-                        status_code=response.status_code,
-                        is_success=False,
-                        latency_ms=latency_ms,
-                        error_message=err_msg,
-                    )
-                    if telemetry_log is not None:
-                        telemetry_log.append({
-                            "stage": "spillover",
-                            "model": m_name,
-                            "slot_id": f"spillover::{m_name}",
-                            "status_code": response.status_code,
-                            "is_success": False,
-                            "latency_ms": latency_ms,
-                            "error": err_msg,
-                        })
-                    logger.warning("Gemini API returned status %d on %s: %s", response.status_code, m_name, response.text[:200])
-                    last_failure_reason = err_msg
-                    continue
-        except (httpx.TimeoutException, TimeoutError):
+    slot_key, slot_model, slot_id = slot_info
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{slot_model}:generateContent?key={slot_key}"
+    start_t = time.perf_counter()
+    try:
+        with httpx.Client(timeout=effective_timeout, http2=False) as client:
+            response = client.post(url, json=payload)
             latency_ms = int((time.perf_counter() - start_t) * 1000)
-            err_msg = f"Timeout after {effective_timeout}s on {m_name}"
-            pool.record_failure(504, err_msg, key=api_key)
-            pool.persist_account_call_log(
-                key=api_key,
-                model=m_name,
-                endpoint_slot=f"spillover::{m_name}",
-                status_code=504,
-                is_success=False,
-                latency_ms=latency_ms,
-                error_message=err_msg,
-            )
-            if telemetry_log is not None:
-                telemetry_log.append({
-                    "stage": "spillover",
-                    "model": m_name,
-                    "slot_id": f"spillover::{m_name}",
-                    "status_code": 504,
-                    "is_success": False,
-                    "latency_ms": latency_ms,
-                    "error": err_msg,
-                })
-            logger.warning("Gemini extraction timed out on %s; trying fallback model.", m_name)
-            last_failure_reason = f"Timeout on {m_name}"
-            continue
-        except Exception as exc:
-            latency_ms = int((time.perf_counter() - start_t) * 1000)
-            err_msg = f"Exception on {m_name}: {exc}"
-            pool.record_failure(500, err_msg, key=api_key)
-            pool.persist_account_call_log(
-                key=api_key,
-                model=m_name,
-                endpoint_slot=f"spillover::{m_name}",
-                status_code=500,
-                is_success=False,
-                latency_ms=latency_ms,
-                error_message=err_msg[:300],
-            )
-            if telemetry_log is not None:
-                telemetry_log.append({
-                    "stage": "spillover",
-                    "model": m_name,
-                    "slot_id": f"spillover::{m_name}",
-                    "status_code": 500,
-                    "is_success": False,
-                    "latency_ms": latency_ms,
-                    "error": str(exc)[:200],
-                })
-            logger.warning("Gemini extraction attempt failed on %s: %s; trying fallback model.", m_name, exc)
-            last_failure_reason = str(exc)
-            continue
-
-    logger.error("All Gemini API keys and models in pool failed: %s", last_failure_reason or "Unknown")
+            if response.status_code == 200:
+                data = response.json()
+                parsed = _parse_extraction_json(data)
+                if parsed is not None:
+                    usage = data.get("usageMetadata", {})
+                    p_tok = usage.get("promptTokenCount", 0)
+                    c_tok = usage.get("candidatesTokenCount", 0)
+                    t_tok = usage.get("totalTokenCount", p_tok + c_tok)
+                    pool.record_slot_success(slot_id, prompt_tokens=p_tok, candidate_tokens=c_tok, total_tokens=t_tok, latency_ms=latency_ms)
+                    return parsed
+            pool.record_slot_failure(slot_id, response.status_code, response.text[:200], latency_ms=latency_ms)
+    except Exception as exc:
+        pool.record_slot_failure(slot_id, 500, str(exc)[:200], latency_ms=int((time.perf_counter() - start_t) * 1000))
     return None
 
 
@@ -1062,6 +764,28 @@ def call_gemini_grounded_search(
         "tools": [{"google_search": {}}],
         "generationConfig": {"temperature": 0.0},
     }
+
+    if isinstance(pool, GeminiAccountManager):
+        from app.services.ai_fleet_gateway import get_fleet_gateway
+
+        gateway = get_fleet_gateway()
+        # Cap at 2 attempts so grounded search never starves PDF extraction lanes
+        res = gateway.execute_gemini_request(
+            payload=base_payload,
+            batch_item_index=batch_item_index,
+            timeout_seconds=max(timeout_seconds, 12.0),
+            max_attempts=2,
+            max_wait_seconds=15.0,
+            purpose="grounding",
+            priority=30,
+            allow_quota_raise=False,
+            cool_slot_on_429=False,
+            endpoint_slot_override_prefix="grounding",
+            parse_fn=_parse_grounded_json_response,
+        )
+        if res is None:
+            _GROUNDING_COOLDOWN_UNTIL = time.time() + 180.0
+        return res
 
     tried_pairs: set[tuple[str, str]] = set()
     # Cap at 2 slots so a Google Search 429 burst never starves all parallel PDF-extraction slots.

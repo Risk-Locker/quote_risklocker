@@ -193,6 +193,10 @@ class ExtractionOrchestrator:
                 warnings=warnings,
                 gemini_telemetry=gemini_telemetry,
                 augment_liberty_fn=_augment_liberty_company_candidates,
+                enable_dual_model_consensus=bool(kwargs.get("enable_dual_model_consensus", True)),
+                job_id=kwargs.get("job_id"),
+                upload_run_id=kwargs.get("upload_run_id"),
+                priority=int(kwargs.get("priority", 100) or 100),
             )
             if gemini_res:
                 winning_call = next((t for t in reversed(gemini_telemetry) if t.get("is_success")), None)

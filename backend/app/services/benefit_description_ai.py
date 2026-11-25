@@ -162,9 +162,6 @@ def polish_benefit_description(
     settings = get_settings()
 
     if all_keys:
-        api_key = pool.get_next_key()
-        model_name = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": _SYSTEM_INSTRUCTION}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -174,19 +171,45 @@ def polish_benefit_description(
             },
         }
         try:
-            with httpx.Client(timeout=10.0) as client:
-                res = client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates") or []
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts") or []
-                        if parts:
-                            raw_text = str(parts[0].get("text") or "").strip()
-                            cleaned = _clean_output(raw_text)
-                            if cleaned:
-                                pool.record_request()
-                                return {"description": cleaned, "source": "gemini"}
+            from app.services.gemini_account_service import GeminiAccountManager
+
+            if isinstance(pool, GeminiAccountManager):
+                from app.services.ai_fleet_gateway import get_fleet_gateway
+
+                cleaned = get_fleet_gateway().execute_gemini_request(
+                    payload=payload,
+                    timeout_seconds=10.0,
+                    max_attempts=2,
+                    max_wait_seconds=8.0,
+                    purpose="benefit_polish",
+                    priority=10,
+                    allow_quota_raise=False,
+                    parse_fn=lambda data: (
+                        _clean_output(
+                            str((((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [{}])[0].get("text") or "").strip()
+                        )
+                        or None
+                    ),
+                )
+                if cleaned:
+                    return {"description": cleaned, "source": "gemini"}
+            else:
+                api_key = pool.get_next_key()
+                model_name = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                with httpx.Client(timeout=10.0) as client:
+                    res = client.post(url, json=payload)
+                    if res.status_code == 200:
+                        data = res.json()
+                        candidates = data.get("candidates") or []
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts") or []
+                            if parts:
+                                raw_text = str(parts[0].get("text") or "").strip()
+                                cleaned = _clean_output(raw_text)
+                                if cleaned:
+                                    pool.record_request()
+                                    return {"description": cleaned, "source": "gemini"}
         except Exception as exc:
             logger.warning("Benefit description polish Gemini call failed: %s; using fallback.", exc)
 

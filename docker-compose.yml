@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - ENABLE_EMBEDDED_WORKER=0
     ports:
       - "127.0.0.1:8100:8100"
     extra_hosts:
@@ -31,6 +33,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - WORKER_CONCURRENCY=3
     extra_hosts:
       - "host.docker.internal:host-gateway"
     deploy:

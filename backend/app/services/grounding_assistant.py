@@ -184,11 +184,8 @@ def answer_grounding_query(
     all_keys = pool.get_all_keys()
     settings = get_settings()
 
-    # If keys exist, call Gemini with tight token limits
+    # If keys exist, call Gemini with tight token limits via unified gateway
     if all_keys:
-        api_key = pool.get_next_key()
-        model_name = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": system_instruction}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -198,23 +195,28 @@ def answer_grounding_query(
             },
         }
         try:
-            with httpx.Client(timeout=8.0) as client:
-                res = client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates") or []
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts") or []
-                        if parts:
-                            reply = parts[0].get("text", "").strip()
-                            pool.record_request()
-                            # Rough token count estimate (prompt chars / 4)
-                            est_tokens = len(prompt) // 4 + len(reply) // 4
-                            return {
-                                "reply": reply,
-                                "sources": list(dict.fromkeys(sources)),
-                                "tokens_used": est_tokens,
-                            }
+            from app.services.ai_fleet_gateway import get_fleet_gateway
+
+            reply = get_fleet_gateway().execute_gemini_request(
+                payload=payload,
+                timeout_seconds=8.0,
+                max_attempts=2,
+                max_wait_seconds=8.0,
+                purpose="grounding_assistant",
+                priority=10,
+                allow_quota_raise=False,
+                parse_fn=lambda data: (
+                    str((((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [{}])[0].get("text") or "").strip()
+                    or None
+                ),
+            )
+            if reply:
+                est_tokens = len(prompt) // 4 + len(reply) // 4
+                return {
+                    "reply": reply,
+                    "sources": list(dict.fromkeys(sources)),
+                    "tokens_used": est_tokens,
+                }
         except Exception as exc:
             logger.warning("Grounding assistant Gemini call failed: %s; falling back to deterministic response.", exc)
 

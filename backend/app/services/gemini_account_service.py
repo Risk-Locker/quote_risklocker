@@ -533,9 +533,6 @@ class GeminiAccountManager:
                 slot["request_count_today"] = slot.get("request_count_today", 0) + 1
                 return slot["key"], slot["model"], slot["slot_id"]
 
-            fallback_key = self.get_next_key()
-            if fallback_key:
-                return fallback_key, PARALLEL_MODELS[0], f"fallback::{fallback_key[:6]}"
             return None
 
     def record_slot_success(

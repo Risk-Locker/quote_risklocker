@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { Suspense, useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import {
   Car,
@@ -36,6 +36,7 @@ import { RealtimePresenceBanner } from "@/components/realtime/RealtimePresenceBa
 import { OpenInNewTabToggle, useOpenInNewTabPreference } from "@/hooks/useOpenInNewTabPreference";
 import { DeepRedetectProgressBanner } from "@/components/redetect/DeepRedetectProgressBanner";
 import { useDeepRedetect } from "@/components/redetect/useDeepRedetect";
+import { StagingBatchesTab } from "@/components/sessions/StagingBatchesTab";
 
 interface SessionItem {
   id: string;
@@ -84,9 +85,10 @@ interface TabCounts {
   quotations: number;
   covernotes: number;
   test: number;
+  staging_batches?: number;
 }
 
-type ActiveTab = "all" | "live" | "quotation" | "covernote" | "test";
+type ActiveTab = "all" | "live" | "quotation" | "covernote" | "test" | "batches";
 type SortOption = "date_desc" | "edited_desc" | "vehicle" | "ref_desc";
 
 const PAGE_SIZE = 50;
@@ -129,9 +131,11 @@ function formatRelativeOrExactDate(dateStr?: string | null): { relative: string;
   }
 }
 
-export default function SessionsPage() {
+function SessionsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
+  const initialTab = searchParams.get("tab") === "batches" ? "batches" : "all";
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tabCounts, setTabCounts] = useState<TabCounts>({
@@ -140,11 +144,12 @@ export default function SessionsPage() {
     quotations: 0,
     covernotes: 0,
     test: 0,
+    staging_batches: 0,
   });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<ActiveTab>("all");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
   const [sortBy, setSortBy] = useState<SortOption>("date_desc");
   const [staffFilter, setStaffFilter] = useState<string>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
@@ -172,7 +177,7 @@ export default function SessionsPage() {
       params.set("offset", String(page * PAGE_SIZE));
       params.set("sort_by", sortBy);
       if (debouncedSearch) params.set("search", debouncedSearch);
-      if (activeTab !== "all") params.set("type_filter", activeTab);
+      if (activeTab !== "all" && activeTab !== "batches") params.set("type_filter", activeTab);
       if (staffFilter !== "all") params.set("staff_id", staffFilter);
       if (companyFilter !== "all") params.set("company", companyFilter);
 
@@ -390,6 +395,7 @@ export default function SessionsPage() {
                 { key: "quotation", label: "Quotations", count: tabCounts.quotations },
                 { key: "covernote", label: "Cover Notes", count: tabCounts.covernotes },
                 { key: "test", label: "Test Sandbox", count: tabCounts.test },
+                { key: "batches", label: "Staging Batches", count: tabCounts.staging_batches ?? 0 },
               ] as Array<{ key: ActiveTab; label: string; count: number }>
             ).map((tab) => {
               const isActive = activeTab === tab.key;
@@ -500,8 +506,10 @@ export default function SessionsPage() {
           </div>
         </div>
 
-        {/* Sessions Stream */}
-        {loading ? (
+        {/* Sessions Stream or Staging Batches */}
+        {activeTab === "batches" ? (
+          <StagingBatchesTab searchQuery={debouncedSearch} />
+        ) : loading ? (
           <Card className="p-14 text-center text-xs text-[var(--rl-text-muted)]">
             <ArrowsClockwise size={22} className="animate-spin mx-auto mb-2 text-[var(--rl-text-muted)]" />
             <span>Loading recent uploads...</span>
@@ -780,5 +788,21 @@ export default function SessionsPage() {
         loading={purgingSandbox}
       />
     </AppShell>
+  );
+}
+
+export default function SessionsPage() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell>
+          <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-12 text-center text-xs text-[var(--rl-text-muted)]">
+            Loading sessions...
+          </div>
+        </AppShell>
+      }
+    >
+      <SessionsPageContent />
+    </Suspense>
   );
 }

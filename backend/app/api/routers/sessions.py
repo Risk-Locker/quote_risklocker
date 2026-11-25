@@ -412,11 +412,29 @@ async def upload_one(
     is_test: bool = Form(False),
     tenure_id: str | None = Form(None),
     document_type: str | None = Form(None),
+    upload_run_id: str | None = Form(None),
+    upload_mode: str | None = Form(None),
+    replace_session_id: str | None = Form(None),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    if replace_session_id:
+        from app.models.tables import Session as QuotationSession
+
+        old_sess = db.get(QuotationSession, replace_session_id)
+        if not old_sess or not can_view_owner_record(db, user, old_sess.owner_id):
+            raise AppError("Target session to replace was not found.", 404)
+    if upload_run_id:
+        from app.services.upload_run_service import _load_run_with_access
+
+        _load_run_with_access(db, upload_run_id, user)
+
+    clean_mode = (upload_mode or "").strip().lower()
+    priority = 10 if clean_mode in {"single", "comparison"} else 100
+
     queued = await create_queued_upload(
         db,
         settings,
@@ -427,25 +445,68 @@ async def upload_one(
         is_test=is_test,
         tenure_id=tenure_id,
         document_type=document_type,
+        upload_run_id=upload_run_id,
+        priority=priority,
+        replace_session_id=replace_session_id,
     )
-    try:
-        from app.workers.fair_queue_worker import get_fair_share_queue
-        get_fair_share_queue().enqueue(
-            user_id=user.id,
-            document_id=queued.uploaded_file.id,
-            job_id=queued.job.id,
-            payload={"session_id": queued.session.id, "tenure_id": tenure_id},
-        )
-    except Exception:
-        pass
+    if upload_run_id:
+        from app.services.upload_run_service import sync_upload_run_status
 
-    return {
+        sync_upload_run_status(db, upload_run_id)
+        db.commit()
+
+    res_payload: dict[str, Any] = {
         "session_id": queued.session.id,
         "job_id": queued.job.id,
         "uploaded_file_id": queued.uploaded_file.id,
         "created": queued.created,
     }
+    if upload_run_id is not None:
+        res_payload["upload_run_id"] = upload_run_id
+    return res_payload
 
+
+def _sql_queue_metrics_for_job(db: Session, job: Job) -> dict[str, int]:
+    """Compute live SQL fair-share queue metrics without leaking in-memory objects."""
+    if job.state not in {"queued", "paused_quota", "paused_user"} or not hasattr(db, "scalar"):
+        return {}
+    ahead = int(
+        db.scalar(
+            select(func.count(Job.id)).where(
+                Job.job_type == job.job_type,
+                Job.state == "queued",
+                Job.cancelled_at.is_(None),
+                (Job.priority < job.priority) | ((Job.priority == job.priority) & (Job.created_at < job.created_at)),
+            )
+        )
+        or 0
+    )
+    total_pending = int(
+        db.scalar(
+            select(func.count(Job.id)).where(
+                Job.job_type == job.job_type,
+                Job.state.in_(["queued", "processing"]),
+                Job.cancelled_at.is_(None),
+            )
+        )
+        or 0
+    )
+    active_users = int(
+        db.scalar(
+            select(func.count(func.distinct(Job.owner_id))).where(
+                Job.job_type == job.job_type,
+                Job.state.in_(["queued", "processing"]),
+                Job.cancelled_at.is_(None),
+            )
+        )
+        or 0
+    )
+    return {
+        "queue_position": ahead + 1,
+        "active_users_count": active_users,
+        "other_users_count": max(0, active_users - 1),
+        "total_pending_jobs": total_pending,
+    }
 
 
 @router.get("/jobs/status")
@@ -471,29 +532,45 @@ def jobs_batch_status(
         ).all()
     )
 
-    queue = None
-    try:
-        from app.workers.fair_queue_worker import get_fair_share_queue
-        queue = get_fair_share_queue()
-    except Exception:
-        queue = None
+    total_pending = (
+        int(
+            db.scalar(
+                select(func.count(Job.id)).where(
+                    Job.job_type == "extract_pdf",
+                    Job.state.in_(["queued", "processing"]),
+                    Job.cancelled_at.is_(None),
+                )
+            )
+            or 0
+        )
+        if hasattr(db, "scalar")
+        else len(rows)
+    )
+    active_users = (
+        int(
+            db.scalar(
+                select(func.count(func.distinct(Job.owner_id))).where(
+                    Job.job_type == "extract_pdf",
+                    Job.state.in_(["queued", "processing"]),
+                    Job.cancelled_at.is_(None),
+                )
+            )
+            or 0
+        )
+        if hasattr(db, "scalar")
+        else 1
+    )
 
     jobs_map: dict[str, dict] = {}
     items_list: list[dict] = []
-    for job in rows:
+    for idx, job in enumerate(rows, start=1):
         serialized = serialize_job(job)
         serialized["status"] = serialized.get("state")
-        if queue is not None:
-            try:
-                q_pos = queue.get_queue_position(_user.id, job.id)
-                if q_pos.get("position", -1) != -1:
-                    serialized["queue_position"] = q_pos["position"]
-                    serialized["active_users_count"] = q_pos["active_users_count"]
-                    serialized["other_users_count"] = q_pos["other_users_count"]
-                    serialized["total_pending_jobs"] = q_pos["total_pending_jobs"]
-                    serialized["items_ahead_for_user"] = q_pos["items_ahead_for_user"]
-            except Exception:
-                pass
+        if job.state in {"queued", "paused_quota", "paused_user"}:
+            serialized["queue_position"] = idx
+            serialized["active_users_count"] = active_users
+            serialized["other_users_count"] = max(0, active_users - 1)
+            serialized["total_pending_jobs"] = total_pending
         jobs_map[job.id] = serialized
         items_list.append(serialized)
 
@@ -508,25 +585,128 @@ def job_detail(job_id: str, db: Session = Depends(get_db), _user: User = Depends
         raise AppError("Job not found.", 404)
     serialized = serialize_job(job)
     serialized["status"] = serialized.get("state")
-
-    try:
-        from app.workers.fair_queue_worker import get_fair_share_queue
-        queue = get_fair_share_queue()
-        q_pos = queue.get_queue_position(_user.id, job_id)
-        if q_pos.get("position", -1) != -1:
-            serialized["queue_position"] = q_pos["position"]
-            serialized["active_users_count"] = q_pos["active_users_count"]
-            serialized["other_users_count"] = q_pos["other_users_count"]
-            serialized["total_pending_jobs"] = q_pos["total_pending_jobs"]
-            serialized["items_ahead_for_user"] = q_pos["items_ahead_for_user"]
-    except Exception:
-        pass
+    serialized.update(_sql_queue_metrics_for_job(db, job))
 
     return {
         "job": serialized,
         "state": serialized.get("state"),
         "status": serialized.get("state"),
     }
+
+
+@router.post("/upload-runs", status_code=status.HTTP_201_CREATED)
+def upload_runs_create(
+    payload: dict = Body(default={}),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.upload_run_service import create_upload_run
+
+    run = create_upload_run(
+        db,
+        owner_id=user.id,
+        title=str((payload or {}).get("title") or "Upload Batch"),
+        mode=str((payload or {}).get("mode") or "bulk"),
+        tenure_id=(payload or {}).get("tenure_id"),
+        is_test=bool((payload or {}).get("is_test", False)),
+        total_files=int((payload or {}).get("total_files") or 0),
+    )
+    return {
+        "run": {
+            "id": run.id,
+            "owner_id": run.owner_id,
+            "title": run.title,
+            "mode": run.mode,
+            "status": run.status,
+            "tenure_id": run.tenure_id,
+            "is_test": run.is_test,
+            "total_files": run.total_files,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+        }
+    }
+
+
+@router.get("/upload-runs")
+def upload_runs_list(
+    mode: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.upload_run_service import list_upload_runs
+
+    return list_upload_runs(
+        db,
+        user=user,
+        mode=mode,
+        status=status_filter,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/upload-runs/{run_id}")
+def upload_run_detail(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    from app.services.upload_run_service import get_upload_run_detail
+
+    return get_upload_run_detail(db, run_id=run_id, user=user)
+
+
+@router.post("/upload-runs/{run_id}/pause")
+def upload_run_pause(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.upload_run_service import pause_upload_run
+
+    return pause_upload_run(db, run_id=run_id, user=user)
+
+
+@router.post("/upload-runs/{run_id}/resume")
+def upload_run_resume(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.upload_run_service import resume_upload_run
+
+    return resume_upload_run(db, run_id=run_id, user=user)
+
+
+@router.post("/upload-runs/{run_id}/retry-failed")
+def upload_run_retry_failed(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.upload_run_service import retry_failed_upload_run
+
+    return retry_failed_upload_run(db, run_id=run_id, user=user)
+
+
+@router.delete("/upload-runs/{run_id}")
+def upload_run_delete(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
+    from app.services.upload_run_service import delete_upload_run
+
+    return delete_upload_run(db, run_id=run_id, user=user)
 
 
 

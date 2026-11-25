@@ -260,29 +260,33 @@ def simplify_vehicle_name_with_ai(
         },
     }
 
-    from app.services.pacer_sentinel import acquire_gemini_pacing_slot
-    acquire_gemini_pacing_slot(context="vehicle_simplifier")
+    from app.services.ai_fleet_gateway import get_fleet_gateway
 
-    for api_key in all_keys[:2]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{configured_model}:generateContent?key={api_key}"
-        try:
-            pool.record_request()
-            with httpx.Client(timeout=timeout_seconds) as client:
-                res = client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates") or []
-                    if candidates:
-                        text_part = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                        clean_json = re.sub(r"^```json\s*|\s*```$", "", text_part.strip(), flags=re.MULTILINE)
-                        parsed = json.loads(clean_json)
-                        sb = (parsed.get("simplified_brand") or "").strip()
-                        sm = (parsed.get("simplified_model") or "").strip()
-                        comb = (parsed.get("combined_name") or "").strip()
-                        if comb:
-                            return sb or det_brand, sm or det_model, comb
-        except Exception as exc:
-            logger.warning("Gemini vehicle model simplification note: %s (using deterministic rules)", exc)
-            continue
+    def _parse_vehicle(data: dict[str, Any]) -> tuple[str, str, str] | None:
+        text_part = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        clean_json = re.sub(r"^```json\s*|\s*```$", "", text_part.strip(), flags=re.MULTILINE)
+        parsed = json.loads(clean_json)
+        sb = (parsed.get("simplified_brand") or "").strip()
+        sm = (parsed.get("simplified_model") or "").strip()
+        comb = (parsed.get("combined_name") or "").strip()
+        if comb:
+            return sb or det_brand, sm or det_model, comb
+        return None
+
+    try:
+        res_tuple = get_fleet_gateway().execute_gemini_request(
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+            max_attempts=2,
+            max_wait_seconds=10.0,
+            purpose="vehicle_simplifier",
+            priority=30,
+            allow_quota_raise=False,
+            parse_fn=_parse_vehicle,
+        )
+        if res_tuple:
+            return res_tuple
+    except Exception as exc:
+        logger.warning("Gemini vehicle model simplification note: %s (using deterministic rules)", exc)
 
     return det_brand, det_model, det_combined
