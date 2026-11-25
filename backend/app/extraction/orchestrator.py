@@ -167,68 +167,33 @@ class ExtractionOrchestrator:
             db_companies=db_companies,
         )
         benefit_lines: list[dict] = []
-        # Check Gemini Multimodal Extraction (Free Tier / Multi-Key Pool)
+        # Check Gemini Multimodal Vision Extraction + Closed-Loop Accounting Proof Gate
         gemini_res = None
         gemini_telemetry: list[dict] = []
+        accounting_verdict = None
         try:
-            from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
+            from app.extraction.canonical_draft_builder import run_orchestrator_vision_step
 
-            pdf_bytes = file_path.read_bytes()
-            operative_pdf_bytes = slice_pdf_bytes_excluding_pages(pdf_bytes, pds_page_nums)
-            pool_keys = get_key_pool().get_all_keys()
-            if not pool_keys:
-                if fail_closed:
-                    raise AIExtractionUnavailableException(
-                        reason="No GEMINI_API_KEY configured in pool.",
-                        status_code=503,
-                        detail="AI Extraction Unavailable: No GEMINI_API_KEY configured. Please verify API billing or switch keys.",
-                    )
-                warnings.append("AI Notice: No GEMINI_API_KEY configured. Extracted via native PDF/OCR fallback.")
-            elif len(pdf_bytes) > 500:
-                page1_text = str((operative_page_text[0] if operative_page_text else {}).get("text") or "")
-                logo_crop_png: bytes | None = None
-                logo_color_meta: dict = {}
-                if is_liberty_group_document(operative_text, page1_text, source_filename or file_path.name):
-                    logo_crop_png, logo_color_meta = render_page1_logo_crop(pdf_bytes)
-                item_idx = abs(hash(source_filename or file_path.name)) % 100
-                gemini_res = extract_with_gemini_sync(
-                    operative_pdf_bytes,
-                    document_text=operative_text,
-                    source_filename=source_filename or file_path.name,
-                    db_companies=db_companies,
-                    db_benefit_concepts=db_benefit_concepts,
-                    db_aliases=db_aliases,
-                    db_packs=db_packs,
-                    correction_memory=db_corrections,
-                    prompt_override=prompt_override,
-                    logo_crop_png=logo_crop_png,
-                    batch_item_index=item_idx,
-                    telemetry_log=gemini_telemetry,
-                )
-                _augment_liberty_company_candidates(
-                    pdf_bytes=pdf_bytes,
-                    page1_text=page1_text,
-                    combined_text=operative_text,
-                    source_filename=source_filename or file_path.name,
-                    db_companies=db_companies,
-                    candidates=candidates,
-                    gemini_res=gemini_res,
-                    logo_crop_png=logo_crop_png,
-                    logo_color_meta=logo_color_meta,
-                )
-                if not gemini_res:
-                    if fail_closed:
-                        pool = get_key_pool()
-                        last_err = pool.get_last_error_message() or "API Token Quota Exhausted or Rate-Limited"
-                        status_code = 429 if any(k in last_err.lower() for k in ["429", "quota", "rate"]) else 503
-                        raise AIExtractionUnavailableException(
-                            reason=last_err,
-                            status_code=status_code,
-                            detail=f"AI Extraction Unavailable: API Token Quota Exhausted. Please verify API billing or switch keys. ({last_err})",
-                        )
-                    warnings.append("AI Notice: Gemini AI token quota expired or rate-limited. Extracted via native PDF/OCR fallback.")
-            else:
-                gemini_res = None
+            gemini_res, accounting_verdict = run_orchestrator_vision_step(
+                file_path=file_path,
+                source_filename=source_filename,
+                operative_text=operative_text,
+                operative_page_text=operative_page_text,
+                pds_page_nums=pds_page_nums,
+                candidates=candidates,
+                db_aliases=db_aliases,
+                db_brands=db_brands,
+                db_models=db_models,
+                db_companies=db_companies,
+                db_benefit_concepts=db_benefit_concepts,
+                db_packs=db_packs,
+                db_corrections=db_corrections,
+                prompt_override=prompt_override,
+                fail_closed=fail_closed,
+                warnings=warnings,
+                gemini_telemetry=gemini_telemetry,
+                augment_liberty_fn=_augment_liberty_company_candidates,
+            )
             if gemini_res:
                 winning_call = next((t for t in reversed(gemini_telemetry) if t.get("is_success")), None)
                 used_model = winning_call.get("model") if winning_call else "gemini"
@@ -508,6 +473,17 @@ class ExtractionOrchestrator:
             raw_text=operative_text,
         )
         warnings.extend(draft_warnings)
+
+        if accounting_verdict is not None and accounting_verdict.quarantine_reason:
+            q_msg = f"Accounting Proof Gate: {accounting_verdict.quarantine_reason}"
+            if q_msg not in warnings:
+                warnings.append(q_msg)
+            for pf in ("premium", "motor_premium", "total_payable", "total_amount"):
+                if pf in fields and isinstance(fields[pf], dict):
+                    fields[pf]["status"] = "check_needed"
+                    fields[pf]["message"] = "Please verify pricing breakdown."
+                    fields[pf].setdefault("warnings", []).append(q_msg)
+            draft_status = "Check Needed"
 
         candidate_payload = {
             field: [candidate.to_dict() for candidate in field_candidates]

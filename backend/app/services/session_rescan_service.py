@@ -122,6 +122,7 @@ def apply_gemini_result(
         "quotation_discount",
         "effective_discount",
         "net_motor_premium",
+        "_accounting_verdict",
     }
     fields = dict(draft.fields or {})
     preserved_pct = to_decimal_clean(fields.get("motor_discount_pct"), Decimal("0.00"))
@@ -133,51 +134,7 @@ def apply_gemini_result(
         if clean_val:
             fields[key] = {"value": clean_val, "status": "ready", "message": ""}
 
-    # Sum detected optional extras cost to derive net base insurance premium
     gemini_benefits = gemini_res.get("detected_benefits") or []
-    extras_cost = Decimal("0")
-    for b_item in gemini_benefits:
-        if not isinstance(b_item, dict):
-            continue
-        cost = str(b_item.get("premium_cost") or "").strip()
-        if cost:
-            clean = re.sub(r"[^\d.]", "", cost)
-            if clean:
-                try:
-                    num = Decimal(clean)
-                    if num > 0:
-                        extras_cost += num
-                except Exception:
-                    pass
-
-    if extras_cost == 0 and gemini_res.get("total_optional_cover_amount"):
-        clean_tot_opt = re.sub(r"[^\d.]", "", str(gemini_res["total_optional_cover_amount"]))
-        if clean_tot_opt:
-            try:
-                extras_cost = Decimal(clean_tot_opt)
-            except Exception:
-                pass
-
-    tot_num: Decimal | None = None
-    t_val = gemini_res.get("total_amount")
-    if t_val:
-        clean_tot = re.sub(r"[^\d.]", "", str(t_val))
-        if clean_tot:
-            try:
-                tot_num = Decimal(clean_tot)
-                fields["total_payable"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
-                fields["total_amount"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
-                if extras_cost > 0:
-                    base_p = tot_num - extras_cost
-                    fields["premium"] = {
-                        "value": f"{base_p:.2f}" if base_p > 0 else f"{tot_num:.2f}",
-                        "status": "ready",
-                        "message": "",
-                    }
-                else:
-                    fields["premium"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
-            except Exception:
-                tot_num = None
 
     evidence_text = raw_text or (extraction.raw_text or "")
     _entity_type, resolved_vtype, inc_rt, inc_rf = reconcile_vehicle_capacity_and_fees(
@@ -192,27 +149,18 @@ def apply_gemini_result(
         inc_rf=inc_rf,
     )
 
-    # Recompute quotation total_amount when fees & active discounts are applied
-    prem_str = str((fields.get("premium") or {}).get("value") or "").strip()
-    rt_dec = Decimal(str((fields.get("roadtax") or {}).get("value") or "0").replace(",", "") or "0") if inc_rt else Decimal("0")
-    rf_dec = Decimal(str((fields.get("service_fee") or {}).get("value") or "0").replace(",", "") or "0") if inc_rf else Decimal("0")
-    gross_motor_dec = to_decimal_clean(prem_str, Decimal("0.00"))
-    if gross_motor_dec <= Decimal("0.00") and tot_num is not None:
-        gross_motor_dec = tot_num
-        fields["premium"] = {"value": f"{gross_motor_dec:.2f}", "status": "ready", "message": ""}
-    if gross_motor_dec > Decimal("0.00"):
-        disc_bd = calculate_motor_discount(gross_motor_dec, preserved_pct, preserved_flat)
-        fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready", "message": ""}
-        fields["motor_discount_amount"] = {"value": f"{disc_bd.pct_discount_amount:.2f}", "status": "ready", "message": ""}
-        fields["quotation_discount"] = {"value": f"{disc_bd.flat_discount_amount:.2f}", "status": "ready", "message": ""}
-        fields["effective_discount"] = {"value": f"{disc_bd.effective_discount:.2f}", "status": "ready", "message": ""}
-        fields["net_motor_premium"] = {"value": f"{disc_bd.net_motor_premium:.2f}", "status": "ready", "message": ""}
-        fields["total_amount"] = {"value": f"{disc_bd.net_total_payable(rt_dec, rf_dec):.2f}", "status": "ready", "message": ""}
-    elif tot_num is not None:
-        if inc_rt or inc_rf:
-            fields["total_amount"] = {"value": f"{(tot_num + rt_dec + rf_dec):.2f}", "status": "ready", "message": ""}
-        else:
-            fields["total_amount"] = {"value": f"{tot_num:.2f}", "status": "ready", "message": ""}
+    from app.extraction.canonical_draft_builder import apply_verified_motor_pricing
+
+    is_cn_doc = getattr(session, "document_type", "") == "covernote"
+    accounting_verdict = apply_verified_motor_pricing(
+        fields,
+        gemini_res,
+        is_covernote=is_cn_doc,
+        preserved_pct=preserved_pct,
+        preserved_flat=preserved_flat,
+        inc_rt=inc_rt,
+        inc_rf=inc_rf,
+    )
 
     start_d = str(gemini_res.get("cover_start_date") or "").strip()
     end_d = str(gemini_res.get("cover_end_date") or "").strip()
@@ -231,6 +179,11 @@ def apply_gemini_result(
         fields=fields,
         raw_text=evidence_text,
     )
+    if accounting_verdict.quarantine_reason:
+        referee_notices = [
+            *referee_notices,
+            f"Accounting Proof Gate: {accounting_verdict.quarantine_reason}",
+        ]
     if referee_notices:
         existing_w = list(draft.warnings or [])
         for note in referee_notices:
@@ -243,7 +196,11 @@ def apply_gemini_result(
     curr_opts["include_runner_fee"] = str((fields.get("include_runner_fee") or {}).get("value") or "true").lower() != "false"
     draft.display_options = curr_opts
     draft.fields = fields
-    draft.status = RecordStatus.READY.value
+    draft.status = (
+        RecordStatus.CHECK_NEEDED.value
+        if accounting_verdict.quarantine_reason
+        else RecordStatus.READY.value
+    )
 
     comp_name = str(gemini_res.get("insurance_company") or "").strip()
     if (
@@ -626,32 +583,24 @@ def rescan_session(
                         logger.info("Rescan: Native extraction produced empty/cannot_read (%d fields); attempting Gemini AI fallback", meaningful_count)
                         run_ai = True
 
-        # Pass 2: Gemini Vision extraction BEFORE wiping or mutating existing draft
+        # Pass 2: Unified Multi-Zoom Gemini Vision extraction BEFORE wiping or mutating existing draft
         if run_ai:
-            from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
-
-            if doc_text is None:
-                try:
-                    with qc_temp_directory("rescan-doc-") as td:
-                        temp_pdf = td / "doc.pdf"
-                        temp_pdf.write_bytes(source_bytes)
-                        native = extract_native(temp_pdf)
-                        doc_text = native.raw_text
-                except Exception:
-                    doc_text = None
+            from app.extraction.gemini_extractor import get_key_pool
+            from app.extraction.multi_zoom_pipeline import run_multi_zoom_vision_pipeline
 
             try:
-                gemini_res = extract_with_gemini_sync(
-                    source_bytes,
-                    document_text=doc_text,
-                    source_filename=target_uploaded.original_filename,
-                    db_companies=db_companies,
-                    db_benefit_concepts=db_benefit_concepts,
-                    db_packs=context.get("db_packs") or [],
-                    correction_memory=context.get("db_corrections") or [],
+                mv_out = run_multi_zoom_vision_pipeline(
+                    pdf_bytes=source_bytes,
+                    source_filename=target_uploaded.original_filename or "quotation.pdf",
+                    current_fields=old_scalar_snapshot,
+                    db_context=context,
                     prompt_override=prompt_override,
                     batch_item_index=abs(hash(target_session.id)) % 100,
+                    is_covernote=(getattr(target_session, "document_type", "") == "covernote"),
                 )
+                gemini_res = mv_out.gemini_res
+                doc_text = mv_out.native_raw_text or doc_text
+                brand_verdict = mv_out.brand_verdict or brand_verdict
             except AppError:
                 raise
             except Exception as ai_exc:
@@ -663,19 +612,6 @@ def rescan_session(
                     raise AppError("No GEMINI_API_KEY configured. Please check your environment.", 400)
                 err = keys_pool.get_last_error_message() or "AI extraction failed or returned an empty result."
                 raise AppError(f"Gemini AI extraction failed: {err}", 502)
-
-            if brand_verdict is None:
-                from app.extraction.brand_logo_scanner import (
-                    extract_liberty_group_spatial_brand,
-                    is_liberty_group_document,
-                )
-
-                if is_liberty_group_document(doc_text or "", doc_text or "", target_uploaded.original_filename or ""):
-                    brand_verdict = extract_liberty_group_spatial_brand(
-                        source_bytes,
-                        doc_text or "",
-                        db_companies=db_companies,
-                    )
 
     # Atomic mutation phase: ONLY executed after extraction passes succeeded
     if mode == "in_place":
@@ -850,8 +786,11 @@ def rescan_session(
     tenure_id = getattr(target_session, "tenure_id", None)
     if tenure_id:
         try:
+            from app.services.marketing_comparison.materialize import materialize_comparison_entries
             from app.services.marketing_comparison_service import rescan_comparison_tenure
+
             rescan_comparison_tenure(db, tenure_id, deep=False)
+            materialize_comparison_entries(db, str(tenure_id))
         except Exception as sync_err:
             logger.warning("Could not auto-sync comparison tenure %s: %s", tenure_id, sync_err)
 

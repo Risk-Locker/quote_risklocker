@@ -22,6 +22,7 @@ from app.models.tables import AppSetting
 SAFE_RPD_CEILING = 480
 SAFE_RPM_CEILING = 13
 SAFE_TPM_CEILING = 200_000
+ALLOWED_PRODUCTION_MODELS = frozenset({"gemini-3.1-flash-lite", "gemini-3.5-flash-lite"})
 
 # Canonical verified baseline models
 CANONICAL_ELIGIBLE_MODELS = [
@@ -125,17 +126,12 @@ def evaluate_model_eligibility(model_data: dict[str, Any]) -> tuple[bool, str, d
             meta,
         )
 
-    # 4. Check for Flash-Lite family qualification
-    if "flash-lite" in model_id:
+    # 4. Strict production allowlist lock: ONLY gemini-3.1-flash-lite and gemini-3.5-flash-lite
+    if model_id in ALLOWED_PRODUCTION_MODELS:
         meta["is_recommended"] = True
-        return True, "Qualified high-capacity Flash-Lite tier.", meta
+        return True, "Verified canonical high-capacity Flash-Lite tier.", meta
 
-    # Check for known verified baseline
-    if model_id in {"gemini-3.1-flash-lite", "gemini-3.5-flash-lite"}:
-        meta["is_recommended"] = True
-        return True, "Verified canonical production tier.", meta
-
-    return False, f"Model '{model_id}' does not match Flash-Lite high-throughput qualification rules.", meta
+    return False, f"Model '{model_id}' is blocked: only {sorted(ALLOWED_PRODUCTION_MODELS)} are permitted.", meta
 
 
 def get_verified_eligible_models(api_key: str | None = None) -> dict[str, Any]:

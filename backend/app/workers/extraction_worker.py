@@ -437,7 +437,7 @@ def process_extraction_job(
 
     fields = draft_data.get("fields") or {}
     for field in fields.values():
-        if isinstance(field, dict) and field.get("value") not in (None, ""):
+        if isinstance(field, dict) and field.get("value") not in (None, "") and field.get("status") != "check_needed":
             field["status"] = "ready"
 
     from app.extraction.entity_classifier import is_commercial_heavy_vehicle
@@ -1009,11 +1009,12 @@ def process_extraction_job(
                 session.is_tenure_active = True
                 if version > 1:
                     curr_opts["tenure_version_notice"] = f"Created revised version v{version} under {session.detected_company or 'insurer'}."
+                    from app.domain.quote_sync_engine import resolve_session_company_id
                     from app.services.session_service import archive_superseded_company_sessions
                     archive_superseded_company_sessions(
                         db=db,
                         tenure_id=tenure.id,
-                        company_id=getattr(session, "company_id", None),
+                        company_id=resolve_session_company_id(session),
                         detected_company=session.detected_company,
                         current_session_id=session.id,
                     )
@@ -1046,6 +1047,26 @@ def process_extraction_job(
         worker_id,
         {"session_id": session.id, "draft_id": draft.id, "tenure_id": tenure_id_out},
     )
+
+    if tenure_id_out:
+        try:
+            from app.services.marketing_comparison.materialize import materialize_comparison_entries
+
+            materialize_comparison_entries(db, str(tenure_id_out))
+        except Exception as _mat_exc:
+            logger.warning("Post-extraction comparison materialization note for tenure %s: %s", tenure_id_out, _mat_exc)
+
+    try:
+        from app.services.realtime_hub import build_session_sync_targets, publish_realtime_update
+
+        publish_realtime_update(
+            scope="workspace",
+            resource_id=str(draft.id),
+            summary="Extraction completed",
+            targets=build_session_sync_targets(session),
+        )
+    except Exception:
+        pass
 
     logger.info("Job %s: review saved and job marked complete (session=%s, draft=%s, tenure=%s)", job.id, session.id, draft.id, tenure_id_out)
 

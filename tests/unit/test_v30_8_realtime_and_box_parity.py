@@ -340,3 +340,44 @@ def test_runner_fee_never_extracted_from_pdf_and_follows_studio_default():
         )
         assert float(t2.runner_fee) == 25.0
         assert float(t1.runner_fee) == 20.0
+
+
+def test_realtime_hub_multi_target_and_origin_tab_id():
+    """Publishing with targets + origin_tab_id fans out across comparison/workspace/ledger without dropping same-user tabs."""
+    async def _run() -> None:
+        hub = RealtimeHub(max_queue_size=16)
+        loop = asyncio.get_running_loop()
+        sub_id, queue = hub.subscribe("u1", loop)
+        try:
+            hub.publish_update(
+                scope="comparison",
+                resource_id="ten-42",
+                actor_id="u1",
+                actor_email="staff@risklocker.test",
+                actor_name="Staff",
+                summary="Towing upgraded",
+                targets=[
+                    ("comparison", "ten-42"),
+                    ("workspace", "sess-1"),
+                    ("workspace", "draft-1"),
+                    ("ledger", "ten-42"),
+                ],
+                origin_tab_id="tab-1-uuid",
+            )
+            await asyncio.sleep(0)
+            events = []
+            while not queue.empty():
+                events.append(queue.get_nowait()["data"])
+            got = {(ev["scope"], ev["resource_id"]) for ev in events}
+            assert got == {
+                ("comparison", "ten-42"),
+                ("workspace", "sess-1"),
+                ("workspace", "draft-1"),
+                ("ledger", "ten-42"),
+            }
+            assert all(ev["origin_tab_id"] == "tab-1-uuid" for ev in events)
+        finally:
+            hub.unsubscribe(sub_id)
+
+    asyncio.run(_run())
+

@@ -658,6 +658,23 @@ def build_draft(
                         fields["premium"]["status"] = "ready"
                         p_val = f"{tot_num:.2f}"
 
+                # Always keep motor_premium, total_payable, and premium aligned to Underwriter Total Payable (never subtract extras)
+                aligned_uw = fields["premium"].get("value") or f"{tot_num:.2f}"
+                fields["motor_premium"] = {
+                    "value": aligned_uw,
+                    "detected_value": aligned_uw,
+                    "status": fields["premium"].get("status") or "ready",
+                    "warnings": list(fields["premium"].get("warnings") or []),
+                    "message": fields["premium"].get("message") or "",
+                }
+                fields["total_payable"] = {
+                    "value": aligned_uw,
+                    "detected_value": aligned_uw,
+                    "status": fields["premium"].get("status") or "ready",
+                    "warnings": list(fields["premium"].get("warnings") or []),
+                    "message": fields["premium"].get("message") or "",
+                }
+
                 # Always preserve extracted total_amount as the Final Price / Total Payable from PDF
                 if "total_amount" in fields:
                     fields["total_amount"]["value"] = f"{tot_num:.2f}"
@@ -672,9 +689,12 @@ def build_draft(
             try:
                 r_num = Decimal(str(r_val).replace(",", "")) if str(r_val).strip() else Decimal("0")
                 s_num = Decimal(str(s_val).replace(",", "")) if str(s_val).strip() else Decimal("0")
-                tot = Decimal(str(p_val).replace(",", "")) + r_num + s_num
+                uw_p_dec = Decimal(str(p_val).replace(",", ""))
+                tot = uw_p_dec + r_num + s_num
                 fields["total_amount"]["value"] = f"{tot:.2f}"
                 fields["total_amount"]["status"] = "ready"
+                fields["motor_premium"] = {"value": f"{uw_p_dec:.2f}", "detected_value": f"{uw_p_dec:.2f}", "status": "ready", "warnings": [], "message": ""}
+                fields["total_payable"] = {"value": f"{uw_p_dec:.2f}", "detected_value": f"{uw_p_dec:.2f}", "status": "ready", "warnings": [], "message": ""}
             except Exception:
                 pass
     except Exception:

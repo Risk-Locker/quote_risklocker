@@ -246,9 +246,11 @@ def _execute_single_session_redetect(
     session.last_edited_at = now
 
     if sync_comparison and getattr(session, "tenure_id", None):
+        from app.services.marketing_comparison.materialize import materialize_comparison_entries
         from app.services.marketing_comparison_service import rescan_comparison_tenure
 
         rescan_comparison_tenure(db, session.tenure_id, deep=False)
+        materialize_comparison_entries(db, str(session.tenure_id))
 
     new_scalars = _extract_scalar_values_map(draft.fields)
     changed = sorted(
@@ -328,6 +330,20 @@ def _run_session_worker(
             _mark_job_terminal(job_id, "cancelled", why_waiting="Re-detection cancelled. Existing quotation data left unchanged.")
             return
         db.commit()
+        try:
+            from app.models.tables import Session as SessionModel
+            from app.services.realtime_hub import build_session_sync_targets, publish_realtime_update
+
+            sess_rt = db.get(SessionModel, session_id)
+            publish_realtime_update(
+                scope="workspace",
+                resource_id=str(session_id),
+                actor=user_obj,
+                summary="Deep re-detection completed",
+                targets=build_session_sync_targets(sess_rt),
+            )
+        except Exception:
+            pass
         _mark_job_terminal(
             job_id,
             "completed",
@@ -404,10 +420,24 @@ def _run_comparison_worker(
             why_waiting="Re-calculating towing entitlements, betterment caps, discounts, and winner ranking.",
             pct=95,
         )
+        from app.services.marketing_comparison.materialize import materialize_comparison_entries
         from app.services.marketing_comparison_service import rescan_comparison_tenure
 
         rescan_comparison_tenure(db, tenure_id, deep=False)
+        materialize_comparison_entries(db, str(tenure_id))
         db.commit()
+        try:
+            from app.services.realtime_hub import build_tenure_sync_targets, publish_realtime_update
+
+            publish_realtime_update(
+                scope="comparison",
+                resource_id=str(tenure_id),
+                actor=user_obj,
+                summary="Comparison deep re-detection completed",
+                targets=build_tenure_sync_targets(db, tenure_id),
+            )
+        except Exception:
+            pass
         _mark_job_terminal(
             job_id,
             "completed",

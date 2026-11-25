@@ -186,11 +186,23 @@ GEMINI_EXTRACTION_SCHEMA = {
         },
         "gross_premium": {
             "type": "string",
-            "description": "Gross premium after NCD deduction plus extra add-on riders (e.g. '2,335.57' or '1,036.44'). Look for 'Gross Premium', 'Premium Kasar', 'Gross Contribution'.",
+            "description": "Gross premium after NCD deduction plus loading and extra add-on riders (e.g. '2,335.57' or '1,036.44'). Look for 'Gross Premium', 'Premium Kasar', 'Gross Contribution'.",
+        },
+        "loading_amount": {
+            "type": "string",
+            "description": "Age, claim, or vehicle loading charge in RM added before gross premium if stated (e.g. '250.00'). Empty string or '0.00' if none.",
+        },
+        "insurer_rebate": {
+            "type": "string",
+            "description": "Direct insurer commission/promo rebate deducted before Final Payable on the quotation PDF itself (NOT agency Risklocker discount). Empty string or '0.00' if none.",
+        },
+        "authorized_driver": {
+            "type": "string",
+            "description": "Authorised driver clause value (e.g. 'Any Authorised Driver', 'All Drivers', or actual named drivers). NEVER copy table header text like 'Named Driver' or 'Driver Details'.",
         },
         "premium": {
             "type": "string",
-            "description": "Total Insurance Premium payable to the insurer (e.g. '2,522.42' or '1,036.44'). Look for 'Total Premium', 'Jumlah Premium', 'Total Contribution', 'Premium Payable', 'Gross Premium'. If both basic premium and total premium are present, output the final Total Premium payable to the insurer.",
+            "description": "Final Underwriter Total Insurance Premium payable to the insurer including Gross + SST + Stamp Duty - Insurer Rebate (e.g. '8,942.45' or '2,522.42'). Look for 'Total Payable', 'Total Premium', 'Total Contribution', 'Jumlah Perlu Dibayar'. NEVER pick conditional Compulsory Excess RM 400.00 footnotes or post-total marketing notes.",
         },
         "total_optional_cover_amount": {
             "type": "string",
@@ -453,6 +465,13 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
    - **Commercial Trucks / Lorries**: ALWAYS preserve weight units (`KG` or `TON`, e.g. `'12000 KG'`, `'11 TON'`). NEVER rewrite `12000 KG` as `12000 CC`, and NEVER coerce commercial tonnage (`2 TON`, `11 TON`) into EV `kW`!
    - **Electric Vehicles (EV)**: ALWAYS output motor power in `kW` or `W` (e.g. `'70 kW'`, `'70000 W'`, `'150 kW'`). NEVER classify `70000 W` as `'70000 CC'`.
    - **Combustion Passenger Cars**: Typical engine displacement is `600 CC` to `7000 CC`. NEVER copy chassis numbers, policy numbers, or account IDs into `engine_cc`.
+15. **CLOSED-LOOP PRICING & HANDWRITING / FOOTNOTE PRECISION (CRITICAL)**:
+   - Read the pricing schedule Visually from top to bottom AND verify from bottom to top:
+     `Basic Premium/Contribution` - `NCD Amount` + `Loading` + `Sum(Optional Covers/Riders)` = `Gross Premium/Contribution`;
+     `Gross Premium/Contribution` + `Service Tax (SST)` + `Stamp Duty` - `Insurer Rebate` = `Final Insurer Payable` (`premium` & `total_amount`).
+   - Extract EVERY itemized Optional Cover / Rider with its exact `premium_cost` so their sum equals `total_optional_cover_amount`.
+   - IGNORE post-total conditional footnotes (such as "Compulsory Excess RM 400.00 applies to drivers under 21 / L-license / unnamed driver"), ISM-ABI market value guides, or PA benefit payout tables — those are NOT `total_amount` and NOT `excess_amount`.
+   - If the quotation contains handwritten pen annotations/corrections on premium, excess, sum insured, or plate, read the handwritten ink digits carefully and prefer explicit handwritten corrections over crossed-out print.
 
 {grounding_context}
 Return strictly structured JSON adhering to the provided schema.
@@ -471,12 +490,16 @@ def extract_with_gemini_sync(
     correction_memory: Sequence[dict[str, Any] | str] | None = None,
     prompt_override: str | None = None,
     logo_crop_png: bytes | None = None,
+    vision_images: Sequence[tuple[bytes, str]] | None = None,
+    inject_document_text: bool = False,
+    requested_model: str | None = None,
+    exclude_slot_ids: set[str] | None = None,
     extra_prompt_guidance: str | None = None,
     batch_item_index: int | None = None,
-    timeout_seconds: float = 15.0,
+    timeout_seconds: float = 35.0,
     telemetry_log: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Extract quotation fields using Gemini AI with 4-endpoint multi-model parallel dispatching."""
+    """Extract quotation fields using Gemini Vision AI with 8-slot multi-model parallel dispatching."""
     pool = get_key_pool()
     all_keys = pool.get_all_keys()
     if not all_keys:
@@ -484,17 +507,19 @@ def extract_with_gemini_sync(
         return None
 
     settings = get_settings()
-    configured_model = settings.gemini_model or "gemini-3.1-flash-lite"
+    allowed_models = ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
+    configured_model = settings.gemini_model if settings.gemini_model in allowed_models else "gemini-3.1-flash-lite"
     system_prompt = build_rag_system_prompt(db_companies, db_benefit_concepts, db_aliases, db_packs, correction_memory, prompt_override)
 
     fn_prefix = f"Original Upload Filename: {source_filename}\n\n" if source_filename else ""
     guidance_prefix = f"{extra_prompt_guidance.strip()}\n\n" if extra_prompt_guidance and extra_prompt_guidance.strip() else ""
     parts: list[dict[str, Any]] = []
 
+    has_pdf_bytes = bool(pdf_bytes and len(pdf_bytes) > 100)
     has_digital_text = bool(document_text and len(document_text.strip()) >= 50)
-    
-    # ALWAYS pass multimodal vision bytes if available to ensure spatial/horizontal alignment awareness.
-    if pdf_bytes and len(pdf_bytes) > 100:
+
+    # ALWAYS pass multimodal vision bytes & high-DPI crops when available so spatial/visual layout drives extraction.
+    if has_pdf_bytes:
         b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
         parts.append(
             {
@@ -518,9 +543,21 @@ def extract_with_gemini_sync(
                 "text": "Zoomed Page 1 Top-Left Insurer Logo Crop above: inspect emblem and color carefully to distinguish Liberty (dark blue/black torch) vs Kurnia (sky-blue) vs AmAssurance (red)."
             }
         )
+    for img_bytes, caption in (vision_images or ()):
+        if img_bytes and len(img_bytes) > 100:
+            parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": "image/png",
+                        "data": base64.b64encode(img_bytes).decode("utf-8"),
+                    }
+                }
+            )
+            if caption:
+                parts.append({"text": str(caption)})
 
-    if has_digital_text:
-        # High-speed text-first extraction helps exact spelling with strict XML boundary sandboxing
+    # Vision-first: only inject raw extracted text when explicitly requested or when no PDF/image bytes are provided.
+    if has_digital_text and (inject_document_text or (not has_pdf_bytes and not vision_images)):
         safe_doc_text = (document_text or "").replace("</untrusted_document_content>", "[ESCAPED_TAG]")
         parts.append(
             {
@@ -535,7 +572,11 @@ def extract_with_gemini_sync(
     else:
         parts.append(
             {
-                "text": f"{fn_prefix}{guidance_prefix}Extract all insurance quotation values, vehicle details, coverage, and detected benefits from this scanned document according to the JSON schema."
+                "text": (
+                    f"{fn_prefix}{guidance_prefix}Inspect the attached PDF and high-DPI zoomed schedule/pricing image crops visually. "
+                    "Extract every vehicle detail, valuation type, pricing line item, optional rider, and final payable amount accurately according to the JSON schema, "
+                    "ignoring post-total excess/marketing footnotes and reading any handwritten ink values carefully."
+                )
             }
         )
 
@@ -559,14 +600,24 @@ def extract_with_gemini_sync(
     # Pre-flight prompt token safety guard
     payload = estimate_and_guard_payload(payload, getattr(settings, "gemini_max_prompt_tokens", 60_000))
 
-    # Timeout: ensure sufficient time for complete structured JSON extraction (typically 5-7s)
-    effective_timeout = max(timeout_seconds or 20.0, 15.0)
+    # Timeout: ensure sufficient time for complete multimodal Vision JSON extraction
+    effective_timeout = max(timeout_seconds or 35.0, 25.0)
 
     from app.extraction.pacer_sentinel import get_pacer_sentinel
     sentinel = get_pacer_sentinel()
 
-    # 1. PARALLEL FLEET DISPATCHING: Acquire dedicated (key, model, slot) honoring 48 RPM / 880k TPM / 1,840 RPD
-    slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index)
+    # 1. PARALLEL FLEET DISPATCHING: Acquire dedicated (key, model, slot)
+    try:
+        slot_info = pool.acquire_parallel_slot(
+            batch_item_index=batch_item_index,
+            requested_model=requested_model,
+            exclude_slot_ids=exclude_slot_ids,
+        )
+    except TypeError:
+        try:
+            slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index, requested_model=requested_model)
+        except TypeError:
+            slot_info = pool.acquire_parallel_slot(batch_item_index=batch_item_index)
     if slot_info:
         slot_key, slot_model, slot_id = slot_info
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{slot_model}:generateContent?key={slot_key}"

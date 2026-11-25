@@ -37,6 +37,9 @@ def _resolve_text_vs_gemini(
         and all(_is_liberty_group_brand(c.value) for c in txt_cands)
     ):
         return FieldSelection(gemini_cand.value, "ready", candidates, [])
+    # Multimodal Vision consensus overrides noisy PDF body text aliases when Gemini confidently extracted an insurer
+    if float(getattr(gemini_cand, "score", 0.0) or 0.0) >= 0.85:
+        return FieldSelection(gemini_cand.value, "ready", candidates, [])
     return FieldSelection(txt_cands[0].value, "ready", candidates, [])
 
 

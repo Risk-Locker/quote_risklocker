@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { API_BASE, api } from "@/lib/api";
+import { API_BASE, CLIENT_TAB_ID, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 export type RealtimeScope = "ledger" | "comparison" | "workspace" | "sessions" | "clients";
@@ -22,6 +22,7 @@ export interface RealtimeUpdateEvent {
   actor_id?: string | null;
   actor_email?: string | null;
   actor_name?: string | null;
+  origin_tab_id?: string | null;
   summary?: string | null;
   version: number;
   timestamp: string;
@@ -41,9 +42,12 @@ type Listener = {
   onConnectionChange: (connected: boolean) => void;
 };
 
-// Shared singleton EventSource across all components in the current browser tab.
+// Shared singleton EventSource + BroadcastChannel fan-out across 10+ browser tabs.
 class RealtimeClientSingleton {
   private es: EventSource | null = null;
+  private bc: BroadcastChannel | null = null;
+  private seenKeys = new Set<string>();
+  private seenOrder: string[] = [];
   private listeners = new Set<Listener>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffMs = 1000;
@@ -52,6 +56,7 @@ class RealtimeClientSingleton {
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     listener.onConnectionChange(this.isConnected);
+    this.ensureBroadcastChannel();
     this.ensureConnected();
     return () => {
       this.listeners.delete(listener);
@@ -59,6 +64,38 @@ class RealtimeClientSingleton {
         this.teardown();
       }
     };
+  }
+
+  private rememberEvent(payload: RealtimeUpdateEvent): boolean {
+    const key = `${payload.version}:${payload.scope}:${payload.resource_id}:${payload.timestamp}`;
+    if (this.seenKeys.has(key)) return false;
+    this.seenKeys.add(key);
+    this.seenOrder.push(key);
+    if (this.seenOrder.length > 128) {
+      const oldest = this.seenOrder.shift();
+      if (oldest) this.seenKeys.delete(oldest);
+    }
+    return true;
+  }
+
+  private ensureBroadcastChannel() {
+    if (typeof BroadcastChannel === "undefined" || this.bc) return;
+    try {
+      const bc = new BroadcastChannel("risklocker-realtime-v1");
+      bc.onmessage = (ev: MessageEvent) => {
+        const msg = ev?.data;
+        if (!msg || msg.sourceTabId === CLIENT_TAB_ID) return;
+        if (msg.type === "updated" && msg.payload) {
+          const data = msg.payload as RealtimeUpdateEvent;
+          if (this.rememberEvent(data)) {
+            this.listeners.forEach((l) => l.onUpdated(data));
+          }
+        }
+      };
+      this.bc = bc;
+    } catch {
+      this.bc = null;
+    }
   }
 
   private setConnected(next: boolean) {
@@ -96,7 +133,13 @@ class RealtimeClientSingleton {
       es.addEventListener("updated", (ev: MessageEvent) => {
         try {
           const data = JSON.parse(ev.data || "{}") as RealtimeUpdateEvent;
+          if (!this.rememberEvent(data)) return;
           this.listeners.forEach((l) => l.onUpdated(data));
+          try {
+            this.bc?.postMessage({ sourceTabId: CLIENT_TAB_ID, type: "updated", payload: data });
+          } catch {
+            // BroadcastChannel optional
+          }
         } catch {
           // Ignore malformed frame
         }
@@ -128,6 +171,14 @@ class RealtimeClientSingleton {
     if (this.es) {
       this.es.close();
       this.es = null;
+    }
+    if (this.bc) {
+      try {
+        this.bc.close();
+      } catch {
+        // Ignore close error
+      }
+      this.bc = null;
     }
     this.setConnected(false);
   }
@@ -242,7 +293,7 @@ export function useRealtimeSync({
           lastVersionRef.current = Math.max(lastVersionRef.current, payload.version);
         }
         if (!matchesTarget(payload.scope, payload.resource_id)) return;
-        if (payload.actor_id && currentUserIdRef.current && payload.actor_id === currentUserIdRef.current) {
+        if (payload.origin_tab_id && payload.origin_tab_id === CLIENT_TAB_ID) {
           return;
         }
         if (hasUnsavedRef.current) {
@@ -254,7 +305,7 @@ export function useRealtimeSync({
           refreshTimerRef.current = null;
           setPendingUpdate(null);
           void onRemoteUpdateRef.current?.(payload);
-        }, 300);
+        }, 60);
       },
     });
 

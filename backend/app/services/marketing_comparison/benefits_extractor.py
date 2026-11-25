@@ -660,15 +660,21 @@ def _is_truthy_field(raw: Any) -> bool:
 
 def _extract_vehicle_motor_premium(f: dict[str, Any]) -> float:
     """Extract motor insurance premium payable to underwriter (including SST and stamp duty)."""
-    explicit = _to_float(f.get("motor_premium") or f.get("total_payable"))
-    if explicit > 0.0:
-        return round(explicit, 2)
+    from app.domain.quote_sync_engine import resolve_canonical_motor_premium_decimal
 
     prem_node = f.get("premium")
     if isinstance(prem_node, dict) and prem_node.get("status") == "manual_override":
         manual_prem = _to_float(prem_node)
         if manual_prem > 0.0:
             return round(manual_prem, 2)
+
+    canonical = resolve_canonical_motor_premium_decimal(f)
+    if float(canonical) > 0.0 and any(f.get(k) not in (None, "", {}) for k in ("motor_premium", "premium", "premium_due")):
+        return round(float(canonical), 2)
+
+    explicit = _to_float(f.get("motor_premium") or f.get("total_payable"))
+    if explicit > 0.0:
+        return round(explicit, 2)
 
     total_amt = _to_float(f.get("total_amount"))
     if total_amt > 0.0:
@@ -844,6 +850,8 @@ def prefetch_comparison_benefit_context(
             comp_ids.add(s.company_id)
         if getattr(s, "draft", None) and getattr(s.draft, "company_id", None):
             comp_ids.add(s.draft.company_id)
+        if getattr(s, "uploaded_file", None) and getattr(s.uploaded_file, "insurance_company_id", None):
+            comp_ids.add(s.uploaded_file.insurance_company_id)
 
     selections_by_draft: dict[str, list[DraftBenefitSelection]] = {}
     all_selections_by_draft: dict[str, list[DraftBenefitSelection]] = {}
@@ -1068,6 +1076,8 @@ def _resolve_comparison_benefits(
             matched.add("ev_battery")
         if any(w in blob for w in ("wall-charger", "charger-liability", "charging-cable", "wall charger")):
             matched.add("ev_other")
+        if any(w in blob for w in ("towing", "emergency-towing", "towing-assistance", "roadside assistance")):
+            matched.add("towing")
         return matched
 
     active_domains: set[str] = set()
@@ -1078,6 +1088,7 @@ def _resolve_comparison_benefits(
         inactive_domains.update(_classify_sel_domains(s))
     disabled_domains = inactive_domains - active_domains
 
+    towing_sel_display: str | None = None
     for s in selections:
         if s.label_override:
             tokens.append(s.label_override)
@@ -1089,8 +1100,15 @@ def _resolve_comparison_benefits(
                 tokens.append(c.label)
             if c.concept_key:
                 tokens.append(c.concept_key)
-            if isinstance(s.typed_value_override, dict) and s.typed_value_override.get("display_text"):
-                tokens.append(str(s.typed_value_override["display_text"]))
+        if isinstance(s.typed_value_override, dict) and s.typed_value_override.get("display_text"):
+            disp_txt = str(s.typed_value_override["display_text"])
+            tokens.append(disp_txt)
+            if "towing" in _classify_sel_domains(s) and not towing_sel_display:
+                towing_sel_display = disp_txt
+        elif "towing" in _classify_sel_domains(s) and not towing_sel_display:
+            lbl_cand = str(s.label_override or (c.label if c else "") or "").strip()
+            if lbl_cand:
+                towing_sel_display = lbl_cand
                 
     # 2. Extraction Benefit Lines & Extraction Record text
     ext_rec = None
@@ -1339,7 +1357,9 @@ def _resolve_comparison_benefits(
     llp_val = "Included" if has_llp else None
 
     # --- TOWING ---
-    target_comp_id = company_id or getattr(session, "company_id", None)
+    from app.domain.quote_sync_engine import resolve_session_company_id
+
+    target_comp_id = company_id or resolve_session_company_id(session)
     comp_obj = None
     comp_name_str = ""
     if target_comp_id:
@@ -1502,11 +1522,14 @@ def _resolve_comparison_benefits(
         clean_towing = "No towing"
     elif bundle_towing_km and not towing_manual_override:
         clean_towing = bundle_towing_km
+    elif towing_sel_display and "unlimited" in towing_sel_display.lower() and not towing_manual_override:
+        clean_towing = "Unlimited"
     else:
+        effective_ext_towing = towing_sel_display or raw_towing
         clean_towing = resolve_insurer_towing_limit(
             company_name=comp_name_str,
             combined_text=combined_text,
-            extracted_towing=raw_towing,
+            extracted_towing=effective_ext_towing,
             catalog_display_value=towing_limit_val,
             company_obj=comp_obj,
         )
@@ -1732,8 +1755,8 @@ def _resolve_comparison_benefits(
                     )
                 )
         
-    target_comp_id = company_id or getattr(session, "company_id", None)
-    
+    target_comp_id = company_id or resolve_session_company_id(session)
+
     if target_comp_id and base_benefits:
         preloaded_conds = (
             prefetched["conditions_by_company"].get(target_comp_id, [])

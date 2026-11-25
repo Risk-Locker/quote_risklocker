@@ -187,7 +187,58 @@ def _resolve_tenure_coverage_label(
     )
 
 
-def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = False) -> dict[str, Any]:
+def _clone_entry_for_readonly(e: Any) -> Any:
+    """Shallow non-ORM copy of a TenureComparisonEntry so read-only GET never dirties SQLAlchemy state."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=getattr(e, "id", None),
+        tenure_id=getattr(e, "tenure_id", None),
+        session_id=getattr(e, "session_id", None),
+        company_name=getattr(e, "company_name", "") or "",
+        company_id=getattr(e, "company_id", None),
+        sum_insured=getattr(e, "sum_insured", 0.0),
+        valuation_type=getattr(e, "valuation_type", "market_value"),
+        motor_premium=getattr(e, "motor_premium", 0.0),
+        road_tax=getattr(e, "road_tax", 0.0),
+        runner_fee=getattr(e, "runner_fee", 0.0),
+        include_road_tax=getattr(e, "include_road_tax", True),
+        include_runner_fee=getattr(e, "include_runner_fee", True),
+        total_payable=getattr(e, "total_payable", 0.0),
+        discount=getattr(e, "discount", None),
+        towing_limit=getattr(e, "towing_limit", None),
+        agreed_value=getattr(e, "agreed_value", False),
+        waiver_betterment=getattr(e, "waiver_betterment", False),
+        excess=getattr(e, "excess", 0.0),
+        rate_percentage=getattr(e, "rate_percentage", None),
+        windscreen_sum_insured=getattr(e, "windscreen_sum_insured", None),
+        special_perils=getattr(e, "special_perils", None),
+        llp_llop=getattr(e, "llp_llop", None),
+        personal_accident=getattr(e, "personal_accident", None),
+        extra_addons=dict(getattr(e, "extra_addons", None) or {}),
+        rank=getattr(e, "rank", None),
+        manual_rank=getattr(e, "manual_rank", None),
+        betterment_rate=getattr(e, "betterment_rate", None),
+        betterment_display=getattr(e, "betterment_display", None),
+        towing_km=getattr(e, "towing_km", None),
+        version=getattr(e, "version", 1) or 1,
+        revision=getattr(e, "revision", getattr(e, "version", 1) or 1),
+        uploaded_at=getattr(e, "uploaded_at", None),
+        created_at=getattr(e, "created_at", None),
+        is_recommended=bool(getattr(e, "is_recommended", False)),
+        is_manual=bool(getattr(e, "is_manual", False)),
+        manual_overrides=list(getattr(e, "manual_overrides", None) or []),
+        review_flags=dict(getattr(e, "review_flags", None) or {}),
+        is_hidden=bool(getattr(e, "is_hidden", False)),
+        sort_order=int(getattr(e, "sort_order", 0) or 0),
+        notes=getattr(e, "notes", None),
+        quotation_ref=getattr(e, "quotation_ref", None),
+        coverage_type=getattr(e, "coverage_type", None),
+        session=getattr(e, "session", None),
+    )
+
+
+def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = True) -> dict[str, Any]:
     """Retrieve or auto-hydrate the full marketing comparison matrix for an insurance tenure.
     
     Returns:
@@ -210,6 +261,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     if not tenure:
         raise ValueError(f"Tenure {tenure_id} not found")
 
+    from app.domain.quote_sync_engine import resolve_session_company_id
+
     # 1. Inspect existing comparison entries
     entries = list(
         db.scalars(
@@ -218,6 +271,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             .order_by(TenureComparisonEntry.sort_order.asc(), TenureComparisonEntry.created_at.asc())
         ).all()
     )
+    if not allow_commit:
+        entries = [_clone_entry_for_readonly(e) for e in entries]
 
     needs_commit = False
 
@@ -257,12 +312,13 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
 
     # Clean up any comparison entries erroneously created for Cover Note sessions or pointing to trashed/missing sessions
     valid_entries = []
-    seen_companies: dict[str, TenureComparisonEntry] = {}
+    seen_companies: dict[str, Any] = {}
     for e in entries:
         if e.session_id:
             sess = session_map.get(e.session_id)
             if not sess or sess.status == "trash" or is_covernote_document(sess, db):
-                db.delete(e)
+                if allow_commit:
+                    db.delete(e)
                 needs_commit = True
                 continue
             # Sync company_name & company_id when session insurer changes after re-detect/rescan
@@ -271,14 +327,15 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 if (e.company_name or "").strip().lower() != det_c.lower():
                     e.company_name = det_c
                     needs_commit = True
-                sess_cid = getattr(sess, "company_id", None) or (getattr(sess.draft, "company_id", None) if sess.draft else None)
+                sess_cid = resolve_session_company_id(sess)
                 if sess_cid and e.company_id != sess_cid:
                     e.company_id = sess_cid
                     needs_commit = True
         # Also clean up any entry whose company_name contains covernote / certificate indicators
         c_lower = (e.company_name or "").lower()
         if any(term in c_lower for term in ("covernote", "cover note", "sijil insurans", "certificate of insurance")):
-            db.delete(e)
+            if allow_commit:
+                db.delete(e)
             needs_commit = True
             continue
 
@@ -292,12 +349,14 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             curr_active = bool(curr_sess and curr_sess.is_tenure_active is not False)
             prev_active = bool(prev_sess and prev_sess.is_tenure_active is not False)
             if curr_active and not prev_active:
-                db.delete(prev_e)
+                if allow_commit:
+                    db.delete(prev_e)
                 valid_entries = [item for item in valid_entries if item.id != prev_e.id]
                 seen_companies[comp_key] = e
                 valid_entries.append(e)
             else:
-                db.delete(e)
+                if allow_commit:
+                    db.delete(e)
             needs_commit = True
             continue
         seen_companies[comp_key] = e
@@ -313,12 +372,15 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     ]
 
     # Auto-link Cover Note to tenure if not already assigned (exclude unlinked_covernote)
-    if not tenure.covernote_session_id:
+    effective_covernote_session_id = tenure.covernote_session_id
+    if not effective_covernote_session_id:
         for s in sessions:
             if is_covernote_document(s, db) and getattr(s, "document_type", "") != "unlinked_covernote":
-                tenure.covernote_session_id = s.id
-                if tenure.stage in ("Quotations", "Material to Client", None, "draft"):
-                    tenure.stage = "Issue Policy"
+                effective_covernote_session_id = s.id
+                if allow_commit:
+                    tenure.covernote_session_id = s.id
+                    if tenure.stage in ("Quotations", "Material to Client", None, "draft"):
+                        tenure.stage = "Issue Policy"
                 needs_commit = True
                 break
 
@@ -427,6 +489,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         car_model=f"{detected_brand or ''} {detected_model or ''}".strip(),
         capacity_str=raw_capacity_token,
     )
+    inc_rt_state = tenure.include_road_tax
+    inc_rf_state = tenure.include_runner_fee
     if is_comm_heavy and float(tenure.road_tax or 0.0) == 0.0 and float(tenure.runner_fee or 0.0) == 0.0:
         inc_rt_def, inc_rf_def = default_fee_inclusions(
             vehicle_type=resolved_vtype,
@@ -434,11 +498,18 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             capacity_str=raw_capacity_token,
         )
         if not inc_rt_def and tenure.include_road_tax is None:
-            tenure.include_road_tax = False
+            inc_rt_state = False
+            if allow_commit:
+                tenure.include_road_tax = False
             needs_commit = True
         if not inc_rf_def and tenure.include_runner_fee is None:
-            tenure.include_runner_fee = False
+            inc_rf_state = False
+            if allow_commit:
+                tenure.include_runner_fee = False
             needs_commit = True
+
+    eff_inc_rt = inc_rt_state if inc_rt_state is not None else True
+    eff_inc_rf = inc_rf_state if inc_rf_state is not None else True
 
     is_comp_private = (resolved_vtype in ("Car", "NonSaloonCar", "EVSaloonCar", "EVNonSaloonCar") and entity_type == "Private")
 
@@ -451,18 +522,22 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             jurisdiction="West Malaysia",
         )
 
-    if tenure.include_road_tax is False or is_comm_heavy and float(tenure.road_tax or 0.0) == 0.0:
+    raw_rt_val = float(tenure.road_tax)
+    if inc_rt_state is False or (is_comm_heavy and float(tenure.road_tax or 0.0) == 0.0):
         road_tax_val = 0.0
     elif float(tenure.road_tax) > 0.0:
         road_tax_val = float(tenure.road_tax)
     elif calculated_jpj_road_tax > 0.0:
         road_tax_val = calculated_jpj_road_tax
-        tenure.road_tax = calculated_jpj_road_tax
+        raw_rt_val = calculated_jpj_road_tax
+        if allow_commit:
+            tenure.road_tax = calculated_jpj_road_tax
         needs_commit = True
     else:
         road_tax_val = 0.0
 
-    if tenure.include_runner_fee is False or is_comm_heavy and float(tenure.runner_fee or 0.0) == 0.0:
+    raw_rf_val = float(tenure.runner_fee)
+    if inc_rf_state is False or (is_comm_heavy and float(tenure.runner_fee or 0.0) == 0.0):
         runner_fee_val = 0.0
     elif float(tenure.runner_fee) > 0.0:
         runner_fee_val = float(tenure.runner_fee)
@@ -472,7 +547,9 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         calc_runner = get_runner_fee_default(db)
         if calc_runner > 0.0:
             runner_fee_val = calc_runner
-            tenure.runner_fee = calc_runner
+            raw_rf_val = calc_runner
+            if allow_commit:
+                tenure.runner_fee = calc_runner
             needs_commit = True
         else:
             runner_fee_val = 0.0
@@ -485,9 +562,9 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 cand_yom = _extract_vehicle_year_from_draft(s.draft.fields)
                 if cand_yom:
                     veh_yom = cand_yom
-                    if tenure.tracked_vehicle:
+                    if allow_commit and tenure.tracked_vehicle:
                         tenure.tracked_vehicle.manufacture_year = cand_yom
-                        needs_commit = True
+                    needs_commit = True
                     break
     veh_age = calculate_vehicle_age(veh_yom, tenure.coverage_start_date)
 
@@ -502,10 +579,11 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             val_type, agreed = _extract_valuation_type(f, s_obj=s)
             excess_val = _extract_excess(f, s_obj=s)
             rate_val = round((motor_prem / sum_ins) * 100, 4) if sum_ins > 0 else None
-            tot_pay = motor_prem + float(tenure.road_tax) + float(tenure.runner_fee)
+            tot_pay = motor_prem + road_tax_val + runner_fee_val
+            s_cid = resolve_session_company_id(s)
 
             b_res = _resolve_comparison_benefits(
-                db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
+                db, s, s_cid, f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
             )
             raw_w = _extract_val(f.get("waiver_of_betterment"))
             has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
@@ -521,7 +599,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 registration_date=reg_date,
                 coverage_start_date=tenure.coverage_start_date,
                 coverage_type=cov_type_val,
-                company_obj=benefit_prefetch.get("companies_by_id", {}).get(getattr(s, "company_id", None)),
+                company_obj=benefit_prefetch.get("companies_by_id", {}).get(s_cid),
             )
 
             entry = TenureComparisonEntry(
@@ -530,12 +608,14 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 session_id=s.id,
                 manual_overrides=[],
                 company_name=comp_name,
-                company_id=getattr(s, "company_id", None),
+                company_id=s_cid,
                 sum_insured=sum_ins,
                 valuation_type=val_type,
                 motor_premium=motor_prem,
-                road_tax=float(tenure.road_tax),
-                runner_fee=float(tenure.runner_fee),
+                road_tax=road_tax_val,
+                runner_fee=runner_fee_val,
+                include_road_tax=eff_inc_rt,
+                include_runner_fee=eff_inc_rf,
                 total_payable=tot_pay,
                 towing_limit=b_res["towing_km"],
                 towing_km=b_res["towing_km"],
@@ -561,11 +641,14 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 sort_order=idx,
                 is_recommended=bool(
                     (tenure.winning_quotation_ref and s.quotation_ref == tenure.winning_quotation_ref)
-                    or (tenure.winning_company_id and getattr(s, "company_id", None) == tenure.winning_company_id)
+                    or (tenure.winning_company_id and s_cid == tenure.winning_company_id)
                 ),
             )
-            db.add(entry)
-            entries.append(entry)
+            if allow_commit:
+                db.add(entry)
+                entries.append(entry)
+            else:
+                entries.append(_clone_entry_for_readonly(entry))
 
         needs_commit = True
     else:
@@ -589,10 +672,11 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 val_type, agreed = _extract_valuation_type(f, s_obj=s)
                 excess_val = _extract_excess(f, s_obj=s)
                 rate_val = round((motor_prem / sum_ins) * 100, 4) if sum_ins > 0 else None
-                tot_pay = motor_prem + float(tenure.road_tax) + float(tenure.runner_fee)
+                tot_pay = motor_prem + road_tax_val + runner_fee_val
+                s_cid = resolve_session_company_id(s)
 
                 b_res = _resolve_comparison_benefits(
-                    db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
+                    db, s, s_cid, f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
                 )
                 raw_w = _extract_val(f.get("waiver_of_betterment"))
                 has_peril = check_has_betterment_peril(f, b_res.get("combined_text", ""), raw_w)
@@ -608,10 +692,10 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     registration_date=reg_date,
                     coverage_start_date=tenure.coverage_start_date,
                     coverage_type=cov_type_val,
-                    company_obj=benefit_prefetch.get("companies_by_id", {}).get(getattr(s, "company_id", None)),
+                    company_obj=benefit_prefetch.get("companies_by_id", {}).get(s_cid),
                 )
 
-                c_id_key = str(getattr(s, "company_id", "") or "").lower()
+                c_id_key = str(s_cid or "").lower()
                 c_name_key = comp_name.strip().lower()
                 dup_src_id = getattr(s, "duplicate_of_session_id", None)
                 existing_match = (
@@ -623,6 +707,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 if existing_match:
                     # In-place update of existing company column with the latest quotation (respecting manual_overrides)
                     existing_match.session_id = s.id
+                    if s_cid and not existing_match.company_id:
+                        existing_match.company_id = s_cid
                     if not is_field_overridden(existing_match, "sum_insured"):
                         existing_match.sum_insured = sum_ins
                     if not is_field_overridden(existing_match, "valuation_type"):
@@ -658,7 +744,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         cov_type=cov_type_val,
                         overrides=get_entry_overrides(existing_match),
                     )
-                    flag_modified(existing_match, "review_flags")
+                    if allow_commit:
+                        flag_modified(existing_match, "review_flags")
                     if not existing_match.is_manual and not get_entry_overrides(existing_match):
                         existing_match.version = s.tenure_version or (existing_match.version or 1)
                 else:
@@ -668,12 +755,14 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         session_id=s.id,
                         manual_overrides=[],
                         company_name=comp_name,
-                        company_id=getattr(s, "company_id", None),
+                        company_id=s_cid,
                         sum_insured=sum_ins,
                         valuation_type=val_type,
                         motor_premium=motor_prem,
-                        road_tax=float(tenure.road_tax),
-                        runner_fee=float(tenure.runner_fee),
+                        road_tax=road_tax_val,
+                        runner_fee=runner_fee_val,
+                        include_road_tax=eff_inc_rt,
+                        include_runner_fee=eff_inc_rf,
                         total_payable=tot_pay,
                         towing_limit=b_res["towing_km"],
                         towing_km=b_res["towing_km"],
@@ -700,18 +789,22 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         version=s.tenure_version or 1,
                         is_recommended=bool(
                             (tenure.winning_quotation_ref and s.quotation_ref == tenure.winning_quotation_ref)
-                            or (tenure.winning_company_id and getattr(s, "company_id", None) == tenure.winning_company_id)
+                            or (tenure.winning_company_id and s_cid == tenure.winning_company_id)
                         ),
                     )
-                    db.add(new_entry)
-                    entries.append(new_entry)
+                    if allow_commit:
+                        db.add(new_entry)
+                        entries.append(new_entry)
+                    else:
+                        new_entry = _clone_entry_for_readonly(new_entry)
+                        entries.append(new_entry)
                     if c_id_key:
                         existing_comp_entries[c_id_key] = new_entry
                     existing_comp_entries[c_name_key] = new_entry
             needs_commit = True
 
-        eff_tenure_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
-        eff_tenure_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+        eff_tenure_rt = road_tax_val if eff_inc_rt else 0.0
+        eff_tenure_rf = runner_fee_val if eff_inc_rf else 0.0
 
         # Parity check: synchronize fixed costs (road tax, runner fee) and fallback betterment rates without clobbering user edits
         for e in entries:
@@ -719,8 +812,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             if abs(float(e.road_tax) - eff_tenure_rt) > 0.01 or abs(float(e.runner_fee) - eff_tenure_rf) > 0.01:
                 e.road_tax = eff_tenure_rt
                 e.runner_fee = eff_tenure_rf
-                e.include_road_tax = (tenure.include_road_tax is not False)
-                e.include_runner_fee = (tenure.include_runner_fee is not False)
+                e.include_road_tax = eff_inc_rt
+                e.include_runner_fee = eff_inc_rf
                 e.total_payable = float(e.motor_premium) + eff_tenure_rt + eff_tenure_rf
                 needs_commit = True
 
@@ -759,7 +852,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                         b_cand = _resolve_comparison_benefits(
                             db,
                             s_cand,
-                            getattr(s_cand, "company_id", None) or e.company_id,
+                            resolve_session_company_id(s_cand, e),
                             s_cand_fields,
                             float(tenure.windscreen_target) if tenure.windscreen_target else None,
                             prefetched=benefit_prefetch,
@@ -794,7 +887,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     b_sp = _resolve_comparison_benefits(
                         db,
                         s_sp,
-                        getattr(s_sp, "company_id", None) or e.company_id,
+                        resolve_session_company_id(s_sp, e),
                         s_sp_fields,
                         float(tenure.windscreen_target) if tenure.windscreen_target else None,
                         prefetched=benefit_prefetch,
@@ -833,7 +926,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     ws_invalid = e.windscreen_sum_insured is not None and not _is_valid_windscreen_amt(float(e.windscreen_sum_insured))
                     if ws_invalid and not is_field_overridden(e, "windscreen_sum_insured"):
                         b_cand = _resolve_comparison_benefits(
-                            db, s, getattr(s, "company_id", None), f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
+                            db, s, resolve_session_company_id(s, e), f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
                         )
                         cand_ws = b_cand.get("windscreen_sum_insured")
                         if cand_ws and _is_valid_windscreen_amt(cand_ws):
@@ -1014,7 +1107,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
 
         # Carry over NCD percentage if not yet set on current tenure
         if tenure.ncd_percentage is None and prev_tenure.ncd_percentage is not None:
-            tenure.ncd_percentage = prev_tenure.ncd_percentage
+            if allow_commit:
+                tenure.ncd_percentage = prev_tenure.ncd_percentage
             needs_commit = True
 
     visible_for_reason = [e for e in entries if not getattr(e, "is_hidden", False)]
@@ -1135,73 +1229,89 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     final_plate_display = "N/A" if is_plate_undetected else clean_final_plate
     tracking_by_chassis = bool(is_plate_undetected and veh_chassis_no)
 
+    effective_cust_name = cust_name or tenure.customer_name
+    effective_veh_no = final_plate_display if final_plate_display != "N/A" else tenure.vehicle_no
+
     if cust_name and tenure.customer_name != cust_name:
-        tenure.customer_name = cust_name
-        if tenure.customer:
-            tenure.customer.canonical_name = cust_name
+        if allow_commit:
+            tenure.customer_name = cust_name
+            if tenure.customer:
+                tenure.customer.canonical_name = cust_name
         needs_commit = True
     if cust_ic and tenure.customer and tenure.customer.id_number != cust_ic:
-        existing_cust = db.query(CustomerAccount).filter(CustomerAccount.id_number == cust_ic).first()
-        if existing_cust:
-            if existing_cust.id != tenure.customer_id:
-                tenure.customer_id = existing_cust.id
-        else:
-            tenure.customer.id_number = cust_ic
+        if allow_commit:
+            existing_cust = db.query(CustomerAccount).filter(CustomerAccount.id_number == cust_ic).first()
+            if existing_cust:
+                if existing_cust.id != tenure.customer_id:
+                    tenure.customer_id = existing_cust.id
+            else:
+                tenure.customer.id_number = cust_ic
         needs_commit = True
     if cust_phone and tenure.customer and not tenure.customer.phone:
-        tenure.customer.phone = cust_phone
+        if allow_commit:
+            tenure.customer.phone = cust_phone
         needs_commit = True
     if cust_email and tenure.customer and not tenure.customer.email:
-        tenure.customer.email = cust_email
+        if allow_commit:
+            tenure.customer.email = cust_email
         needs_commit = True
     if cust_address and tenure.customer and not tenure.customer.address:
-        tenure.customer.address = cust_address
+        if allow_commit:
+            tenure.customer.address = cust_address
         needs_commit = True
 
     if final_plate_display != "N/A" and tenure.vehicle_no != final_plate_display:
-        tenure.vehicle_no = final_plate_display
+        if allow_commit:
+            tenure.vehicle_no = final_plate_display
         needs_commit = True
 
     if tenure.tracked_vehicle:
         if veh_model and tenure.tracked_vehicle.car_model != veh_model:
-            tenure.tracked_vehicle.car_model = veh_model
+            if allow_commit:
+                tenure.tracked_vehicle.car_model = veh_model
             needs_commit = True
         if waterfall_brand and tenure.tracked_vehicle.car_brand != waterfall_brand:
-            tenure.tracked_vehicle.car_brand = waterfall_brand
+            if allow_commit:
+                tenure.tracked_vehicle.car_brand = waterfall_brand
             needs_commit = True
         if veh_engine_no and tenure.tracked_vehicle.engine_no != veh_engine_no:
-            tenure.tracked_vehicle.engine_no = veh_engine_no
+            if allow_commit:
+                tenure.tracked_vehicle.engine_no = veh_engine_no
             needs_commit = True
         if veh_chassis_no and tenure.tracked_vehicle.chassis_no != veh_chassis_no:
-            tenure.tracked_vehicle.chassis_no = veh_chassis_no
+            if allow_commit:
+                tenure.tracked_vehicle.chassis_no = veh_chassis_no
             needs_commit = True
         if veh_engine_cc and tenure.tracked_vehicle.engine_cc != veh_engine_cc:
-            tenure.tracked_vehicle.engine_cc = veh_engine_cc
+            if allow_commit:
+                tenure.tracked_vehicle.engine_cc = veh_engine_cc
             needs_commit = True
         if veh_yom and getattr(tenure.tracked_vehicle, "manufacture_year", None) != veh_yom:
-            tenure.tracked_vehicle.manufacture_year = veh_yom
+            if allow_commit:
+                tenure.tracked_vehicle.manufacture_year = veh_yom
             needs_commit = True
         tv_clean = re.sub(r"\s+", "", (tenure.tracked_vehicle.vehicle_no or "").upper())
         if final_plate_display != "N/A" and tv_clean != clean_final_plate:
-            existing_other_veh = db.scalar(
-                select(TrackedVehicle).where(
-                    or_(
-                        TrackedVehicle.vehicle_no == final_plate_display,
-                        func.replace(TrackedVehicle.vehicle_no, " ", "") == clean_final_plate,
-                    ),
-                    TrackedVehicle.id != tenure.tracked_vehicle.id,
+            if allow_commit:
+                existing_other_veh = db.scalar(
+                    select(TrackedVehicle).where(
+                        or_(
+                            TrackedVehicle.vehicle_no == final_plate_display,
+                            func.replace(TrackedVehicle.vehicle_no, " ", "") == clean_final_plate,
+                        ),
+                        TrackedVehicle.id != tenure.tracked_vehicle.id,
+                    )
                 )
-            )
-            if existing_other_veh:
-                tenure.tracked_vehicle = existing_other_veh
-                tenure.tracked_vehicle_id = existing_other_veh.id
-            else:
-                tenure.tracked_vehicle.vehicle_no = final_plate_display
+                if existing_other_veh:
+                    tenure.tracked_vehicle = existing_other_veh
+                    tenure.tracked_vehicle_id = existing_other_veh.id
+                else:
+                    tenure.tracked_vehicle.vehicle_no = final_plate_display
             needs_commit = True
 
     if veh_model:
         from app.services.vehicle_simplifier_service import clean_vehicle_tokens_deterministic, CANONICAL_BRANDS
-        tb = tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None
+        tb = waterfall_brand or (tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None)
         if tb and any(veh_model.upper().startswith(k) for k in CANONICAL_BRANDS.keys()):
             pass_brand = None
         else:
@@ -1213,13 +1323,16 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
     cand_ncd: float | None = None
     if tenure.ncd_percentage is not None:
         cand_ncd = float(tenure.ncd_percentage)
+    elif prev_tenure and prev_tenure.ncd_percentage is not None:
+        cand_ncd = float(prev_tenure.ncd_percentage)
     else:
         for s in sessions:
             if s.draft and isinstance(s.draft.fields, dict):
                 ext_ncd = _extract_ncd_from_draft(s.draft.fields)
                 if ext_ncd is not None:
                     cand_ncd = ext_ncd
-                    tenure.ncd_percentage = cand_ncd
+                    if allow_commit:
+                        tenure.ncd_percentage = cand_ncd
                     needs_commit = True
                     break
 
@@ -1347,7 +1460,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         entry_extra_addons = dict(getattr(e, "extra_addons", None) or {})
         if s_obj:
             entry_b_res = _resolve_comparison_benefits(
-                db, s_obj, getattr(s_obj, "company_id", None), f_obj, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
+                db, s_obj, resolve_session_company_id(s_obj, e), f_obj, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
             )
             entry_perils = entry_b_res.get("canonical_perils") or []
             entry_detailed_perils = entry_b_res.get("detailed_perils") or []
@@ -1627,13 +1740,13 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
 
     # Locate active Cover Note / Issued Policy session for this tenure
     cn_session = None
-    if tenure.covernote_session_id and tenure.covernote_session_id in session_map:
-        cn_session = session_map[tenure.covernote_session_id]
+    if effective_covernote_session_id and effective_covernote_session_id in session_map:
+        cn_session = session_map[effective_covernote_session_id]
 
     # Collect any unlinked covernotes / issued policy documents available for this tenure
     unlinked_covernotes = []
     for s in sessions_desc:
-        if s.id != (tenure.covernote_session_id or "") and getattr(s, "document_type", "") in ("unlinked_covernote", "covernote"):
+        if s.id != (effective_covernote_session_id or "") and getattr(s, "document_type", "") in ("unlinked_covernote", "covernote"):
             f_name = s.uploaded_file.original_filename if s.uploaded_file else f"{s.detected_company or 'Policy'}.pdf"
             s_date = s.coverage_start_date or tenure.coverage_start_date
             e_date = s.coverage_end_date or tenure.coverage_end_date
@@ -1657,27 +1770,33 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         cn_sum = _extract_vehicle_sum_insured(cn_f, s_obj=cn_session)
         cn_prem = _extract_vehicle_motor_premium(cn_f)
         cn_val_type, cn_agreed = _extract_valuation_type(cn_f, s_obj=cn_session)
-        cn_eff_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
-        cn_eff_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+        cn_eff_rt = road_tax_val if eff_inc_rt else 0.0
+        cn_eff_rf = runner_fee_val if eff_inc_rf else 0.0
         cn_tot_pay = float(tenure.won_premium) if tenure.won_premium is not None else round(cn_prem + cn_eff_rt + cn_eff_rf, 2)
+        cn_cid = resolve_session_company_id(cn_session) or tenure.winning_company_id
         cn_b_res = _resolve_comparison_benefits(
-            db, cn_session, getattr(cn_session, "company_id", None), cn_f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
+            db, cn_session, cn_cid, cn_f, float(tenure.windscreen_target) if tenure.windscreen_target else None, prefetched=benefit_prefetch
         )
         cn_excess = _extract_excess(cn_f, s_obj=cn_session)
         cn_all_sels = benefit_prefetch.get("all_selections_by_draft", {}).get(cn_session.draft_id, []) if cn_session.draft_id else []
+        cn_concepts = benefit_prefetch.get("concepts_by_id", {})
         cn_bet_active = any(
-            getattr(sel, "state", None) == "current" and "betterment" in f"{getattr(sel, 'selection_key', '') or ''} {getattr(sel, 'label_override', '') or ''}".lower()
+            getattr(sel, "state", None) == "current"
+            and "betterment"
+            in f"{getattr(sel, 'selection_key', '') or ''} {getattr(sel, 'label_override', '') or ''} {getattr(cn_concepts.get(getattr(sel, 'concept_id', None)), 'concept_key', '') or ''} {getattr(cn_concepts.get(getattr(sel, 'concept_id', None)), 'label', '') or ''}".lower()
             for sel in cn_all_sels
         )
         cn_bet_inactive = any(
-            getattr(sel, "state", None) in ("removed", "available_addon") and "betterment" in f"{getattr(sel, 'selection_key', '') or ''} {getattr(sel, 'label_override', '') or ''}".lower()
+            getattr(sel, "state", None) in ("removed", "available_addon")
+            and "betterment"
+            in f"{getattr(sel, 'selection_key', '') or ''} {getattr(sel, 'label_override', '') or ''} {getattr(cn_concepts.get(getattr(sel, 'concept_id', None)), 'concept_key', '') or ''} {getattr(cn_concepts.get(getattr(sel, 'concept_id', None)), 'label', '') or ''}".lower()
             for sel in cn_all_sels
         )
         cn_raw_rate = _extract_val(cn_f.get("betterment_rate"))
         cn_rate_manual = isinstance(cn_f.get("betterment_rate"), dict) and cn_f["betterment_rate"].get("status") == "manual_override" and cn_raw_rate not in (None, "")
         cn_raw_w = _extract_val(cn_f.get("waiver_of_betterment"))
         cn_w_manual = isinstance(cn_f.get("waiver_of_betterment"), dict) and cn_f["waiver_of_betterment"].get("status") == "manual_override"
-        cn_comp_obj = benefit_prefetch.get("companies_by_id", {}).get(getattr(cn_session, "company_id", None) or tenure.winning_company_id)
+        cn_comp_obj = benefit_prefetch.get("companies_by_id", {}).get(cn_cid)
         cn_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
         cn_q_yr = (cn_session.coverage_start_date or tenure.coverage_start_date or datetime.now(timezone.utc)).year
         cn_reg_date = _extract_val(cn_f.get("registration_date")) or _extract_val(cn_f.get("reg_date"))
@@ -1754,7 +1873,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         covernote_policy = {
             "session_id": cn_session.id,
             "company_name": cn_comp,
-            "company_id": getattr(cn_session, "company_id", None) or tenure.winning_company_id,
+            "company_id": cn_cid,
             "policy_number": cn_session.policy_number or tenure.policy_number,
             "coverage_start_date": s_date.isoformat() if s_date else None,
             "coverage_end_date": e_date.isoformat() if e_date else None,
@@ -1866,13 +1985,17 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 resolved_vtype = str(vt_val).strip()
                 break
 
+    if allow_commit and needs_commit:
+        db.commit()
+        needs_commit = False
+
     return {
         "tenure": {
             "id": tenure.id,
             "vehicle_no": final_plate_display,
             "is_plate_undetected": is_plate_undetected,
             "tracking_by_chassis": tracking_by_chassis,
-            "customer_name": tenure.customer_name,
+            "customer_name": effective_cust_name,
             "ic_no": cust_ic,
             "formatted_ic": nric_details.get("formatted", cust_ic) if nric_details.get("valid") else cust_ic,
             "birth_date": nric_details.get("birth_date"),
@@ -1891,23 +2014,23 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "coverage_start_date": active_start_date.isoformat() if active_start_date else tenure.coverage_start_date.isoformat(),
             "coverage_end_date": active_end_date.isoformat() if active_end_date else tenure.coverage_end_date.isoformat(),
             "coverage_period_formatted": active_period_formatted,
-            "covernote_session_id": tenure.covernote_session_id,
+            "covernote_session_id": effective_covernote_session_id,
             "policy_number": tenure.policy_number or (covernote_policy.get("policy_number") if covernote_policy else None),
             "is_covernote_issued": bool(covernote_policy),
             "winning_file_id": (covernote_policy.get("uploaded_file_id") if covernote_policy else None) or (winner_entry.get("uploaded_file_id") if winner_entry else None),
             "winning_file_name": (covernote_policy.get("uploaded_file_name") if covernote_policy else None) or (winner_entry.get("original_filename") if winner_entry else None),
             "expiry_month": tenure.expiry_month,
             "status": tenure.status,
-            "road_tax": float(tenure.road_tax),
-            "runner_fee": float(tenure.runner_fee),
-            "include_road_tax": tenure.include_road_tax if tenure.include_road_tax is not None else True,
-            "include_runner_fee": tenure.include_runner_fee if tenure.include_runner_fee is not None else True,
-            "runner_fee_type": "passport" if (float(tenure.runner_fee) >= 20.0 or (cust_ic and cust_ic[0].isalpha() and not cust_ic.upper().startswith("PENDING-"))) else "mykad",
-            "fixed_costs_total": (float(tenure.road_tax) if tenure.include_road_tax is not False else 0.0) + (float(tenure.runner_fee) if tenure.include_runner_fee is not False else 0.0),
+            "road_tax": raw_rt_val,
+            "runner_fee": raw_rf_val,
+            "include_road_tax": eff_inc_rt,
+            "include_runner_fee": eff_inc_rf,
+            "runner_fee_type": "passport" if (raw_rf_val >= 20.0 or (cust_ic and cust_ic[0].isalpha() and not cust_ic.upper().startswith("PENDING-"))) else "mykad",
+            "fixed_costs_total": (road_tax_val if eff_inc_rt else 0.0) + (runner_fee_val if eff_inc_rf else 0.0),
             "quotation_discount": float(getattr(tenure, "quotation_discount", 0.0) or 0.0),
             "motor_discount_pct": float(getattr(tenure, "motor_discount_pct", 0.0) or 0.0),
             "windscreen_target": float(tenure.windscreen_target) if tenure.windscreen_target else None,
-            "ncd_percentage": float(tenure.ncd_percentage) if tenure.ncd_percentage is not None else None,
+            "ncd_percentage": cand_ncd,
             "car_brand": (tenure.tracked_vehicle.car_brand if tenure.tracked_vehicle else None) or waterfall_brand,
             "vehicle_model": veh_model or "Motor Vehicle",
             "vehicle_type": resolved_vtype,
@@ -2202,7 +2325,7 @@ def update_tenure_fixed_costs(
         motor_discount_pct=motor_discount_pct,
     )
     db.commit()
-    return get_marketing_comparison(db, tenure_id)
+    return get_marketing_comparison(db, tenure_id, allow_commit=True)
 
 
 def refresh_tenure_ledger(db: Session, tenure_id: str) -> dict[str, Any]:
@@ -2231,7 +2354,7 @@ def refresh_tenure_ledger(db: Session, tenure_id: str) -> dict[str, Any]:
     tenure.runner_fee = 0.0
     db.commit()
 
-    return get_marketing_comparison(db, tenure_id)
+    return get_marketing_comparison(db, tenure_id, allow_commit=True)
 
 
 
@@ -2470,7 +2593,7 @@ def save_comparison_entry(
                 entry.rate_percentage = round((float(entry.motor_premium) / float(entry.sum_insured)) * 100, 4)
 
     db.commit()
-    return get_marketing_comparison(db, tenure_id)
+    return get_marketing_comparison(db, tenure_id, allow_commit=True)
 
 
 def delete_comparison_entry(
@@ -2509,7 +2632,7 @@ def delete_comparison_entry(
         db.delete(e)
 
     db.commit()
-    return get_marketing_comparison(db, tenure_id)
+    return get_marketing_comparison(db, tenure_id, allow_commit=True)
 
 
 def select_winner_and_generate_draft(
@@ -2636,7 +2759,8 @@ def select_winner_and_generate_draft(
                     "service_fee": eff_rf_s,
                     "include_road_tax": (tenure.include_road_tax is not False),
                     "include_runner_fee": (tenure.include_runner_fee is not False),
-                    "total_payable": net_tot_s,
+                    "total_payable": float(entry.motor_premium),
+                    "net_motor_premium": float(bd_s.net_motor_premium),
                     "total_amount": net_tot_s,
                     "towing_limit": entry.towing_limit,
                     "agreed_value": entry.agreed_value,
@@ -3200,13 +3324,13 @@ def rescan_comparison_tenure(
                         pass
 
     db.commit()
-    return get_marketing_comparison(db, tenure_id)
+    return get_marketing_comparison(db, tenure_id, allow_commit=True)
 
 
 def format_whatsapp_teaser(db: Session, tenure_id: str) -> str:
     """Format a clean, executive WhatsApp teaser message comparing all underwriters for client messaging."""
     from app.services.marketing_comparison.whatsapp_formatter import format_whatsapp_teaser_from_data
-    data = get_marketing_comparison(db, tenure_id)
+    data = get_marketing_comparison(db, tenure_id, allow_commit=False)
     return format_whatsapp_teaser_from_data(data)
 
 def reset_comparison_entry_to_detected(db: Session, tenure_id: str, entry_id: str) -> dict[str, Any]:
@@ -3251,4 +3375,4 @@ def reset_comparison_entry_to_detected(db: Session, tenure_id: str, entry_id: st
     db.commit()
     
     # Return refreshed comparison
-    return get_marketing_comparison(db, tenure_id)
+    return get_marketing_comparison(db, tenure_id, allow_commit=True)

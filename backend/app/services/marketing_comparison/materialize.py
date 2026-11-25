@@ -171,7 +171,7 @@ def materialize_comparison_entries(db: Session, tenure_id: str) -> dict[str, Any
     """Idempotently materialize and commit comparison entries for a tenure at write time."""
     from app.services.marketing_comparison_service import get_marketing_comparison
 
-    result = get_marketing_comparison(db, tenure_id)
+    result = get_marketing_comparison(db, tenure_id, allow_commit=True)
     db.commit()
     result["needs_materialize"] = False
     return result

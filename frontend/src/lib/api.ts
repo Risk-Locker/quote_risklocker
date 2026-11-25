@@ -2,6 +2,11 @@
 
 export const API_BASE = "/api";
 
+export const CLIENT_TAB_ID: string =
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `tab-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function cookieValue(name: string): string | undefined {
@@ -17,9 +22,14 @@ function requestHeaders(options: RequestInit): Headers {
     headers.set("Content-Type", "application/json");
   }
   const method = (options.method || "GET").toUpperCase();
-  if (!SAFE_METHODS.has(method) && !headers.has("X-CSRF-Token")) {
-    const csrf = cookieValue("risklocker_csrf");
-    if (csrf) headers.set("X-CSRF-Token", csrf);
+  if (!SAFE_METHODS.has(method)) {
+    if (!headers.has("X-CSRF-Token")) {
+      const csrf = cookieValue("risklocker_csrf");
+      if (csrf) headers.set("X-CSRF-Token", csrf);
+    }
+    if (!headers.has("X-Client-Tab-Id")) {
+      headers.set("X-Client-Tab-Id", CLIENT_TAB_ID);
+    }
   }
   return headers;
 }

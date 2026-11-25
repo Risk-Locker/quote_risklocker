@@ -274,6 +274,9 @@ def _recompute_total(fields: dict, decisions: dict, user, draft: QuotationDraft 
         }
         return
 
+    from app.domain.quote_sync_engine import sync_draft_motor_premium_aliases
+
+    sync_draft_motor_premium_aliases(fields, base_prem)
     rt_val = (
         (_extract_decimal_field(fields, "roadtax", "road_tax_amount") or Decimal("0.00"))
         if _is_fee_included(fields, draft, "include_road_tax")
@@ -1721,140 +1724,22 @@ def apply_workspace_patch(
                     )
 
                 # Sync comparison entries under this tenure (Invariant 2: Two-way quotation sync)
-                eff_rt = float(tenure.road_tax) if (tenure.include_road_tax is not False) else 0.0
-                eff_rf = float(tenure.runner_fee) if (tenure.include_runner_fee is not False) else 0.0
+                from app.domain.quote_sync_engine import sync_comparison_from_workspace
 
-                all_tenure_entries = list(
-                    db.scalars(
-                        select(TenureComparisonEntry).where(
-                            TenureComparisonEntry.tenure_id == tenure.id
-                        )
-                    ).all()
+                eff_rt_dec = parse_money_decimal(tenure.road_tax) if (tenure.include_road_tax is not False) else Decimal("0.00")
+                eff_rf_dec = parse_money_decimal(tenure.runner_fee) if (tenure.include_runner_fee is not False) else Decimal("0.00")
+                sync_comparison_from_workspace(
+                    db,
+                    session=session,
+                    tenure=tenure,
+                    draft=draft,
+                    selections=selections,
+                    changed_paths=changed_paths,
+                    operation_names=operation_names,
+                    benefit_mutation_ops=benefit_mutation_ops,
+                    eff_rt=eff_rt_dec,
+                    eff_rf=eff_rf_dec,
                 )
-                for ce in all_tenure_entries:
-                    if ce.session_id == session.id:
-                        def _extract_f_val(field_key: str) -> Any:
-                            raw = f.get(field_key)
-                            return raw.get("value") if isinstance(raw, dict) else raw
-
-                        raw_prem = _extract_f_val("premium") or _extract_f_val("premium_due")
-                        try:
-                            if raw_prem is not None and str(raw_prem).strip() != "":
-                                ce.motor_premium = float(str(raw_prem).replace(",", ""))
-                        except (ValueError, TypeError):
-                            pass
-
-                        raw_si = _extract_f_val("sum_insured")
-                        try:
-                            if raw_si is not None and str(raw_si).strip() != "":
-                                ce.sum_insured = float(str(raw_si).replace(",", ""))
-                        except (ValueError, TypeError):
-                            pass
-
-                        raw_vt = _extract_f_val("valuation_type")
-                        if raw_vt:
-                            is_agreed = str(raw_vt).strip().lower() in ("agreed value", "agreed_value")
-                            ce.valuation_type = "agreed_value" if is_agreed else "market_value"
-                            ce.agreed_value = is_agreed
-
-                        raw_ex = _extract_f_val("excess_amount") or _extract_f_val("excess")
-                        try:
-                            if raw_ex is not None and str(raw_ex).strip() != "":
-                                ce.excess = float(str(raw_ex).replace(",", ""))
-                        except (ValueError, TypeError):
-                            pass
-
-                        raw_tow = _extract_f_val("towing") or _extract_f_val("towing_limit")
-                        if raw_tow and str(raw_tow).strip():
-                            ce.towing_limit = str(raw_tow).strip()
-
-                        raw_ws = _extract_f_val("windscreen_sum_insured") or _extract_f_val("windscreen")
-                        try:
-                            if raw_ws is not None and str(raw_ws).strip() != "":
-                                ws_f = float(str(raw_ws).replace(",", ""))
-                                ce.windscreen_sum_insured = ws_f if ws_f > 0 else None
-                        except (ValueError, TypeError):
-                            pass
-
-                        has_benefit_mutation = any(op in benefit_mutation_ops for op in operation_names)
-                        if has_benefit_mutation:
-                            from app.services.marketing_comparison.benefits_extractor import _resolve_comparison_benefits
-                            from app.services.marketing_comparison.materialize import record_manual_overrides
-                            from app.services.marketing_comparison.ncd_evaluator import evaluate_betterment_rules
-
-                            b_sync = _resolve_comparison_benefits(
-                                db,
-                                session,
-                                getattr(session, "company_id", None) or ce.company_id,
-                                f,
-                                float(tenure.windscreen_target) if tenure.windscreen_target else None,
-                            )
-                            ce.windscreen_sum_insured = b_sync.get("windscreen_sum_insured")
-                            ce.special_perils = b_sync.get("special_perils")
-                            ce.llp_llop = b_sync.get("llp_llop")
-                            ce.towing_limit = b_sync.get("towing_km") or "Unlimited"
-                            ce.towing_km = ce.towing_limit
-
-                            has_bet_active = any(
-                                s.state == "current" and "betterment" in f"{s.selection_key or ''} {s.label_override or ''}".lower()
-                                for s in selections
-                            )
-                            has_bet_inactive = any(
-                                s.state != "current" and "betterment" in f"{s.selection_key or ''} {s.label_override or ''}".lower()
-                                for s in selections
-                            )
-                            if has_bet_active or has_bet_inactive:
-                                veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if getattr(tenure, "tracked_vehicle", None) else None
-                                reg_date = getattr(tenure.tracked_vehicle, "registration_date", None) if getattr(tenure, "tracked_vehicle", None) else None
-                                quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year
-                                company_obj = db.get(InsuranceCompany, ce.company_id) if ce.company_id else None
-                                _, b_rate, b_disp = evaluate_betterment_rules(
-                                    yom=veh_yom,
-                                    quote_year=quote_year,
-                                    company_name=getattr(company_obj, "name", None) if company_obj else None,
-                                    has_betterment_peril=has_bet_active,
-                                    registration_date=reg_date,
-                                    coverage_start_date=tenure.coverage_start_date,
-                                    coverage_type=getattr(tenure, "coverage_type", None) or _extract_f_val("coverage_type"),
-                                    company_obj=company_obj,
-                                )
-                                ce.waiver_betterment = has_bet_active
-                                ce.betterment_rate = 0.0 if has_bet_active else b_rate
-                                ce.betterment_display = "Yes (0%)" if has_bet_active else b_disp
-
-                            for clr_key in ("windscreen_sum_insured", "special_perils", "llp_llop", "towing_limit", "waiver_betterment", "motor_premium"):
-                                record_manual_overrides(ce, clear_field=clr_key)
-                        elif changed_paths:
-                            from app.services.marketing_comparison.materialize import record_manual_overrides
-
-                            if any("fields.premium" in p for p in changed_paths):
-                                record_manual_overrides(ce, clear_field="motor_premium")
-                            if any("fields.sum_insured" in p or "fields.coverage_amount" in p for p in changed_paths):
-                                raw_cov = _extract_f_val("sum_insured") or _extract_f_val("coverage_amount")
-                                try:
-                                    if raw_cov is not None and str(raw_cov).strip() != "":
-                                        ce.sum_insured = float(str(raw_cov).replace(",", ""))
-                                except (ValueError, TypeError):
-                                    pass
-                                record_manual_overrides(ce, clear_field="sum_insured")
-                            if any("fields.valuation_type" in p for p in changed_paths):
-                                record_manual_overrides(ce, clear_field="valuation_type")
-                                record_manual_overrides(ce, clear_field="agreed_value")
-                            if any("fields.excess" in p for p in changed_paths):
-                                record_manual_overrides(ce, clear_field="excess")
-
-                        if float(ce.sum_insured or 0.0) > 0 and float(ce.motor_premium or 0.0) > 0:
-                            ce.rate_percentage = round((float(ce.motor_premium) / float(ce.sum_insured)) * 100, 4)
-
-                        ce.version = (ce.version or 1) + 1
-
-                    ce.road_tax = eff_rt
-                    ce.runner_fee = eff_rf
-                    ce.include_road_tax = (tenure.include_road_tax is not False)
-                    ce.include_runner_fee = (tenure.include_runner_fee is not False)
-                    ce.total_payable = round(float(ce.motor_premium or 0.0) + eff_rt + eff_rf, 2)
-                    if tenure.covernote_session_id and ce.session_id == tenure.covernote_session_id:
-                        tenure.won_premium = ce.total_payable
 
         db.commit()
         db.refresh(draft)

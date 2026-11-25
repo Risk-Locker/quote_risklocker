@@ -145,7 +145,7 @@ PARALLEL_MODELS: tuple[str, ...] = ("gemini-3.1-flash-lite", "gemini-3.5-flash-l
 
 
 class GeminiAccountManager:
-    """Thread-safe multi-account Gemini manager enforcing 1,920 RPD, 52 RPM, 800k TPM across 4 parallel model endpoints (480 RPD buffer / 500 raw per endpoint, 13 RPM, 200k TPM)."""
+    """Thread-safe multi-account Gemini manager supporting up to 8+ parallel model endpoints (2N x 13 RPM, 200k TPM, 480 RPD)."""
 
     def __init__(self, keys: Sequence[str] = ()):
         self._lock = threading.RLock()
@@ -154,7 +154,7 @@ class GeminiAccountManager:
         self._max_rpm_per_key = getattr(settings, "gemini_max_rpm_per_key", 13)
         self._max_tpm_per_key = getattr(settings, "gemini_max_tpm_per_key", 200_000)
         self._max_prompt_tokens = getattr(settings, "gemini_max_prompt_tokens", 60_000)
-        self._max_accounts = getattr(settings, "gemini_max_accounts", 6)
+        self._max_accounts = getattr(settings, "gemini_max_accounts", 8)
 
         self._accounts: list[GeminiAccount] = []
         self._active_index: int = 0
@@ -439,9 +439,12 @@ class GeminiAccountManager:
             return endpoints
 
     def acquire_parallel_slot(
-        self, batch_item_index: int | None = None, requested_model: str | None = None
+        self,
+        batch_item_index: int | None = None,
+        requested_model: str | None = None,
+        exclude_slot_ids: set[str] | None = None,
     ) -> tuple[str, str, str] | None:
-        """Acquire a parallel endpoint slot (api_key, model_name, slot_id) honoring 52 RPM / 800k TPM / 1,920 RPD fleet math (480/endpoint buffer, 2,000 raw)."""
+        """Acquire a parallel endpoint slot (api_key, model_name, slot_id) honoring 13 RPM / 200k TPM / 480 RPD per model slot."""
         if requested_model is not None and requested_model not in PARALLEL_MODELS:
             raise ValueError(f"Forbidden model tier: {requested_model}. Allowed models: {PARALLEL_MODELS}")
 
@@ -456,6 +459,10 @@ class GeminiAccountManager:
             slots_list = sorted(self._parallel_slots.values(), key=lambda s: s["slot_index"])
             if requested_model is not None:
                 slots_list = [s for s in slots_list if s["model"] == requested_model]
+            if exclude_slot_ids:
+                non_excluded = [s for s in slots_list if s["slot_id"] not in exclude_slot_ids]
+                if non_excluded:
+                    slots_list = non_excluded
             n_slots = len(slots_list)
             if n_slots == 0:
                 return None

@@ -70,7 +70,7 @@ class Settings:
     gemini_max_rpm_per_key: int = 13
     gemini_max_tpm_per_key: int = 200_000
     gemini_max_prompt_tokens: int = 60_000
-    gemini_max_accounts: int = 6
+    gemini_max_accounts: int = 8
 
     @property
     def max_upload_bytes(self) -> int:
@@ -328,7 +328,7 @@ def get_settings() -> Settings:
         gemini_max_rpm_per_key=_bounded_int("GEMINI_MAX_RPM_PER_KEY", 13, 1, 13),
         gemini_max_tpm_per_key=_bounded_int("GEMINI_MAX_TPM_PER_KEY", 200_000, 1000, 200_000),
         gemini_max_prompt_tokens=_bounded_int("GEMINI_MAX_PROMPT_TOKENS", 60_000, 1000, 1_000_000),
-        gemini_max_accounts=_bounded_int("GEMINI_MAX_ACCOUNTS", 6, 1, 20),
+        gemini_max_accounts=_bounded_int("GEMINI_MAX_ACCOUNTS", 8, 1, 20),
     )
 
 

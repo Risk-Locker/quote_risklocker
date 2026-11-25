@@ -7,7 +7,7 @@ import re
 from datetime import date, datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from app.api.deps import current_user, settings_dep
 from app.auth.rbac import require_role
 from app.core.config import Settings
 from app.db.session import get_db
-from app.services.realtime_hub import publish_realtime_update
+from app.services.realtime_hub import build_tenure_sync_targets, publish_realtime_update
 from app.models.enums import Role
 from app.models.tables import DraftBenefitSelection, InsuranceCompany, InsuranceTenure, Session as SessionModel, TenureComparisonEntry, UploadedFile, User, new_id
 from app.services.marketing_comparison_service import (
@@ -183,7 +183,7 @@ def get_comparison(
 ) -> dict[str, Any]:
     """Retrieve full marketing comparison matrix for an insurance tenure."""
     try:
-        return get_marketing_comparison(db, tenure_id)
+        return get_marketing_comparison(db, tenure_id, allow_commit=False)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -231,6 +231,7 @@ def refresh_ledger(
 def update_fixed_costs(
     tenure_id: str,
     payload: FixedCostsUpdateRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -262,7 +263,15 @@ def update_fixed_costs(
             quotation_discount=payload.quotation_discount,
             motor_discount_pct=payload.motor_discount_pct,
         )
-        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Fixed costs updated", extra_scopes=("ledger",))
+        publish_realtime_update(
+            scope="comparison",
+            resource_id=tenure_id,
+            actor=user,
+            summary="Fixed costs updated",
+            extra_scopes=("ledger",),
+            targets=build_tenure_sync_targets(db, tenure_id),
+            origin_tab_id=x_client_tab_id,
+        )
         return res
 
     except ValueError as e:
@@ -276,6 +285,7 @@ def update_fixed_costs(
 def toggle_tenure_fees(
     tenure_id: str,
     payload: ToggleFeesRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -302,7 +312,15 @@ def toggle_tenure_fees(
             include_runner_fee=inc_rf,
             motor_discount_pct=payload.motor_discount_pct,
         )
-        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Fees toggled", extra_scopes=("ledger",))
+        publish_realtime_update(
+            scope="comparison",
+            resource_id=tenure_id,
+            actor=user,
+            summary="Fees toggled",
+            extra_scopes=("ledger",),
+            targets=build_tenure_sync_targets(db, tenure_id),
+            origin_tab_id=x_client_tab_id,
+        )
         return res
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -315,6 +333,7 @@ def toggle_tenure_fees(
 def upsert_entry(
     tenure_id: str,
     payload: ComparisonEntryUpsertRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -322,7 +341,15 @@ def upsert_entry(
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         res = save_comparison_entry(db, tenure_id, payload.model_dump())
-        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Comparison entry saved", extra_scopes=("ledger",))
+        publish_realtime_update(
+            scope="comparison",
+            resource_id=tenure_id,
+            actor=user,
+            summary="Comparison entry saved",
+            extra_scopes=("ledger",),
+            targets=build_tenure_sync_targets(db, tenure_id),
+            origin_tab_id=x_client_tab_id,
+        )
         return res
     except ValueError as e:
         err_msg = str(e)
@@ -339,6 +366,7 @@ def delete_entry(
     tenure_id: str,
     entry_id: str,
     all_versions: bool = Query(default=False, description="Delete all versions of this underwriter"),
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -346,7 +374,15 @@ def delete_entry(
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         res = delete_comparison_entry(db, tenure_id, entry_id, delete_all_versions=all_versions)
-        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Comparison entry deleted", extra_scopes=("ledger",))
+        publish_realtime_update(
+            scope="comparison",
+            resource_id=tenure_id,
+            actor=user,
+            summary="Comparison entry deleted",
+            extra_scopes=("ledger",),
+            targets=build_tenure_sync_targets(db, tenure_id),
+            origin_tab_id=x_client_tab_id,
+        )
         return res
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -359,13 +395,24 @@ def delete_entry(
 def reset_entry(
     tenure_id: str,
     entry_id: str,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Reset a manual override back to original AI detected values for a specific entry."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
-        return reset_comparison_entry_to_detected(db, tenure_id, entry_id)
+        res = reset_comparison_entry_to_detected(db, tenure_id, entry_id)
+        publish_realtime_update(
+            scope="comparison",
+            resource_id=tenure_id,
+            actor=user,
+            summary="Comparison entry reset",
+            extra_scopes=("ledger",),
+            targets=build_tenure_sync_targets(db, tenure_id),
+            origin_tab_id=x_client_tab_id,
+        )
+        return res
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -377,6 +424,7 @@ def reset_entry(
 def choose_winner(
     tenure_id: str,
     payload: SelectWinnerRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -390,7 +438,15 @@ def choose_winner(
             user.id,
             force_state=payload.force_state,
         )
-        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Winner updated", extra_scopes=("ledger", "sessions"))
+        publish_realtime_update(
+            scope="comparison",
+            resource_id=tenure_id,
+            actor=user,
+            summary="Winner updated",
+            extra_scopes=("ledger", "sessions"),
+            targets=build_tenure_sync_targets(db, tenure_id),
+            origin_tab_id=x_client_tab_id,
+        )
         return res
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -775,6 +831,7 @@ def patch_comparison_entry(
     tenure_id: str,
     entry_id: str,
     payload: UpdateComparisonEntryPatch,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1310,7 +1367,15 @@ def patch_comparison_entry(
         auto_recommend_rank1=False,
     )
     db.commit()
-    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Comparison entry updated", extra_scopes=("ledger",))
+    publish_realtime_update(
+        scope="comparison",
+        resource_id=tenure_id,
+        actor=user,
+        summary="Comparison entry updated",
+        extra_scopes=("ledger",),
+        targets=build_tenure_sync_targets(db, tenure_id),
+        origin_tab_id=x_client_tab_id,
+    )
     return {
         "status": "success",
         "entry_id": entry_id,
@@ -1347,6 +1412,7 @@ def patch_comparison_entry(
 @router.post("/{tenure_id}/rerank")
 def rerank_deal_entries(
     tenure_id: str,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1357,7 +1423,15 @@ def rerank_deal_entries(
     entries = list(db.scalars(select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure_id)).all())
     ranked = evaluate_logical_value_rerank(entries)
     db.commit()
-    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Comparison entry updated", extra_scopes=("ledger",))
+    publish_realtime_update(
+        scope="comparison",
+        resource_id=tenure_id,
+        actor=user,
+        summary="Comparison entry updated",
+        extra_scopes=("ledger",),
+        targets=build_tenure_sync_targets(db, tenure_id),
+        origin_tab_id=x_client_tab_id,
+    )
     return {
         "status": "success",
         "ranked_count": len(ranked),
@@ -1431,6 +1505,7 @@ def convert_session_document_type(
     tenure_id: str,
     session_id: str,
     payload: ConvertDocumentTypeRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1508,13 +1583,22 @@ def convert_session_document_type(
             pass
 
     db.commit()
-    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Document type converted", extra_scopes=("ledger", "sessions"))
+    publish_realtime_update(
+        scope="comparison",
+        resource_id=tenure_id,
+        actor=user,
+        summary="Document type converted",
+        extra_scopes=("ledger", "sessions"),
+        targets=build_tenure_sync_targets(db, tenure_id),
+        origin_tab_id=x_client_tab_id,
+    )
     return {"status": "success", "session_id": session_id, "document_type": target_type}
 
 
 @router.delete("/{tenure_id}/covernote")
 def unlink_tenure_covernote(
     tenure_id: str,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1551,7 +1635,15 @@ def unlink_tenure_covernote(
         pass
 
     db.commit()
-    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Cover note unlinked", extra_scopes=("ledger",))
+    publish_realtime_update(
+        scope="comparison",
+        resource_id=tenure_id,
+        actor=user,
+        summary="Cover note unlinked",
+        extra_scopes=("ledger",),
+        targets=build_tenure_sync_targets(db, tenure_id),
+        origin_tab_id=x_client_tab_id,
+    )
     return {"status": "success", "tenure_id": tenure_id, "message": "Cover note unlinked successfully"}
 
 
@@ -1563,6 +1655,7 @@ class LinkCovernoteRequest(BaseModel):
 def link_tenure_covernote(
     tenure_id: str,
     payload: LinkCovernoteRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1588,7 +1681,15 @@ def link_tenure_covernote(
         pass
 
     db.commit()
-    publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Cover note linked", extra_scopes=("ledger",))
+    publish_realtime_update(
+        scope="comparison",
+        resource_id=tenure_id,
+        actor=user,
+        summary="Cover note linked",
+        extra_scopes=("ledger",),
+        targets=build_tenure_sync_targets(db, tenure_id),
+        origin_tab_id=x_client_tab_id,
+    )
     return {"status": "success", "tenure_id": tenure_id, "session_id": sess.id, "message": "Policy linked successfully"}
 
 
@@ -1625,6 +1726,7 @@ class CovernotePatchRequest(BaseModel):
 def patch_tenure_covernote(
     tenure_id: str,
     payload: CovernotePatchRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1661,7 +1763,15 @@ def patch_tenure_covernote(
             data,
             user_id=user.id if getattr(user, "id", None) else None,
         )
-        publish_realtime_update(scope="comparison", resource_id=tenure_id, actor=user, summary="Cover note updated", extra_scopes=("ledger",))
+        publish_realtime_update(
+            scope="comparison",
+            resource_id=tenure_id,
+            actor=user,
+            summary="Cover note updated",
+            extra_scopes=("ledger",),
+            targets=build_tenure_sync_targets(db, tenure_id),
+            origin_tab_id=x_client_tab_id,
+        )
         return res
     except ValueError as exc:
         msg = str(exc)

@@ -220,13 +220,30 @@ def sync_and_update_covernote(
     eff_rt = _q2(tenure.road_tax) if (tenure.include_road_tax is not False) else _ZERO
     eff_rf = _q2(tenure.runner_fee) if (tenure.include_runner_fee is not False) else _ZERO
 
-    # 3d. Bidirectional Total Payable <-> Motor Premium sync
+    # 3d. Bidirectional Total Payable <-> Motor Premium sync (single-discount invariant)
+    from app.domain.motor.discount_calculator import calculate_motor_discount
+    from app.domain.quote_sync_engine import resolve_canonical_motor_premium_decimal
+
+    pct_dec = _q2(getattr(tenure, "motor_discount_pct", _ZERO) or _ZERO)
+    flat_dec = _q2(getattr(tenure, "quotation_discount", _ZERO) or _ZERO)
     sync_payload = dict(payload)
     if sync_payload.get("total_payable") is not None:
         tot_dec = _q2(sync_payload["total_payable"])
         tenure.won_premium = float(tot_dec)
         if sync_payload.get("motor_premium") is None:
-            sync_payload["motor_premium"] = float(max(_ZERO, (tot_dec - eff_rt - eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP)))
+            net_motor = max(_ZERO, (tot_dec - eff_rt - eff_rf).quantize(_CENT, rounding=ROUND_HALF_UP))
+            cur_mp = (
+                resolve_canonical_motor_premium_decimal(cn_session.draft.fields)
+                if (cn_session and cn_session.draft and isinstance(cn_session.draft.fields, dict))
+                else _ZERO
+            )
+            if cur_mp > _ZERO and calculate_motor_discount(cur_mp, pct_dec, flat_dec).net_total_payable(eff_rt, eff_rf) == tot_dec:
+                gross_mp = cur_mp
+            elif pct_dec > _ZERO and pct_dec < _HUNDRED:
+                gross_mp = ((net_motor + flat_dec) / (Decimal("1") - (pct_dec / _HUNDRED))).quantize(_CENT, rounding=ROUND_HALF_UP)
+            else:
+                gross_mp = (net_motor + flat_dec).quantize(_CENT, rounding=ROUND_HALF_UP)
+            sync_payload["motor_premium"] = float(gross_mp)
 
     # Normalize Betterment mode ('auto' | 'waived' | 'copay') & explicit betterment_rate
     b_mode = str(sync_payload.get("betterment_mode") or "").strip().lower()
@@ -464,4 +481,4 @@ def sync_and_update_covernote(
                 ce.rate_percentage = ((mp_dec / si_dec) * _HUNDRED).quantize(_RATE_QUANT, rounding=ROUND_HALF_UP)
 
     db.commit()
-    return get_marketing_comparison(db, tenure_id)
+    return get_marketing_comparison(db, tenure_id, allow_commit=True)

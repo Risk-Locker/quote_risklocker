@@ -279,13 +279,15 @@ def run_deep_redetect_pipeline(
     on_progress: Callable[[str, str, str, int, dict[str, Any] | None], None] | None = None,
     cancel_event: threading.Event | None = None,
     batch_item_index: int = 0,
+    is_covernote: bool = False,
 ) -> DeepRedetectResult:
-    """Execute 4-pass self-verifying deep re-detection with cooperative cancellation."""
+    """Delegate deep re-detection to the unified Multi-Zoom Gemini Vision + Accounting Proof pipeline."""
+    from app.extraction.multi_zoom_pipeline import PipelineCancelledError, run_multi_zoom_vision_pipeline
+
     ctx = db_context or {}
     cur_map = current_fields or {}
     _check_cancel(cancel_event)
 
-    # Pass 1: Native extraction + Page 1 top-left logo crop
     _emit(
         on_progress,
         "native_and_logo_crop",
@@ -295,151 +297,44 @@ def run_deep_redetect_pipeline(
         None,
     )
     pass1 = _run_pass1_native_and_logo_crop(pdf_bytes, source_filename, ctx)
-    _check_cancel(cancel_event)
 
-    pool = gemini_extractor.get_key_pool()
-    if not pool.get_all_keys():
-        raise AppError("No GEMINI_API_KEY configured. Please check your environment.", 400)
+    # Emit subsequent steps only (native_and_logo_crop already emitted above so test assertions see exact 5-step trace)
+    def _forward_progress(
+        step_key: str,
+        step_label: str,
+        why_waiting: str,
+        pct: int,
+        detail: dict[str, Any] | None,
+    ) -> None:
+        if step_key == "native_and_logo_crop":
+            return
+        _emit(on_progress, step_key, step_label, why_waiting, pct, detail)
 
-    # Pass 2: Brand & Logo Visual Identification
-    brand_verdict: dict[str, Any] | None = None
-    passes_used = 1
-    is_mmip = _check_mmip_override(pass1, source_filename)
-    if is_mmip:
-        brand_verdict = {
-            "insurance_company": "MMIP",
-            "canonical_company": "MMIP",
-            "confidence": 1.0,
-            "reasoning": "MMIP pool indicator present in document.",
-        }
-    elif pass1.get("spatial_brand") and float(pass1["spatial_brand"].get("confidence") or 0.0) >= 0.99:
-        brand_verdict = pass1["spatial_brand"]
-        _emit(
-            on_progress,
-            "brand_logo_vision",
-            "Pass 2/4 · Verified insurer footer website",
-            str(brand_verdict.get("reasoning") or "Matched authoritative Page 1 footer website domain."),
-            35,
-            {"brand_verdict": brand_verdict.get("canonical_company"), "domain": brand_verdict.get("domain")},
-        )
-    elif _should_verify_brand_visually(pass1, cur_map, source_filename):
-        _emit(
-            on_progress,
-            "brand_logo_vision",
-            "Pass 2/4 · Scanning insurer logo & colors",
-            "Inspecting Page 1 logo shape, brand color (Liberty dark blue vs Kurnia sky-blue vs AmAssurance red), and primary domain.",
-            35,
-            pass1["logo_color_meta"],
-        )
-        brand_verdict = verify_brand_logo_with_vision(
-            pdf_bytes,
-            page1_text=pass1["page1_text"],
+    try:
+        mv_res = run_multi_zoom_vision_pipeline(
+            pdf_bytes=pdf_bytes,
             source_filename=source_filename,
-            db_companies=ctx.get("db_companies") or [],
-            logo_crop_png=pass1["logo_crop_png"],
-            color_meta=pass1["logo_color_meta"],
-            timeout_seconds=18.0,
-        )
-        passes_used += 1
-    _check_cancel(cancel_event)
-
-    # Pass 3: Fresh Full-Document Multimodal AI Extraction
-    _emit(
-        on_progress,
-        "fresh_multimodal_extraction",
-        "Pass 3/4 · Full multimodal AI extraction",
-        "Extracting all policy, vehicle, pricing, and optional benefit rows against live database catalogs.",
-        60,
-        {"brand_verdict": (brand_verdict or {}).get("canonical_company")},
-    )
-    brand_hint_text = ""
-    if brand_verdict and brand_verdict.get("canonical_company") and float(brand_verdict.get("confidence") or 0.0) >= 0.85:
-        brand_hint_text = (
-            f"VERIFIED VISUAL BRAND HINT: Page 1 logo scan identified insurer as "
-            f"'{brand_verdict['canonical_company']}' ({brand_verdict.get('reasoning', '')})."
-        )
-    gemini_res = gemini_extractor.extract_with_gemini_sync(
-        pass1.get("operative_pdf_bytes") or pdf_bytes,
-        document_text=pass1["raw_text"] or None,
-        source_filename=source_filename,
-        db_companies=ctx.get("db_companies") or [],
-        db_benefit_concepts=ctx.get("db_benefit_concepts") or [],
-        db_aliases=ctx.get("db_aliases"),
-        db_packs=ctx.get("db_packs") or [],
-        correction_memory=ctx.get("db_corrections") or [],
-        prompt_override=prompt_override,
-        logo_crop_png=pass1["logo_crop_png"],
-        extra_prompt_guidance=brand_hint_text or None,
-        batch_item_index=batch_item_index,
-        timeout_seconds=25.0,
-    )
-    passes_used += 1
-    if not gemini_res:
-        err = pool.get_last_error_message() or "AI extraction failed or returned an empty result."
-        raise AppError(f"Gemini AI extraction failed: {err}", 502)
-    _check_cancel(cancel_event)
-
-    # Pass 4: Self-Audit, Cross-Verification & Math Check
-    _emit(
-        on_progress,
-        "cross_verify_and_audit",
-        "Pass 4/4 · Auditing conflicts & math",
-        "Cross-checking previous detection, native PDF tables, and fresh AI output plus optional-cover math.",
-        82,
-        None,
-    )
-    conflicts, math_issues = _audit_conflicts_and_math(cur_map, pass1["native_fields"], gemini_res, brand_verdict)
-    if conflicts or math_issues:
-        _emit(
-            on_progress,
-            "cross_verify_and_audit",
-            "Pass 4/4 · Re-verifying disputed fields",
-            f"Found {len(conflicts) + len(math_issues)} discrepancy/audit check(s); running targeted verification pass against PDF.",
-            88,
-            {"conflicts": conflicts[:4], "math_issues": math_issues[:3]},
-        )
-        reconcile_guidance = _build_reconciliation_guidance(
-            cur_map,
-            pass1["native_fields"],
-            gemini_res,
-            conflicts,
-            math_issues,
-            brand_verdict,
-        )
-        verified_res = gemini_extractor.extract_with_gemini_sync(
-            pass1.get("operative_pdf_bytes") or pdf_bytes,
-            document_text=pass1["raw_text"] or None,
-            source_filename=source_filename,
-            db_companies=ctx.get("db_companies") or [],
-            db_benefit_concepts=ctx.get("db_benefit_concepts") or [],
-            db_aliases=ctx.get("db_aliases"),
-            db_packs=ctx.get("db_packs") or [],
-            correction_memory=ctx.get("db_corrections") or [],
+            current_fields=cur_map,
+            db_context=ctx,
             prompt_override=prompt_override,
-            logo_crop_png=pass1["logo_crop_png"],
-            extra_prompt_guidance=reconcile_guidance,
-            batch_item_index=(batch_item_index + 1) % 100,
-            timeout_seconds=25.0,
+            on_progress=_forward_progress,
+            cancel_event=cancel_event,
+            batch_item_index=batch_item_index,
+            pass1_precomputed=pass1,
+            brand_verifier=verify_brand_logo_with_vision,
+            enable_dual_model_consensus=True,
+            is_covernote=is_covernote,
         )
-        gemini_res = _merge_reconciled_result(gemini_res, verified_res)
-        passes_used += 1
+    except PipelineCancelledError as exc:
+        raise RedetectCancelledError(str(exc)) from exc
 
-    # Authoritative brand verdict overrides noisy AI brand drift when confident
-    if is_mmip:
-        gemini_res["insurance_company"] = "MMIP"
-    elif brand_verdict and brand_verdict.get("canonical_company") and float(brand_verdict.get("confidence") or 0.0) >= 0.85:
-        gemini_res["insurance_company"] = brand_verdict["canonical_company"]
-    elif pass1["p1_signals"].get("winning_brand") and not gemini_res.get("insurance_company"):
-        gemini_res["insurance_company"] = pass1["p1_signals"]["winning_brand"]
-
-    _check_cancel(cancel_event)
     return DeepRedetectResult(
-        gemini_res=gemini_res,
-        native_raw_text=pass1["raw_text"],
-        native_fields=pass1["native_fields"],
-        brand_verdict=brand_verdict,
-        audit_conflicts=conflicts,
-        math_issues=math_issues,
-        passes_used=passes_used,
-        logo_color_meta=pass1["logo_color_meta"],
+        gemini_res=mv_res.gemini_res,
+        native_raw_text=mv_res.native_raw_text,
+        native_fields=mv_res.native_fields,
+        brand_verdict=mv_res.brand_verdict,
+        audit_conflicts=mv_res.audit_conflicts,
+        math_issues=mv_res.math_issues,
+        passes_used=mv_res.passes_used,
+        logo_color_meta=mv_res.logo_color_meta,
     )

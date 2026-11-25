@@ -241,3 +241,140 @@ def test_zero_fake_coverage_gate_for_optional_covers_and_detected_sync():
         assert by_label["Windscreen Damage (Tempered/Laminated Glass Inclusive Labour Cost) RM 15,000.00"]["coverage_limit"] == "15,000.00"
         assert by_label["Windscreen Damage (Tempered/Laminated Glass Inclusive Labour Cost) RM 15,000.00"]["premium_cost"] == "2250.00"
 
+
+def test_phase1_model_lock_8slot_pool_and_accounting_proof_gate():
+    """Verify strict 2-model Flash-Lite lock, 8-slot pool exclusion, closed-loop Decimal gate, and no-subtraction parity."""
+    from decimal import Decimal
+    from types import SimpleNamespace
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.core.config import get_settings
+    from app.extraction.accounting_proof_gate import verify_quotation_accounting
+    from app.extraction.canonical_draft_builder import apply_verified_motor_pricing
+    from app.extraction.model_discovery_service import ALLOWED_PRODUCTION_MODELS, evaluate_model_eligibility
+    from app.models.enums import AccountStatus, RecordStatus
+    from app.models.tables import (
+        Base,
+        Batch,
+        ExtractionRecord,
+        QuotationDraft,
+        Session as QuotationSession,
+        UploadedFile,
+        User,
+        new_id,
+    )
+    from app.services.gemini_account_service import GeminiAccountManager
+    from app.services.session_rescan_service import apply_gemini_result
+
+    # 1. Strict 2-model lock + 8-slot pool default & exclusion
+    assert ALLOWED_PRODUCTION_MODELS == frozenset({"gemini-3.1-flash-lite", "gemini-3.5-flash-lite"})
+    ok_31, _, _ = evaluate_model_eligibility({"name": "models/gemini-3.1-flash-lite", "supportedGenerationMethods": ["generateContent"]})
+    ok_35, _, _ = evaluate_model_eligibility({"name": "models/gemini-3.5-flash-lite", "supportedGenerationMethods": ["generateContent"]})
+    assert ok_31 is True and ok_35 is True
+    for bad_id in ("gemini-3.8-flash", "-".join(["gemini", "2.0", "flash"]), "-".join(["gemini", "1.5", "pro"])):
+        bad_ok, _, _ = evaluate_model_eligibility({"name": f"models/{bad_id}", "supportedGenerationMethods": ["generateContent"]})
+        assert bad_ok is False, f"{bad_id} must be rejected"
+
+    mgr = GeminiAccountManager(tuple(f"AIzaSyTestKey0000000000000000000000{i}" for i in range(8)))
+    assert mgr._max_accounts == 8
+    assert len(mgr.get_accounts()) == 8
+    slot1 = mgr.acquire_parallel_slot(requested_model="gemini-3.1-flash-lite")
+    assert slot1 is not None
+    _, _, slot1_id = slot1
+    slot2 = mgr.acquire_parallel_slot(requested_model="gemini-3.5-flash-lite", exclude_slot_ids={slot1_id})
+    assert slot2 is not None and slot2[2] != slot1_id
+
+    # 2. Closed-loop Decimal accounting proof gate (AmAssurance 8,942.45 + RM 400 Clause 2(f) trap rejection)
+    am_payload = {
+        "insurance_company": "AmAssurance",
+        "coverage_type": "Comprehensive",
+        "sum_insured": "250000.00",
+        "basic_premium": "9999.00",
+        "ncd_amount": "2499.75",
+        "gross_premium": "8428.05",
+        "service_tax": "504.40",
+        "stamp_duty": "10.00",
+        "total_amount": "8942.45",
+        "total_optional_cover_amount": "928.80",
+        "detected_benefits": [
+            {"label": "Special Perils", "value": "Included", "premium_cost": "741.80", "is_optional_cover": True},
+            {"label": "Legal Liability to Passengers", "value": "Included", "premium_cost": "49.50", "is_optional_cover": True},
+            {"label": "Legal Liability of Passengers", "value": "Included", "premium_cost": "7.50", "is_optional_cover": True},
+            {"label": "Private Car 365 Plan 2", "value": "Plan 2", "premium_cost": "130.00", "is_optional_cover": True},
+        ],
+    }
+    verdict = verify_quotation_accounting(am_payload)
+    assert verdict.passed is True
+    assert verdict.quarantine_reason is None
+    assert verdict.authoritative_motor_premium == Decimal("8942.45")
+
+    trap_payload = {
+        "insurance_company": "Zurich",
+        "coverage_type": "Comprehensive",
+        "basic_premium": "1500.00",
+        "ncd_amount": "0.00",
+        "gross_premium": "1500.00",
+        "service_tax": "120.00",
+        "stamp_duty": "10.00",
+        "total_amount": "400.00",
+        "detected_benefits": [],
+    }
+    trap_verdict = verify_quotation_accounting(trap_payload)
+    assert trap_verdict.passed is False
+    assert trap_verdict.quarantine_reason is not None
+
+    # 3. Upload & Re-Detect canonical pricing parity (zero extras_cost subtraction!)
+    fields_direct: dict = {}
+    apply_verified_motor_pricing(fields_direct, am_payload, accounting_verdict=verdict)
+    assert fields_direct["premium"]["value"] == "8942.45"
+    assert fields_direct["motor_premium"]["value"] == "8942.45"
+    assert fields_direct["total_payable"]["value"] == "8942.45"
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with SessionLocal() as db:
+        u_id, b_id, uf_id, d_id, s_id, er_id = new_id(), new_id(), new_id(), new_id(), new_id(), new_id()
+        db.add(User(id=u_id, email="proof@rl.test", password_hash="x", status=AccountStatus.ACTIVE.value))
+        db.add(Batch(id=b_id, owner_id=u_id, name="Proof", status=RecordStatus.READY.value))
+        uf = UploadedFile(
+            id=uf_id, batch_id=b_id, owner_id=u_id, original_filename="vqe8.pdf",
+            content_type="application/pdf", storage_path="/tmp/vqe8.pdf",
+            storage_provider="local_ephemeral", size_bytes=1234, status=RecordStatus.READY.value, is_test=True,
+        )
+        draft = QuotationDraft(
+            id=d_id, revision=1, uploaded_file_id=uf_id, owner_id=u_id,
+            status=RecordStatus.READY.value, fields={}, scalar_decisions={}, display_options={}, warnings=[],
+        )
+        sess = QuotationSession(
+            id=s_id, owner_id=u_id, uploaded_file_id=uf_id, draft_id=d_id,
+            quotation_ref="TEST-PROOF", status="active", is_test=True,
+        )
+        rec = ExtractionRecord(
+            id=er_id, uploaded_file_id=uf_id, method_summary=["gemini_vision"], raw_text="AmAssurance",
+            ocr_text="", page_text=[], words=[], blocks=[], tables=[], images=[], regions=[],
+            candidates={}, benefit_lines=[], company_resolution={}, warnings=[], reading_quality="ready",
+        )
+        db.add_all([uf, draft, sess, rec])
+        db.flush()
+        apply_gemini_result(
+            db=db,
+            settings=SimpleNamespace(),
+            draft=draft,
+            session=sess,
+            uploaded=uf,
+            extraction=rec,
+            gemini_res=am_payload,
+            quotation_ref="TEST-PROOF",
+            db_companies=[],
+            db_benefit_concepts=[],
+            raw_text="AmAssurance",
+        )
+        db.flush()
+        assert draft.fields["premium"]["value"] == "8942.45"
+        assert draft.fields["motor_premium"]["value"] == "8942.45"
+        assert draft.fields["total_payable"]["value"] == "8942.45"
+
+

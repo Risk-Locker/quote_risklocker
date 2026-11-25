@@ -594,3 +594,152 @@ def test_towing_evaluator_honors_db_company_policy_rules_and_covernote_reg_date(
     assert res_auto.status_code == 200
     assert res_auto.json()["covernote_policy"]["waiver_betterment"] is True
     assert res_auto.json()["covernote_policy"]["betterment_rate"] == 0.0
+
+
+def test_v32_two_way_bundle_betterment_readonly_get_and_covernote_single_discount(db: Session):
+    """Verify 2-way Comparison <-> Workspace Box 2 bundle & catalog betterment sync, read-only GET, and single discount."""
+    from app.api.routers.sessions import draft_workspace_patch
+    from app.api.schemas import WorkspacePatchRequest
+    from app.models.tables import (
+        BenefitProfile,
+        CatalogOffering,
+        CompanyBenefitBundle,
+        CompanyBenefitBundleEffect,
+        CompanyBenefitBundleTier,
+    )
+
+    staff = User(id=new_id(), email="staff-v32@rl.test", password_hash="x", role="staff", status="active")
+    stmb = InsuranceCompany(
+        id=new_id(),
+        name="Syarikat Takaful Malaysia Am Berhad",
+        slug="takaful-malaysia",
+        policy_rules={
+            "towing": {"metric": "km", "base_limit": "50 km", "upgrade_triggers": ["motor pa plus"], "plan_limits": {"plan 4": "Unlimited"}},
+            "betterment": {"max_waiver_years": 15, "default_display": "Up to 15 Years", "auto_waive_without_peril": False},
+        },
+    )
+    prod = InsuranceProduct(id=new_id(), company_id=stmb.id, product_key="stmb-car", name="Private Car")
+    cat = BenefitCatalog(id=new_id(), company_id=stmb.id, product_id=prod.id, name="STMB Catalog")
+    rev = BenefitCatalogRevision(id=new_id(), catalog_id=cat.id, revision_number=1, state="published", content_hash="h1")
+    prof = BenefitProfile(id=new_id(), name="Default Profile", is_active=True, status="active")
+
+    c_mpa = BenefitConcept(id=new_id(), concept_key="motor-pa-plus", label="Motor PA Plus", description="PA + Towing")
+    c_tow = BenefitConcept(id=new_id(), concept_key="towing", label="Emergency Towing Assistance", description="Towing")
+    c_bet = BenefitConcept(id=new_id(), concept_key="waiver-of-betterment", label="Waiver of Betterment", description="Waives betterment")
+
+    off_mpa = CatalogOffering(
+        id=new_id(), catalog_revision_id=rev.id, concept_id=c_mpa.id,
+        offering_key="motor-pa-plus", offering_kind="benefit", sort_order=10,
+    )
+    off_bet = CatalogOffering(
+        id=new_id(), catalog_revision_id=rev.id, concept_id=c_bet.id,
+        offering_key="waiver-of-betterment", offering_kind="benefit", sort_order=20,
+    )
+
+    bundle = CompanyBenefitBundle(
+        id=new_id(), company_id=stmb.id, profile_id=prof.id, bundle_key="stmb-motor-pa-plus",
+        name="Motor PA Plus", primary_concept_id=c_mpa.id, trigger_concept_ids=[c_mpa.id],
+        has_plan_tiers=True, is_active=True,
+    )
+    tier4 = CompanyBenefitBundleTier(
+        id=new_id(), bundle_id=bundle.id, tier_key="plan_4", label="Plan 4",
+        match_tokens=["plan 4", "p4"], sort_order=4, is_default_fallback=False,
+    )
+    eff4 = CompanyBenefitBundleEffect(
+        id=new_id(), tier_id=tier4.id, target_concept_id=c_tow.id, effect_type="upgrade_to_box2",
+        display_title="Unlimited Emergency Towing", comparison_value="Unlimited", sort_order=1,
+    )
+
+    veh = TrackedVehicle(id=new_id(), vehicle_no="VQE8", car_brand="Honda", car_model="Civic", manufacture_year=2020)
+    tenure = InsuranceTenure(
+        id=new_id(), tracked_vehicle_id=veh.id, vehicle_no="VQE8", customer_name="Ali",
+        coverage_start_date=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 3, 31, tzinfo=timezone.utc),
+        expiry_month="2027-03", motor_discount_pct=5.0, road_tax=20.0, runner_fee=0.0,
+        include_road_tax=True, include_runner_fee=False,
+    )
+    draft = QuotationDraft(
+        id=new_id(), uploaded_file_id=new_id(), owner_id=staff.id, company_id=stmb.id,
+        catalog_revision_id=rev.id, revision=1, status="ready",
+        fields={"premium": {"value": "1000.00", "status": "ready"}, "motor_premium": {"value": "1000.00", "status": "ready"}, "sum_insured": {"value": "80000.00", "status": "ready"}},
+        display_options={}, scalar_decisions={},
+    )
+    sess = SessionModel(
+        id=new_id(), owner_id=staff.id, uploaded_file_id=draft.uploaded_file_id,
+        draft_id=draft.id, tenure_id=tenure.id, detected_company=stmb.name, status="active", is_tenure_active=True,
+    )
+    entry = TenureComparisonEntry(
+        id=new_id(), tenure_id=tenure.id, session_id=sess.id, company_id=stmb.id, company_name=stmb.name,
+        sum_insured=80000.0, motor_premium=1000.0, total_payable=1020.0, towing_limit="50 km", towing_km="50 km",
+        extra_addons={}, manual_overrides=[], review_flags={}, version=1,
+    )
+    db.add_all([staff, stmb, prod, cat, rev, prof, c_mpa, c_tow, c_bet, off_mpa, off_bet, bundle, tier4, eff4, veh, tenure, draft, sess, entry])
+    db.commit()
+
+    # 1. Read-only GET (service + HTTP route handler) must not dirty SQLAlchemy Session state
+    from app.api.routers.comparison import get_comparison
+
+    comp_data = get_marketing_comparison(db, tenure.id, allow_commit=False)
+    assert len(comp_data["entries"]) == 1
+    assert not db.new and not db.dirty and not db.deleted
+    http_comp_data = get_comparison(tenure_id=tenure.id, db=db, user=staff)
+    assert len(http_comp_data["entries"]) == 1
+    assert not db.new and not db.dirty and not db.deleted
+
+    # 2. Comparison -> Workspace Box 2 bundle sync ("Unlimited" towing activates Motor PA Plus Plan 4)
+    sync_session_draft_from_comparison(
+        db, tenure, sess.id,
+        edited_fields=["towing_limit"], field_values={"towing_limit": "Unlimited"}, user_id=staff.id,
+    )
+    db.commit()
+    mpa_sel = db.scalar(select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft.id, DraftBenefitSelection.concept_id == c_mpa.id))
+    assert mpa_sel is not None and mpa_sel.state == "current" and mpa_sel.bundle_tier_id == tier4.id
+
+    # 3. Workspace Box 2 -> Comparison sync (remove Motor PA Plus & add catalog Betterment with label_override=None)
+    db.refresh(draft)
+    bet_sel = DraftBenefitSelection(
+        id=new_id(), draft_id=draft.id, selection_key=f"catalog:{off_bet.offering_key}",
+        catalog_offering_id=off_bet.id, concept_id=c_bet.id, item_kind="catalog",
+        state="available_addon", cost_status="included", label_override=None, evidence_snapshot={},
+    )
+    db.add(bet_sel)
+    db.commit()
+
+    draft_workspace_patch(
+        draft_id=draft.id,
+        payload=WorkspacePatchRequest(
+            base_revision=draft.revision,
+            operations=[
+                {"op": "benefit_update", "selection_id": mpa_sel.id, "state": "removed"},
+                {"op": "benefit_update", "selection_id": bet_sel.id, "state": "current"},
+            ],
+        ),
+        db=db,
+        user=staff,
+    )
+    db.refresh(entry)
+    assert entry.towing_limit == "50 km"
+    assert entry.waiver_betterment is True
+    assert float(entry.betterment_rate) == 0.0
+
+    # 4. Cover Note single-discount parity (total_payable=970 -> net_motor=950 -> gross=1000 with 5% discount, NOT double-discounted!)
+    cn_draft = QuotationDraft(
+        id=new_id(), uploaded_file_id=new_id(), owner_id=staff.id, company_id=stmb.id,
+        fields={"premium": {"value": "1000.00", "status": "ready"}}, display_options={},
+    )
+    cn_sess = SessionModel(
+        id=new_id(), owner_id=staff.id, uploaded_file_id=cn_draft.uploaded_file_id, draft_id=cn_draft.id,
+        tenure_id=tenure.id, document_type="covernote", detected_company=stmb.name, status="active", is_tenure_active=True,
+    )
+    tenure.covernote_session_id = cn_sess.id
+    tenure.winning_company_id = stmb.id
+    db.add_all([cn_draft, cn_sess])
+    db.commit()
+
+    from app.services.marketing_comparison.covernote_sync import sync_and_update_covernote
+
+    cn_out = sync_and_update_covernote(db, tenure.id, {"total_payable": 970.0}, user_id=staff.id)
+    assert cn_out["covernote_policy"]["motor_premium"] == 1000.0
+    assert cn_out["covernote_policy"]["net_motor_premium"] == 950.0
+    assert cn_out["covernote_policy"]["net_total_payable"] == 970.0
+

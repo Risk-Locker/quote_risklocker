@@ -101,9 +101,20 @@ def create_app() -> FastAPI:
 
             worker_task = asyncio.create_task(_embedded_worker_pool())
 
+        pg_listener_stop = None
+        try:
+            from app.services.realtime_hub import realtime_hub
+            from app.services.realtime_pg_bridge import start_pg_realtime_listener
+
+            pg_listener_stop = start_pg_realtime_listener(realtime_hub)
+        except Exception:
+            pg_listener_stop = None
+
         try:
             yield
         finally:
+            if pg_listener_stop is not None:
+                pg_listener_stop.set()
             if worker_task:
                 worker_task.cancel()
                 try:
@@ -125,7 +136,7 @@ def create_app() -> FastAPI:
         allow_origins=list(settings.cors_origins),
         allow_credentials=True,
         allow_methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Idempotency-Key", "Range", "X-CSRF-Token"],
+        allow_headers=["Content-Type", "Idempotency-Key", "Range", "X-CSRF-Token", "X-Client-Tab-Id"],
     )
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(

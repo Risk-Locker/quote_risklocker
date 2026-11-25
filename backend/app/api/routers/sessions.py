@@ -17,7 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import AuthContext, current_auth, current_auth_optional, current_user, ensure_trusted_origin, settings_dep
-from app.services.realtime_hub import publish_realtime_update
+from app.services.realtime_hub import build_session_sync_targets, publish_realtime_update
 from app.api.schemas import (
     BenefitAliasSaveRequest,
     BenefitCatalogSaveRequest,
@@ -649,20 +649,27 @@ def sessions_purge_test_sandbox(
 
 
 @router.post("/sessions/bulk-delete")
-def sessions_bulk_delete(payload: BulkDeleteRequest, db: Session = Depends(get_db), settings: Settings = Depends(settings_dep), user: User = Depends(current_user)) -> dict:
+def sessions_bulk_delete(
+    payload: BulkDeleteRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
+    user: User = Depends(current_user),
+) -> dict:
     from app.services.trash_service import permanent_delete_session
     for sid in payload.item_ids:
         try:
             permanent_delete_session(db, user, sid, SupabaseStorage(settings))
         except Exception:
             pass # Skip if not found or already deleted
-    publish_realtime_update(scope="sessions", resource_id="all", actor=user, summary="Sessions deleted", extra_scopes=("comparison", "ledger"))
+    publish_realtime_update(scope="sessions", resource_id="all", actor=user, summary="Sessions deleted", extra_scopes=("comparison", "ledger"), origin_tab_id=x_client_tab_id)
     return {"deleted": True}
 
 
 @router.post("/sessions/bulk-status")
 def sessions_bulk_status(
     payload: BulkQuotationStatusRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
@@ -679,7 +686,7 @@ def sessions_bulk_status(
         coverage_start_date=payload.coverage_start_date,
         coverage_end_date=payload.coverage_end_date,
     )
-    publish_realtime_update(scope="sessions", resource_id="all", actor=user, summary="Session statuses updated", extra_scopes=("comparison", "ledger"))
+    publish_realtime_update(scope="sessions", resource_id="all", actor=user, summary="Session statuses updated", extra_scopes=("comparison", "ledger"), origin_tab_id=x_client_tab_id)
     return res
 
 
@@ -779,6 +786,7 @@ def session_detail(session_id: str, db: Session = Depends(get_db), user: User = 
 def update_session(
     session_id: str,
     payload: UpdateSessionRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
@@ -858,7 +866,15 @@ def update_session(
         session.detected_company = payload.detected_company
 
     db.commit()
-    publish_realtime_update(scope="sessions", resource_id=session_id, actor=user, summary="Session updated", extra_scopes=("comparison", "ledger"))
+    publish_realtime_update(
+        scope="sessions",
+        resource_id=session_id,
+        actor=user,
+        summary="Session updated",
+        extra_scopes=("comparison", "ledger"),
+        targets=build_session_sync_targets(session),
+        origin_tab_id=x_client_tab_id,
+    )
     return {"status": "success", "session": serialize_session(session), "document_type": session.document_type}
 
 
@@ -867,6 +883,7 @@ def update_session(
 @router.delete("/sessions/{session_id}")
 def session_delete(
     session_id: str,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
@@ -892,7 +909,15 @@ def session_delete(
 
     session.status = "trash"
     db.commit()
-    publish_realtime_update(scope="sessions", resource_id=session_id, actor=user, summary="Session deleted", extra_scopes=("comparison", "ledger"))
+    publish_realtime_update(
+        scope="sessions",
+        resource_id=session_id,
+        actor=user,
+        summary="Session deleted",
+        extra_scopes=("comparison", "ledger"),
+        targets=build_session_sync_targets(session),
+        origin_tab_id=x_client_tab_id,
+    )
     return {"deleted": True, "session_id": session_id}
 
 
@@ -1176,6 +1201,7 @@ def redetect_job_cancel(
 def session_rescan_endpoint(
     session_id: str,
     payload: SessionRescanRequest | None = None,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
@@ -1185,7 +1211,7 @@ def session_rescan_endpoint(
 
     mode = payload.mode if payload else "in_place"
     engine = payload.engine if payload else "auto"
-    return rescan_session(
+    res = rescan_session(
         db,
         session_id,
         user,
@@ -1193,6 +1219,21 @@ def session_rescan_endpoint(
         mode=mode,
         engine=engine,
     )
+    try:
+        from app.models.tables import Session as SessionModel
+
+        sess_rt = db.get(SessionModel, session_id)
+        publish_realtime_update(
+            scope="workspace",
+            resource_id=session_id,
+            actor=user,
+            summary="Quotation re-detected",
+            targets=build_session_sync_targets(sess_rt),
+            origin_tab_id=x_client_tab_id,
+        )
+    except Exception:
+        pass
+    return res
 
 
 
@@ -1200,9 +1241,12 @@ def session_rescan_endpoint(
 def draft_workspace_patch(
     draft_id: str,
     payload: WorkspacePatchRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
+    from app.models.tables import Session as SessionModel
+
     workspace = apply_workspace_patch(
         db,
         user,
@@ -1210,7 +1254,16 @@ def draft_workspace_patch(
         base_revision=payload.base_revision,
         operations=payload.operations,
     )
-    publish_realtime_update(scope="workspace", resource_id=draft_id, actor=user, summary="Workspace saved", extra_scopes=("sessions", "comparison"))
+    sess_rt = db.scalar(select(SessionModel).where(SessionModel.draft_id == draft_id)) if hasattr(db, "scalar") else None
+    publish_realtime_update(
+        scope="workspace",
+        resource_id=draft_id,
+        actor=user,
+        summary="Workspace saved",
+        extra_scopes=("sessions", "comparison"),
+        targets=build_session_sync_targets(sess_rt),
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {"workspace": workspace}
 
 

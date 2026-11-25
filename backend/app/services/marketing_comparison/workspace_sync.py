@@ -374,21 +374,20 @@ def sync_session_draft_from_comparison(
                 removed_applied_total += _deactivate_domain_selections(selections, concepts_by_id, "llp_llop", user_id)
 
         if "towing_limit" in edited_set or "towing_km" in edited_set:
+            from app.domain.quote_sync_engine import sync_towing_and_insurer_bundle_to_draft
+
             tow_raw = str(field_values.get("towing_limit") or field_values.get("towing_km") or "").strip()
-            if tow_raw and tow_raw.lower() not in {"no towing", "not included", "none", "-"}:
-                _activate_domain_selection(
-                    db,
-                    draft,
-                    selections,
-                    concepts_by_id,
-                    "towing",
-                    ("towing",),
-                    "Emergency Towing Assistance",
-                    {"type": "string", "display_text": tow_raw},
-                    user_id,
-                )
-            else:
-                removed_applied_total += _deactivate_domain_selections(selections, concepts_by_id, "towing", user_id)
+            removed_applied_total += sync_towing_and_insurer_bundle_to_draft(
+                db,
+                s_obj,
+                draft,
+                selections,
+                concepts_by_id,
+                tow_raw,
+                user_id,
+                activate_domain_fn=_activate_domain_selection,
+                deactivate_domain_fn=_deactivate_domain_selections,
+            )
 
         if "waiver_betterment" in edited_set:
             if bool(field_values.get("waiver_betterment")):
@@ -553,6 +552,7 @@ def sync_session_draft_from_comparison(
         disc_bd = calculate_motor_discount(mp_dec, pct_val, flat_val)
         _set_manual_field("motor_premium", f"{mp_dec:.2f}")
         _set_manual_field("premium", f"{mp_dec:.2f}")
+        _set_manual_field("total_payable", f"{mp_dec:.2f}")
         _set_manual_field("premium_due", f"{mp_dec:.2f}")
         _set_decision("premium", f"{mp_dec:.2f}")
         d_fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready"}
@@ -576,6 +576,7 @@ def sync_session_draft_from_comparison(
         disc_bd = calculate_motor_discount(new_prem, pct_val, flat_val)
         _set_manual_field("motor_premium", f"{new_prem:.2f}")
         _set_manual_field("premium", f"{new_prem:.2f}")
+        _set_manual_field("total_payable", f"{new_prem:.2f}")
         _set_manual_field("premium_due", f"{new_prem:.2f}")
         _set_decision("premium", f"{new_prem:.2f}")
         d_fields["motor_discount_pct"] = {"value": f"{disc_bd.motor_discount_pct:.2f}", "status": "ready"}

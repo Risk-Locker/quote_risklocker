@@ -6,13 +6,13 @@ import asyncio
 import json
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 PRESENCE_TTL_SECONDS = 20.0
-SUBSCRIBER_QUEUE_MAXSIZE = 100
+SUBSCRIBER_QUEUE_MAXSIZE = 256
 
 
 def _utc_iso() -> str:
@@ -193,35 +193,65 @@ class RealtimeHub:
         actor_name: str | None = None,
         summary: str | None = None,
         extra_scopes: Iterable[str] | None = None,
+        targets: Sequence[tuple[str, str]] | None = None,
+        origin_tab_id: str | None = None,
     ) -> int:
-        """Broadcast a post-commit resource_updated event to all connected tabs."""
-        scopes = [scope]
+        """Broadcast a post-commit resource_updated event to all connected tabs & workers."""
+        effective_targets: list[tuple[str, str]] = []
+        seen_targets: set[tuple[str, str]] = set()
+
+        def _add_target(t_scope: str | None, t_rid: str | None) -> None:
+            s_clean = str(t_scope or "").strip()
+            r_clean = str(t_rid or "all").strip() or "all"
+            if s_clean and (s_clean, r_clean) not in seen_targets:
+                seen_targets.add((s_clean, r_clean))
+                effective_targets.append((s_clean, r_clean))
+
+        base_rid = str(resource_id or "all")
+        _add_target(scope, base_rid)
         if extra_scopes:
-            for s in extra_scopes:
-                if s and s not in scopes:
-                    scopes.append(s)
+            for extra_s in extra_scopes:
+                _add_target(extra_s, base_rid)
+        if targets:
+            for t_scope, t_rid in targets:
+                _add_target(t_scope, t_rid)
 
         ts = _utc_iso()
+        envelopes: list[dict[str, Any]] = []
         with self._lock:
             self._version += 1
             version = self._version
-            for target_scope in scopes:
-                self._broadcast_locked(
-                    {
-                        "event": "updated",
-                        "data": {
-                            "scope": target_scope,
-                            "resource_id": str(resource_id or "all"),
-                            "actor_id": actor_id,
-                            "actor_email": actor_email,
-                            "actor_name": actor_name or actor_email or "Teammate",
-                            "summary": summary or "Updated",
-                            "version": version,
-                            "timestamp": ts,
-                        },
-                    }
-                )
-            return version
+            for target_scope, target_rid in effective_targets:
+                envelope = {
+                    "event": "updated",
+                    "data": {
+                        "scope": target_scope,
+                        "resource_id": target_rid,
+                        "actor_id": actor_id,
+                        "actor_email": actor_email,
+                        "actor_name": actor_name or actor_email or "Teammate",
+                        "origin_tab_id": origin_tab_id,
+                        "summary": summary or "Updated",
+                        "version": version,
+                        "timestamp": ts,
+                    },
+                }
+                envelopes.append(envelope)
+                self._broadcast_locked(envelope)
+
+        from app.services.realtime_pg_bridge import notify_pg_realtime
+
+        for env in envelopes:
+            notify_pg_realtime(env)
+        return version
+
+    def deliver_external_event(self, envelope: dict[str, Any]) -> None:
+        """Deliver an external cross-worker realtime envelope to local SSE subscribers."""
+        if not isinstance(envelope, dict):
+            return
+        with self._lock:
+            self._version += 1
+            self._broadcast_locked(envelope)
 
     def current_version(self) -> int:
         with self._lock:
@@ -237,6 +267,54 @@ class RealtimeHub:
 realtime_hub = RealtimeHub()
 
 
+def build_tenure_sync_targets(db: Any, tenure_id: str | None) -> list[tuple[str, str]]:
+    """Build exact multi-scope SSE targets for a Tenure and every linked Session + Draft."""
+    tid = str(tenure_id or "").strip()
+    if not tid:
+        return []
+    targets: list[tuple[str, str]] = [("comparison", tid), ("ledger", tid), ("ledger", "all")]
+    try:
+        from sqlalchemy import select
+        from app.models.tables import Session as SessionModel
+
+        rows = db.execute(
+            select(SessionModel.id, SessionModel.draft_id).where(
+                SessionModel.tenure_id == tid,
+                SessionModel.status != "trash",
+            )
+        ).all()
+        for sid, did in rows:
+            if sid:
+                targets.append(("workspace", str(sid)))
+                targets.append(("sessions", str(sid)))
+            if did:
+                targets.append(("workspace", str(did)))
+    except Exception:
+        pass
+    return targets
+
+
+def build_session_sync_targets(session: Any) -> list[tuple[str, str]]:
+    """Build exact multi-scope SSE targets for a Session, its Draft, and its linked Tenure."""
+    if session is None:
+        return []
+    targets: list[tuple[str, str]] = []
+    sid = getattr(session, "id", None)
+    did = getattr(session, "draft_id", None)
+    tid = getattr(session, "tenure_id", None)
+    if sid:
+        targets.append(("workspace", str(sid)))
+        targets.append(("sessions", str(sid)))
+    if did:
+        targets.append(("workspace", str(did)))
+    targets.append(("sessions", "all"))
+    if tid:
+        targets.append(("comparison", str(tid)))
+        targets.append(("ledger", str(tid)))
+        targets.append(("ledger", "all"))
+    return targets
+
+
 def publish_realtime_update(
     *,
     scope: str,
@@ -244,11 +322,14 @@ def publish_realtime_update(
     actor: Any = None,
     summary: str | None = None,
     extra_scopes: Iterable[str] | None = None,
+    targets: Sequence[tuple[str, str]] | None = None,
+    origin_tab_id: str | None = None,
 ) -> int:
     """Convenience helper for routers to emit updates right after db.commit()."""
     actor_id = getattr(actor, "id", None) if actor is not None else None
     actor_email = getattr(actor, "email", None) if actor is not None else None
     actor_name = getattr(actor, "name", None) if actor is not None else None
+    clean_tab = origin_tab_id.strip() if isinstance(origin_tab_id, str) and origin_tab_id.strip() else None
     return realtime_hub.publish_update(
         scope=scope,
         resource_id=str(resource_id or "all"),
@@ -257,6 +338,8 @@ def publish_realtime_update(
         actor_name=actor_name or actor_email,
         summary=summary,
         extra_scopes=extra_scopes,
+        targets=targets,
+        origin_tab_id=clean_tab,
     )
 
 
