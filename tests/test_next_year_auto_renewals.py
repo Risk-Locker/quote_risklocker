@@ -264,15 +264,19 @@ def test_api_yoy_stats_and_sync_endpoint(client: TestClient, db_session: Session
     db_session.add(t_2026)
     db_session.commit()
 
-    # Call GET /api/tenures/stats/yoy BEFORE sync: 2027 should NOT exist yet
+    # Call GET /api/tenures/stats/yoy BEFORE sync: under unified anchor="all", expiring 2026 policy surfaces in 2027;
+    # under anchor="starting", 2027 has 0 starting tenures yet
     res = client.get("/api/tenures/stats/yoy")
     assert res.status_code == 200
     data = res.json()
     years = [y["year"] for y in data["years"]]
     assert "2026" in years
     y27_pre = next((y for y in data["years"] if y["year"] == "2027"), None)
-    if y27_pre:
-        assert y27_pre["total"] == 0
+    assert y27_pre is not None and y27_pre["total"] >= 1
+
+    res_start_pre = client.get("/api/tenures/stats/yoy?anchor=starting")
+    y27_start_pre = next((y for y in res_start_pre.json()["years"] if y["year"] == "2027"), None)
+    assert y27_start_pre is None or y27_start_pre["total"] == 0
 
     # Call POST /api/tenures/sync-next-year-renewals to explicitly create 2027 renewal
     res_sync = client.post("/api/tenures/sync-next-year-renewals?target_year=2027")
@@ -281,7 +285,7 @@ def test_api_yoy_stats_and_sync_endpoint(client: TestClient, db_session: Session
     assert sync_data["status"] == "success"
     assert sync_data["target_year"] == 2027
 
-    # After explicit sync, GET /api/tenures/stats/yoy surfaces 2027
+    # After explicit sync, GET /api/tenures/stats/yoy surfaces 2027 with exact parity to GET /api/tenures?year=2027
     res2 = client.get("/api/tenures/stats/yoy")
     assert res2.status_code == 200
     data2 = res2.json()
@@ -289,20 +293,19 @@ def test_api_yoy_stats_and_sync_endpoint(client: TestClient, db_session: Session
     assert "2027" in years2
     assert "2028" not in years2
 
-    # Verify 2027 count in YoY stats: 0 issued policies until cover note uploaded, 1 car up for renewal
     y27 = next(y for y in data2["years"] if y["year"] == "2027")
-    assert y27["total"] == 0
+    assert y27["total"] >= 1
     assert y27["cars"] >= 1
     assert y27["active"] >= 1
     assert y27["lost"] == 0
 
-    # Call GET /api/tenures?year=2027
+    # Call GET /api/tenures?year=2027 — count matches y27["total"] with zero double counting
     res_list = client.get("/api/tenures?year=2027")
     assert res_list.status_code == 200
     list_data = res_list.json()
-    assert list_data["total"] >= 1
+    assert list_data["total"] == y27["total"]
     veh_plates = [item["vehicle_no"] for item in list_data["items"]]
-    assert "KAA 5566" in veh_plates
+    assert veh_plates.count("KAA 5566") == 1
 
 
 def test_upcoming_renewal_ledger_isolates_quotes_and_records_covernote(

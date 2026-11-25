@@ -102,9 +102,11 @@ export function IssuePolicyModal({
               <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded text-[11px] text-emerald-900 font-mono">
                 Coverage: {policyStartDate} →{" "}
                 {(() => {
-                  const d = new Date(policyStartDate);
-                  d.setFullYear(d.getFullYear() + 1);
-                  d.setDate(d.getDate() - 1);
+                  const [yy, mm, dd] = policyStartDate.split("T")[0].split("-").map(Number);
+                  if (!yy || !mm || !dd) return "—";
+                  if (mm === 2 && dd === 29) return `${yy + 1}-02-28`;
+                  const d = new Date(Date.UTC(yy + 1, mm - 1, dd));
+                  d.setUTCDate(d.getUTCDate() - 1);
                   return d.toISOString().split("T")[0];
                 })()}
               </div>

@@ -4,10 +4,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
 import type {
+  LedgerAnchor,
   LedgerSortColumn,
   LedgerDensity,
   YoYStatItem,
   MonthItem,
+  MonthSummaryByNum,
   PicItem,
   TenureRow,
   StageSummary,
@@ -23,7 +25,9 @@ export function useLedgerState() {
 
   const [selectedYear, setSelectedYear] = useState<string>(currentYear);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
+  const [anchor, setAnchor] = useState<LedgerAnchor>("all");
   const [months, setMonths] = useState<MonthItem[]>([]);
+  const [summaryByMonth, setSummaryByMonth] = useState<MonthSummaryByNum[]>([]);
   const [loadingMonths, setLoadingMonths] = useState(true);
 
   // Category toggle: 'active' (default) vs 'lost' vs 'all'
@@ -40,8 +44,16 @@ export function useLedgerState() {
   const [viewMode, setViewMode] = useState<"ledger" | "calendar">("ledger");
   const [calendarDisplay, setCalendarDisplay] = useState<"grid" | "agenda">("grid");
 
-  // Tenures Data & Filters
+  // Tenures Data, Pagination & Filters
   const [tenures, setTenures] = useState<TenureRow[]>([]);
+  const [totalTenures, setTotalTenures] = useState(0);
+  const [tabCounts, setTabCounts] = useState<{ all: number; issued: number; pending: number }>({
+    all: 0,
+    issued: 0,
+    pending: 0,
+  });
+  const [page, setPage] = useState(1);
+  const pageSize = 100;
   const [loadingTenures, setLoadingTenures] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -76,6 +88,8 @@ export function useLedgerState() {
       const stored = localStorage.getItem("rl_ledger_density");
       if (stored === "compact" || stored === "comfortable") {
         setDensityState(stored as LedgerDensity);
+      } else if (typeof window !== "undefined" && window.innerWidth < 1536) {
+        setDensityState("compact");
       }
     } catch {}
   }, []);
@@ -129,18 +143,27 @@ export function useLedgerState() {
 
   const monthScrollRef = useRef<HTMLDivElement>(null);
 
-  // Issued & Pending counts
-  const issuedCount = useMemo(() => {
-    return tenures.filter(
-      (t) => Boolean(t.covernote_policy || t.stage === "Close - Win" || t.status === "hit")
-    ).length;
-  }, [tenures]);
+  // Issued & Pending counts (server-computed across all pages, matching active period/search/anchor)
+  const issuedCount = tabCounts.issued;
+  const pendingCount = tabCounts.pending;
+  const activeTenuresTotal = tabCounts.all;
 
-  const pendingCount = useMemo(() => {
-    return tenures.filter(
-      (t) => !Boolean(t.covernote_policy || t.stage === "Close - Win" || t.status === "hit")
-    ).length;
-  }, [tenures]);
+  // Reset to page 1 when filters or sort change
+  useEffect(() => {
+    setPage(1);
+  }, [
+    selectedYear,
+    selectedMonth,
+    anchor,
+    category,
+    stageFilter,
+    debouncedSearch,
+    statusFilter,
+    policyFilter,
+    showHidden,
+    sortBy,
+    sortDir,
+  ]);
 
   const handleSort = (column: LedgerSortColumn) => {
     if (sortBy === column) {
@@ -155,18 +178,23 @@ export function useLedgerState() {
   const loadYoyStats = useCallback(async () => {
     setLoadingYoy(true);
     try {
+      const params = new URLSearchParams();
+      params.set("anchor", anchor);
+      params.set("category", category);
+      if (showHidden) params.set("show_hidden", "true");
       const res = await api<{
         years: YoYStatItem[];
-        all_years_summary: { total: number; cars: number; active: number; lost: number };
-      }>("/tenures/yoy-stats");
+        all_years?: { total: number; cars: number; active: number; lost: number };
+        all_years_summary?: { total: number; cars: number; active: number; lost: number };
+      }>(`/tenures/yoy-stats?${params.toString()}`);
       setYoyStats(res.years || []);
-      setAllYearsSummary(res.all_years_summary || null);
+      setAllYearsSummary(res.all_years ?? res.all_years_summary ?? null);
     } catch (err) {
       console.error("Failed to load YoY stats:", err);
     } finally {
       setLoadingYoy(false);
     }
-  }, []);
+  }, [anchor, category, showHidden]);
 
   // Load PICs directory
   const loadPics = useCallback(async () => {
@@ -182,31 +210,45 @@ export function useLedgerState() {
   const loadMonths = useCallback(async () => {
     setLoadingMonths(true);
     try {
-      const res = await api<{ months: MonthItem[] }>(
-        "/tenures/months" + (showHidden ? "?show_hidden=true" : "")
-      );
+      const params = new URLSearchParams();
+      params.set("anchor", anchor);
+      params.set("category", category);
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      if (showHidden) params.set("show_hidden", "true");
+      const res = await api<{
+        months: MonthItem[];
+        summary_by_month?: MonthSummaryByNum[];
+      }>(`/tenures/months?${params.toString()}`);
       setMonths(res.months || []);
+      setSummaryByMonth(res.summary_by_month || []);
     } catch (err) {
       console.error("Failed to load months:", err);
     } finally {
       setLoadingMonths(false);
     }
-  }, [showHidden]);
+  }, [anchor, category, debouncedSearch, showHidden]);
 
   // Load 5-Stage KPI Summary
   const loadStageSummary = useCallback(async () => {
     setLoadingSummary(true);
     try {
       const params = new URLSearchParams();
+      params.set("anchor", anchor);
+      params.set("category", category);
       if (selectedMonth && selectedMonth !== "all") {
-        const parts = selectedMonth.split("-");
-        if (parts.length === 2) {
+        if (selectedMonth.includes("-")) {
+          const parts = selectedMonth.split("-");
           params.set("year", parts[0]);
           params.set("month", String(parseInt(parts[1], 10)));
+        } else {
+          params.set("month", String(parseInt(selectedMonth, 10)));
         }
       } else if (selectedYear && selectedYear !== "all") {
         params.set("year", selectedYear);
       }
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      if (policyFilter !== "all") params.set("policy_status", policyFilter);
+      if (showHidden) params.set("show_hidden", "true");
       const data = await api<StageSummary>(`/tenures/stage-summary?${params.toString()}`);
       setSummary(data);
     } catch (err) {
@@ -214,28 +256,32 @@ export function useLedgerState() {
     } finally {
       setLoadingSummary(false);
     }
-  }, [selectedYear, selectedMonth]);
+  }, [selectedYear, selectedMonth, anchor, category, debouncedSearch, policyFilter, showHidden]);
 
   // Load Tenures
   const loadTenures = useCallback(async () => {
     setLoadingTenures(true);
     try {
       const params = new URLSearchParams();
+      params.set("anchor", anchor);
+      params.set("category", category);
       if (selectedMonth && selectedMonth !== "all") {
-        const parts = selectedMonth.split("-");
-        if (parts.length === 2) {
+        if (selectedMonth.includes("-")) {
+          const parts = selectedMonth.split("-");
           params.set("year", parts[0]);
           params.set("month", String(parseInt(parts[1], 10)));
+        } else {
+          params.set("month", String(parseInt(selectedMonth, 10)));
         }
       } else if (selectedYear && selectedYear !== "all") {
         params.set("year", selectedYear);
       }
 
-      if (category === "lost") {
-        params.set("category", "lost");
-      }
       if (stageFilter && stageFilter !== "all") {
         params.set("stage", stageFilter);
+      }
+      if (policyFilter !== "all") {
+        params.set("policy_status", policyFilter);
       }
       if (debouncedSearch.trim()) {
         params.set("search", debouncedSearch.trim());
@@ -246,18 +292,45 @@ export function useLedgerState() {
       if (showHidden) {
         params.set("show_hidden", "true");
       }
-      params.set("page_size", "500");
+      params.set("sort_by", sortBy);
+      params.set("sort_dir", sortDir);
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
 
-      const res = await api<{ items: TenureRow[]; total: number }>(
-        `/tenures?${params.toString()}`
-      );
+      const res = await api<{
+        items: TenureRow[];
+        total: number;
+        active_total?: number;
+        issued_count?: number;
+        pending_count?: number;
+      }>(`/tenures?${params.toString()}`);
       setTenures(res.items || []);
+      setTotalTenures(res.total ?? (res.items || []).length);
+      setTabCounts({
+        all: res.active_total ?? res.total ?? (res.items || []).length,
+        issued: res.issued_count ?? 0,
+        pending: res.pending_count ?? 0,
+      });
     } catch (err) {
       console.error("Failed to load tenures:", err);
     } finally {
       setLoadingTenures(false);
     }
-  }, [selectedYear, selectedMonth, category, stageFilter, debouncedSearch, statusFilter, showHidden]);
+  }, [
+    selectedYear,
+    selectedMonth,
+    anchor,
+    category,
+    stageFilter,
+    policyFilter,
+    debouncedSearch,
+    statusFilter,
+    showHidden,
+    sortBy,
+    sortDir,
+    page,
+    pageSize,
+  ]);
 
   // Load Calendar Quotation Sessions
   const loadCalendarSessions = useCallback(async () => {
@@ -269,7 +342,11 @@ export function useLedgerState() {
         params.set("year", selectedYear);
       }
       if (selectedMonth && selectedMonth !== "all") {
-        params.set("month", String(parseInt(selectedMonth.split("-")[1], 10)));
+        const mPart = selectedMonth.includes("-") ? selectedMonth.split("-")[1] : selectedMonth;
+        params.set("month", String(parseInt(mPart, 10)));
+      }
+      if (calendarVehicleFilter && calendarVehicleFilter !== "all") {
+        params.set("vehicle_no", calendarVehicleFilter);
       }
       const res = await api<{ sessions: CalendarSession[]; total: number }>(
         `/tenures/calendar-sessions?${params.toString()}`
@@ -280,7 +357,7 @@ export function useLedgerState() {
     } finally {
       setLoadingCalendar(false);
     }
-  }, [viewMode, selectedYear, selectedMonth]);
+  }, [viewMode, selectedYear, selectedMonth, calendarVehicleFilter]);
 
   // Handle live inline edit patch
   const patchTenureField = async (tenureId: string, updates: Partial<TenureRow>) => {
@@ -431,11 +508,25 @@ export function useLedgerState() {
     return Array.from(yearsSet).sort();
   }, [currentYear, yoyStats]);
 
-  // 12 Clean Month list for selected year
+  // 12 Clean Month list for selected year (or aggregated across all years when selectedYear === "all")
   const monthsOfYear = useMemo(() => {
-    const yr = selectedYear === "all" ? currentYear : selectedYear;
+    if (selectedYear === "all") {
+      return MONTH_NAMES.map((name, idx) => {
+        const mNum = idx + 1;
+        const mKey = String(mNum).padStart(2, "0");
+        const existing = summaryByMonth.find((m) => m.month_num === mNum);
+        return {
+          month: mKey,
+          label: name,
+          total: existing?.total || 0,
+          start_count: existing?.start_count || 0,
+          end_count: existing?.end_count || 0,
+          cars: existing?.cars || 0,
+        };
+      });
+    }
     return MONTH_NAMES.map((name, idx) => {
-      const mStr = `${yr}-${String(idx + 1).padStart(2, "0")}`;
+      const mStr = `${selectedYear}-${String(idx + 1).padStart(2, "0")}`;
       const existing = months.find((m) => m.month === mStr);
       return {
         month: mStr,
@@ -446,19 +537,25 @@ export function useLedgerState() {
         cars: existing?.cars || 0,
       };
     });
-  }, [selectedYear, currentYear, months]);
+  }, [selectedYear, months, summaryByMonth]);
 
   // Calendar Geometry for Visual View
   const calendarData = useMemo(() => {
     const now = new Date();
-    let yr = now.getFullYear();
+    let yr = selectedYear !== "all" ? parseInt(selectedYear, 10) : now.getFullYear();
     let mo = now.getMonth();
+
     if (selectedMonth && selectedMonth !== "all") {
-      const parts = selectedMonth.split("-");
-      if (parts.length === 2) {
+      if (selectedMonth.includes("-")) {
+        const parts = selectedMonth.split("-");
         yr = parseInt(parts[0], 10);
         mo = parseInt(parts[1], 10) - 1;
+      } else {
+        mo = Math.max(0, Math.min(11, parseInt(selectedMonth, 10) - 1));
       }
+    } else if (selectedYear !== "all" && yr !== now.getFullYear()) {
+      const firstActiveIdx = monthsOfYear.findIndex((m) => m.total > 0);
+      mo = firstActiveIdx >= 0 ? firstActiveIdx : 0;
     }
 
     const firstDay = new Date(yr, mo, 1).getDay();
@@ -493,8 +590,10 @@ export function useLedgerState() {
       }
     });
 
-    // 2. Filter to ONLY approved / main policies for coverage start/end events
-    const calendarTenures = tenures.filter((t) => t.is_main);
+    // 2. Include all active non-discarded non-lost tenures in calendar view (never gate on is_main)
+    const calendarTenures = tenures.filter(
+      (t) => !t.is_discarded && t.stage !== "Close - Lose" && t.stage !== "Others"
+    );
     calendarTenures.forEach((t) => {
       // Check start date
       if (t.coverage_start_date) {
@@ -558,7 +657,7 @@ export function useLedgerState() {
       dayMap,
       agendaDays,
     };
-  }, [selectedMonth, calendarSessions, tenures, calendarVehicleFilter]);
+  }, [selectedYear, selectedMonth, monthsOfYear, calendarSessions, tenures, calendarVehicleFilter]);
 
   // Unique vehicle list for calendar filter dropdown
   const calendarVehicleOptions = useMemo(() => {
@@ -572,39 +671,21 @@ export function useLedgerState() {
     return Array.from(set).sort();
   }, [tenures, calendarSessions]);
 
-  // Group tenures by vehicle for the vehicle-centric ledger
+  // 1 row per policy term (never collapse 2026 & 2027 terms into one hidden row under All Years)
   const vehicleGroups = useMemo(() => {
-    const map = new Map<string, TenureRow[]>();
-    for (const t of tenures) {
-      const key = (t.vehicle_no || t.chassis_no || t.id).trim().toUpperCase();
-      if (!map.has(key)) {
-        map.set(key, []);
-      }
-      map.get(key)!.push(t);
-    }
-
-    const groups: VehicleGroup[] = [];
-    map.forEach((tList, key) => {
-      const sorted = [...tList].sort((a, b) => {
-        const da = a.coverage_start_date || "";
-        const db = b.coverage_start_date || "";
-        return da.localeCompare(db);
-      });
-      const main = sorted.find((t) => t.is_main) || sorted[0];
-      groups.push({
-        vehicle_no: key,
-        customer_name: main.customer_name,
-        customer_ic_no: main.customer_ic_no,
-        car_brand: main.car_brand,
-        car_model: main.car_model,
-        engine_cc: main.engine_cc,
-        manufacture_year: main.manufacture_year,
-        chassis_no: main.chassis_no,
-        engine_no: main.engine_no,
-        mainTenure: main,
-        tenures: sorted,
-      });
-    });
+    const groups: VehicleGroup[] = tenures.map((t) => ({
+      vehicle_no: (t.vehicle_no || t.chassis_no || t.id).trim().toUpperCase(),
+      customer_name: t.customer_name,
+      customer_ic_no: t.customer_ic_no,
+      car_brand: t.car_brand,
+      car_model: t.car_model,
+      engine_cc: t.engine_cc,
+      manufacture_year: t.manufacture_year,
+      chassis_no: t.chassis_no,
+      engine_no: t.engine_no,
+      mainTenure: t,
+      tenures: [t],
+    }));
 
     // 1. Instant client-side search filtering (0ms latency while typing, before debounced network query)
     const query = searchInput.trim().toLowerCase();
@@ -650,99 +731,18 @@ export function useLedgerState() {
       if (policyFilter === "all") return true;
       const t = g.mainTenure;
       const hasPolicy = Boolean(
-        t.covernote_policy || t.is_covernote_issued || t.stage === "Close - Win" || t.status === "hit"
+        t.is_covernote_issued ||
+          (t.covernote_policy && !t.covernote_policy.is_previous_year_policy) ||
+          t.stage === "Close - Win" ||
+          t.status === "hit"
       );
       if (policyFilter === "issued") return hasPolicy;
       if (policyFilter === "pending") return !hasPolicy;
       return true;
     });
 
-    return filtered.sort((a, b) => {
-      let cmp = 0;
-      if (sortBy === "vehicle_no") {
-        cmp = a.vehicle_no.localeCompare(b.vehicle_no);
-      } else if (sortBy === "coverage_period") {
-        const isIssuedA = Boolean(
-          a.mainTenure.covernote_policy ||
-            a.mainTenure.is_covernote_issued ||
-            a.mainTenure.stage === "Close - Win" ||
-            a.mainTenure.status === "hit"
-        );
-        const isIssuedB = Boolean(
-          b.mainTenure.covernote_policy ||
-            b.mainTenure.is_covernote_issued ||
-            b.mainTenure.stage === "Close - Win" ||
-            b.mainTenure.status === "hit"
-        );
-
-        if (isIssuedA && !isIssuedB) return -1;
-        if (!isIssuedA && isIssuedB) return 1;
-
-        const da =
-          (isIssuedA
-            ? a.mainTenure.covernote_policy?.coverage_start_date ||
-              a.mainTenure.coverage_start_date
-            : a.mainTenure.coverage_start_date) || "";
-        const db =
-          (isIssuedB
-            ? b.mainTenure.covernote_policy?.coverage_start_date ||
-              b.mainTenure.coverage_start_date
-            : b.mainTenure.coverage_start_date) || "";
-
-        if (!da && db) return 1;
-        if (da && !db) return -1;
-        if (!da && !db) return 0;
-
-        cmp = da.localeCompare(db);
-      } else if (sortBy === "stage") {
-        const stageWeight: Record<string, number> = {
-          "Close - Win": 5,
-          "Issue Policy": 4,
-          "Material to Client": 3,
-          Quotations: 2,
-          "Close - Lose": 1,
-        };
-        const wa = stageWeight[a.mainTenure.stage] ?? 0;
-        const wb = stageWeight[b.mainTenure.stage] ?? 0;
-        cmp = wa - wb;
-        if (cmp === 0) {
-          const dateA =
-            a.mainTenure.last_activity_at ||
-            a.mainTenure.stage_updated_at ||
-            a.mainTenure.created_at ||
-            "";
-          const dateB =
-            b.mainTenure.last_activity_at ||
-            b.mainTenure.stage_updated_at ||
-            b.mainTenure.created_at ||
-            "";
-          cmp = dateA.localeCompare(dateB);
-        }
-      } else if (sortBy === "created_at") {
-        const ca = a.mainTenure.created_at || "";
-        const cb = b.mainTenure.created_at || "";
-        cmp = ca.localeCompare(cb);
-      } else if (sortBy === "pic") {
-        const picA = (a.mainTenure.sub_agent_name || "").toLowerCase();
-        const picB = (b.mainTenure.sub_agent_name || "").toLowerCase();
-        cmp = picA.localeCompare(picB);
-      } else {
-        const dateA =
-          a.mainTenure.last_activity_at ||
-          a.mainTenure.stage_updated_at ||
-          a.mainTenure.created_at ||
-          "";
-        const dateB =
-          b.mainTenure.last_activity_at ||
-          b.mainTenure.stage_updated_at ||
-          b.mainTenure.created_at ||
-          "";
-        cmp = dateA.localeCompare(dateB);
-      }
-
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-  }, [tenures, policyFilter, sortBy, sortDir, searchInput]);
+    return filtered;
+  }, [tenures, policyFilter, searchInput]);
 
   // Initial loads
   useEffect(() => {
@@ -769,6 +769,8 @@ export function useLedgerState() {
     setSelectedYear,
     selectedMonth,
     setSelectedMonth,
+    anchor,
+    setAnchor,
     months,
     loadingMonths,
     category,
@@ -782,6 +784,11 @@ export function useLedgerState() {
     calendarDisplay,
     setCalendarDisplay,
     tenures,
+    totalTenures,
+    page,
+    setPage,
+    pageSize,
+    activeTenuresTotal,
     loadingTenures,
     search: searchInput,
     setSearch: setSearchInput,

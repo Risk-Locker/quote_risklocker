@@ -140,3 +140,30 @@ def test_production_factory_exposes_only_api_and_rejects_unknown_hosts(monkeypat
     assert response.status_code == 200
     assert response.headers["x-content-type-options"] == "nosniff"
     assert client.get("/api/health", headers={"Host": "attacker.example"}).status_code == 400
+
+
+def test_pure_asgi_middlewares_stream_sse_without_buffering():
+    from fastapi.responses import StreamingResponse
+
+    settings = security_settings()
+    app = FastAPI()
+    app.add_middleware(
+        RequestSecurityMiddleware,
+        settings=settings,
+        csrf_exempt_paths={"/api/auth/login"},
+    )
+    app.add_middleware(SecurityHeadersMiddleware, production=True)
+
+    @app.get("/api/realtime/events")
+    async def sse():
+        async def _gen():
+            yield "event: connected\ndata: {\"ok\":true}\n\n"
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
+    client = TestClient(app, base_url=settings.app_origin)
+    with client.stream("GET", "/api/realtime/events") as resp:
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        body = "".join(resp.iter_text())
+        assert "event: connected" in body

@@ -431,7 +431,7 @@ def evaluate_tenure_ingestion(
 def get_tenure_timeline(db: Session, tenure_id: str) -> dict[str, Any] | None:
     """Compile the comprehensive lifecycle timeline for an Insurance Tenure."""
     tenure = db.get(InsuranceTenure, tenure_id)
-    if not tenure:
+    if not tenure or tenure.deleted_at is not None:
         return None
 
     # Load sessions under tenure

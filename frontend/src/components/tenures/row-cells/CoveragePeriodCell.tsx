@@ -23,14 +23,24 @@ const TONE_STYLES: Record<CoverageTone, { chip: string; label: string }> = {
 };
 
 export function isTenurePolicyIssued(t: TenureRow): boolean {
-  return Boolean(t.covernote_policy || t.is_covernote_issued || t.stage === "Close - Win" || t.status === "hit");
+  return Boolean(
+    t.is_covernote_issued ||
+      (t.covernote_policy && !t.covernote_policy.is_previous_year_policy) ||
+      t.stage === "Close - Win" ||
+      t.status === "hit"
+  );
 }
 
 /** Pick which coverage period represents this tenure (display-only, no date arithmetic). */
 function summarizeCoverage(t: TenureRow): CoverageSummary {
   const cn = t.covernote_policy;
-  if (cn?.is_previous_year_policy) {
-    return { start: t.coverage_start_date, end: t.coverage_end_date, tone: "upcoming", label: "Upcoming Renewal" };
+  if (t.is_upcoming_renewal || cn?.is_previous_year_policy) {
+    return {
+      start: t.coverage_start_date,
+      end: t.coverage_end_date,
+      tone: "upcoming",
+      label: "Expiring for Renewal",
+    };
   }
   if (isTenurePolicyIssued(t) && (cn?.coverage_start_date || t.coverage_start_date)) {
     return {
@@ -43,8 +53,14 @@ function summarizeCoverage(t: TenureRow): CoverageSummary {
   if (t.external_policy_start_date) {
     return { start: t.external_policy_start_date, end: t.external_policy_end_date, tone: "external", label: "External Policy" };
   }
-  if (t.coverage_start_date && t.coverage_end_date && t.sourced_quotes?.length > 0) {
-    return { start: t.coverage_start_date, end: t.coverage_end_date, tone: "pending", label: "Pending Cover Note" };
+  if (t.coverage_start_date && t.coverage_end_date) {
+    if (t.has_selected_winner || t.stage === "Issue Policy") {
+      return { start: t.coverage_start_date, end: t.coverage_end_date, tone: "pending", label: "Pending Cover Note" };
+    }
+    if ((t.sourced_quotes?.length ?? 0) > 0) {
+      return { start: t.coverage_start_date, end: t.coverage_end_date, tone: "pending", label: "Quotes In Progress" };
+    }
+    return { start: t.coverage_start_date, end: t.coverage_end_date, tone: "upcoming", label: "Awaiting Quotes" };
   }
   return { start: null, end: null, tone: "empty", label: "Pending Renewal" };
 }

@@ -128,6 +128,7 @@ export function TenureTimelineLedger() {
     <div className="space-y-4">
       <RealtimePresenceBanner
         connected={realtime.connected}
+        syncMode={realtime.syncMode}
         otherEditors={realtime.otherEditors}
         pendingUpdate={realtime.pendingUpdate}
         onRefreshNow={() => void realtime.refreshNow()}
@@ -159,6 +160,8 @@ export function TenureTimelineLedger() {
         onSelectYear={state.setSelectedYear}
         selectedMonth={state.selectedMonth}
         onSelectMonth={state.setSelectedMonth}
+        anchor={state.anchor}
+        onSelectAnchor={state.setAnchor}
         availableYears={state.availableYears}
         monthsOfYear={state.monthsOfYear}
         allYearsSummary={state.allYearsSummary}
@@ -179,7 +182,7 @@ export function TenureTimelineLedger() {
         onSelectPolicyFilter={state.setPolicyFilter}
         stageFilter={state.stageFilter}
         onClearStageFilter={() => state.setStageFilter("all")}
-        tenuresCount={state.tenures.length}
+        tenuresCount={state.activeTenuresTotal}
         issuedCount={state.issuedCount}
         pendingCount={state.pendingCount}
         search={state.search}
@@ -207,6 +210,10 @@ export function TenureTimelineLedger() {
         <LedgerTable
           loadingTenures={state.loadingTenures}
           tenures={state.tenures}
+          totalTenures={state.totalTenures}
+          page={state.page}
+          pageSize={state.pageSize}
+          onPageChange={state.setPage}
           vehicleGroups={state.vehicleGroups}
           selectedTenureIds={state.selectedTenureIds}
           sortBy={state.sortBy}

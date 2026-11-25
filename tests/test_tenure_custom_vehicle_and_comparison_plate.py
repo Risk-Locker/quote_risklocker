@@ -401,26 +401,36 @@ def test_yoy_stats_anchors_strictly_on_start_year(client: TestClient, db_session
     )
     assert res.status_code == 200
 
-    # Check YoY stats: policy must be counted strictly in 2026 (0 in 2027), while cars includes 2027
+    # Under anchor="starting": policy is strictly in 2026 (0 in 2027)
+    yoy_start_res = client.get("/api/tenures/stats/yoy?anchor=starting")
+    assert yoy_start_res.status_code == 200
+    years_start_map = {y["year"]: y["total"] for y in yoy_start_res.json()["years"]}
+    assert years_start_map.get("2026", 0) >= 1
+    assert years_start_map.get("2027", 0) == 0
+
+    res_2027_start = client.get("/api/tenures?year=2027&anchor=starting")
+    assert res_2027_start.status_code == 200
+    assert "YOYTEST20262027" not in [i["vehicle_no"] for i in res_2027_start.json()["items"]]
+
+    # Under unified anchor="all": yoy-stats matches list_tenures identically (including expiring 2026 policy in 2027)
     yoy_res = client.get("/api/tenures/stats/yoy")
     assert yoy_res.status_code == 200
     yoy_data = yoy_res.json()
-
     years_map = {y["year"]: y["total"] for y in yoy_data["years"]}
     cars_map = {y["year"]: y["cars"] for y in yoy_data["years"]}
     assert years_map.get("2026", 0) >= 1
-    assert years_map.get("2027", 0) == 0
     assert cars_map.get("2027", 0) >= 1
 
-    # Query list_tenures: 2026 returns the deal; 2027 is strictly isolated until policy is issued
+    # Query list_tenures: 2026 returns the deal; 2027 unified view returns expiring upcoming renewal
     res_2026 = client.get("/api/tenures?year=2026")
     assert res_2026.status_code == 200
     p26 = [i["vehicle_no"] for i in res_2026.json()["items"]]
     assert "YOYTEST20262027" in p26
+    assert res_2026.json()["total"] == years_map.get("2026", 0)
 
     res_2027_pre = client.get("/api/tenures?year=2027")
     assert res_2027_pre.status_code == 200
-    assert "YOYTEST20262027" not in [i["vehicle_no"] for i in res_2027_pre.json()["items"]]
+    assert res_2027_pre.json()["total"] == years_map.get("2027", 0)
 
     # Once policy is issued/won, next year renewal entry is created
     from sqlalchemy import select

@@ -10,6 +10,10 @@ import { LedgerScrollRail } from "./LedgerScrollRail";
 export interface LedgerTableProps {
   loadingTenures: boolean;
   tenures: TenureRow[];
+  totalTenures?: number;
+  page?: number;
+  pageSize?: number;
+  onPageChange?: (nextPage: number) => void;
   vehicleGroups: VehicleGroup[];
   selectedTenureIds: string[];
   sortBy: LedgerSortColumn;
@@ -45,6 +49,10 @@ function SortIndicator({ active, dir }: { active: boolean; dir: "asc" | "desc" }
 export function LedgerTable({
   loadingTenures,
   tenures,
+  totalTenures,
+  page = 1,
+  pageSize = 100,
+  onPageChange,
   vehicleGroups,
   selectedTenureIds,
   sortBy,
@@ -78,7 +86,7 @@ export function LedgerTable({
       <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#f9f9fb] border-b border-neutral-200/80 text-xs">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-bold text-neutral-800 text-[11px] uppercase tracking-wider">
-            {category === "lost" ? "Lost Client Records" : "Active Renewal Policies"} ({tenures.length})
+            {category === "lost" ? "Lost Client Records" : "Active Renewal Policies"} ({totalTenures ?? tenures.length})
           </span>
           {layout.isCompact && (
             <span
@@ -184,7 +192,7 @@ export function LedgerTable({
                 </th>
               )}
 
-              <th className={`text-right ${layout.cellPadding} ${layout.widths.actions}`}>
+              <th className={`text-right sticky right-0 z-30 bg-[#f9f9fb] border-l border-neutral-200/80 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.05)] ${layout.cellPadding} ${layout.widths.actions}`}>
                 Actions
               </th>
             </tr>
@@ -209,7 +217,7 @@ export function LedgerTable({
             ) : (
               vehicleGroups.map((group) => (
                 <TenureRowComponent
-                  key={group.vehicle_no}
+                  key={group.mainTenure.id}
                   group={group}
                   selectedTenureIds={selectedTenureIds}
                   onToggleSelectGroup={onToggleSelectGroup}
@@ -237,6 +245,37 @@ export function LedgerTable({
         scrollTargetRef={scrollContainerRef}
         recomputeDeps={[tenures.length, density, hiddenColumns.join(","), loadingTenures]}
       />
+
+      {/* Server Pagination Footer */}
+      {(totalTenures ?? tenures.length) > pageSize && onPageChange && (
+        <div className="flex items-center justify-between px-3 py-2 bg-[#f9f9fb] border-t border-neutral-200/80 text-xs text-neutral-600">
+          <span>
+            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalTenures ?? tenures.length)} of{" "}
+            {totalTenures ?? tenures.length} policies
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={page <= 1 || loadingTenures}
+              onClick={() => onPageChange(page - 1)}
+              className="px-2.5 py-1 rounded border border-neutral-200 bg-white hover:bg-neutral-50 disabled:opacity-40 cursor-pointer font-semibold"
+            >
+              Prev
+            </button>
+            <span className="px-2 font-mono font-bold text-neutral-800">
+              Page {page} / {Math.max(1, Math.ceil((totalTenures ?? tenures.length) / pageSize))}
+            </span>
+            <button
+              type="button"
+              disabled={page * pageSize >= (totalTenures ?? tenures.length) || loadingTenures}
+              onClick={() => onPageChange(page + 1)}
+              className="px-2.5 py-1 rounded border border-neutral-200 bg-white hover:bg-neutral-50 disabled:opacity-40 cursor-pointer font-semibold"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

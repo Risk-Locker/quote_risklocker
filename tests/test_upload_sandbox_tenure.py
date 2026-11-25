@@ -385,12 +385,17 @@ def test_update_vehicle_specs_and_delete_tenure():
     assert veh.car_model == "CIVIC TYPE R"
     assert veh.engine_cc == "2000 CC"
 
-    # 3. Delete tenure via delete_tenure_endpoint
+    # 3. Soft-delete tenure via delete_tenure_endpoint (30-day Trash)
     del_res = delete_tenure_endpoint(tenure.id, db=db, user=user)
     assert del_res["success"] is True
     assert del_res["deleted_tenure_id"] == tenure.id
 
-    assert db.get(InsuranceTenure, tenure.id) is None
+    trashed_t = db.get(InsuranceTenure, tenure.id)
+    assert trashed_t is not None
+    assert trashed_t.deleted_at is not None
+    assert trashed_t.is_discarded is True
+    from app.services.insurance_tenure_service import get_tenure_timeline
+    assert get_tenure_timeline(db, tenure.id) is None
 
 
 

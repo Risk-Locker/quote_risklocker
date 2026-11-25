@@ -16,6 +16,15 @@ type SpecialItem = { id: string; label: string; category: string; variant_count:
 type VariantItem = { id: string; label: string; special_label: string; deleted_at?: string | null };
 type RecordItem = { id: string; insurer_no: string; customer_name?: string | null; vehicle_no?: string | null; deleted_at?: string | null };
 type AssetItem = { id: string; label: string; filename: string; folder?: string | null; deleted_at?: string | null };
+type TenureTrashItem = {
+  id: string;
+  vehicle_no: string;
+  customer_name: string;
+  stage?: string | null;
+  coverage_start_date?: string | null;
+  coverage_end_date?: string | null;
+  deleted_at?: string | null;
+};
 
 type TrashData = {
   retention_policy: "manual_reference_aware_purge";
@@ -25,12 +34,14 @@ type TrashData = {
   our_special_variants: VariantItem[];
   client_records: RecordItem[];
   assets: AssetItem[];
+  tenures?: TenureTrashItem[];
 };
 
-type TabKey = "sessions" | "templates" | "specials" | "records" | "assets";
+type TabKey = "sessions" | "tenures" | "templates" | "specials" | "records" | "assets";
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "sessions", label: "Sessions" },
+  { key: "tenures", label: "Motor Deals" },
   { key: "templates", label: "Templates" },
   { key: "specials", label: "Specials & Benefits" },
   { key: "records", label: "Records" },
@@ -142,6 +153,7 @@ export default function TrashPage() {
 
   const counts: Record<TabKey, number> = {
     sessions: data?.sessions.length ?? 0,
+    tenures: data?.tenures?.length ?? 0,
     templates: data?.templates.length ?? 0,
     specials: (data?.our_specials.length ?? 0) + (data?.our_special_variants.length ?? 0),
     records: data?.client_records.length ?? 0,
@@ -177,7 +189,7 @@ export default function TrashPage() {
               </button>
             ))}
           </div>
-          {counts.sessions + counts.templates + counts.specials + counts.records + counts.assets > 0 ? (
+          {counts.sessions + counts.tenures + counts.templates + counts.specials + counts.records + counts.assets > 0 ? (
             <div className="flex items-center gap-2">
               {selected.size > 0 && (
                 <Button
@@ -253,6 +265,44 @@ export default function TrashPage() {
                           Restore
                         </Button>
                         <Button variant="ghost" size="sm" icon={<Trash size={14} weight="bold" />} onClick={() => setConfirmForever({ entityType: "session", entityId: item.id, label: item.filename })} className="text-[var(--rl-red)] hover:bg-[var(--rl-red-light)]" title="Delete forever" />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        ) : tab === "tenures" ? (
+          <Card className="overflow-x-auto">
+            <table className="w-full min-w-[640px]">
+              <thead>
+                <tr className="border-b border-[var(--rl-border)]">
+                  <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Vehicle</th>
+                  <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Customer</th>
+                  <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Policy Period</th>
+                  <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Stage</th>
+                  <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Deleted</th>
+                  <th className="px-4 py-3 text-left text-[12px] font-semibold text-[var(--rl-text-muted)] uppercase tracking-wider">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.tenures?.length ?? 0) === 0 ? (
+                  <tr><td colSpan={6} className="px-4 py-10 text-center text-[14px] text-[var(--rl-text-muted)]">No motor deals in trash.</td></tr>
+                ) : data?.tenures?.map((item) => (
+                  <tr key={item.id} className="border-b border-[var(--rl-border)] last:border-0">
+                    <td className="px-4 py-3 text-[14px] font-bold font-mono text-[var(--rl-text-strong)]">{item.vehicle_no}</td>
+                    <td className="px-4 py-3 text-[14px] font-medium text-[var(--rl-text-strong)]">{item.customer_name || "-"}</td>
+                    <td className="px-4 py-3 text-[13px] font-mono text-[var(--rl-text-muted)]">
+                      {item.coverage_start_date ? item.coverage_start_date.slice(0, 10) : "—"} → {item.coverage_end_date ? item.coverage_end_date.slice(0, 10) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-[13px] text-[var(--rl-text-muted)]">{item.stage || "Quotations"}</td>
+                    <td className="px-4 py-3 text-[13px] text-[var(--rl-text-muted)]">{item.deleted_at ? new Date(item.deleted_at).toLocaleString() : "-"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <Button variant="secondary" size="sm" icon={<ArrowCounterClockwise size={16} weight="bold" />} loading={restoring.has(item.id)} onClick={() => restore("tenures", item.id)}>
+                          Restore
+                        </Button>
+                        <Button variant="ghost" size="sm" icon={<Trash size={14} weight="bold" />} onClick={() => setConfirmForever({ entityType: "insurance_tenure", entityId: item.id, label: item.vehicle_no })} className="text-[var(--rl-red)] hover:bg-[var(--rl-red-light)]" title="Delete forever" />
                       </div>
                     </td>
                   </tr>

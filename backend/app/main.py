@@ -7,12 +7,10 @@ import logging
 import os
 import sys
 import time
-from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import router
@@ -41,16 +39,32 @@ def _setup_logging() -> None:
     logging.getLogger("app").setLevel(logging.INFO)
 
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Log every incoming HTTP request and response status in real time."""
+class RequestLoggingMiddleware:
+    """Pure ASGI middleware logging HTTP status without buffering StreamingResponse/SSE."""
 
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
         start_time = time.perf_counter()
-        response = await call_next(request)
-        duration_ms = (time.perf_counter() - start_time) * 1000
-        logger = logging.getLogger("app.http")
-        logger.info("%s %s -> %d (%.1fms)", request.method, request.url.path, response.status_code, duration_ms)
-        return response
+        status_code = 500
+        method = scope.get("method", "GET")
+        path = scope.get("path", "")
+
+        async def send_wrapper(message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = int(message.get("status", 500))
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logging.getLogger("app.http").info("%s %s -> %d (%.1fms)", method, path, status_code, duration_ms)
 
 
 def create_app() -> FastAPI:

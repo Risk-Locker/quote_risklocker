@@ -17,13 +17,16 @@ from app.models.enums import AccountStatus, Role
 from app.models.tables import (
     ClientRecord,
     GeneratedPdfVersion,
+    InsuranceTenure,
     OurSpecial,
     OurSpecialVariant,
     OutputTemplateConfig,
     QuotationDraft,
     RenderSnapshot,
+    Session as SessionModel,
     TemplateAsset,
     TemplateRevision,
+    TenureComparisonEntry,
     TrashRecord,
     UploadedFile,
 )
@@ -214,6 +217,63 @@ def purge_expired_template_assets(db: Session, now: datetime) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- insurance tenures (motor deals)
+
+def soft_delete_tenure(
+    db: Session,
+    settings: Settings | None,
+    user,
+    tenure: InsuranceTenure,
+    *,
+    commit: bool = True,
+) -> None:
+    """Soft-delete a motor renewal tenure for 30-day Trash recovery without wiping linked files."""
+    if tenure.deleted_at is not None:
+        return
+    retention_days = getattr(settings, "trash_retention_days", 30)
+    original_status = tenure.status or "draft"
+    tenure.mark_deleted(retention_days)
+    tenure.is_discarded = True
+    _trash_entry(db, user, "insurance_tenure", tenure.id, original_status, retention_days)
+
+    child_sessions = list(
+        db.scalars(select(SessionModel).where(SessionModel.tenure_id == tenure.id)).all()
+    )
+    for sess in child_sessions:
+        if sess.status != "trash":
+            sess.status = "trash"
+        sess.is_tenure_active = False
+
+    if commit:
+        db.commit()
+
+
+def restore_tenure(db: Session, user, tenure_id: str) -> None:
+    """Restore a soft-deleted motor renewal tenure and reactivate its linked sessions."""
+    _ = user
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure or not tenure.deleted_at:
+        raise AppError("Trash motor deal not found.", 404)
+
+    tenure.restore()
+    tenure.is_discarded = False
+    _remove_trash_entries(db, "insurance_tenure", [tenure.id])
+
+    child_sessions = list(
+        db.scalars(select(SessionModel).where(SessionModel.tenure_id == tenure.id)).all()
+    )
+    for sess in child_sessions:
+        if sess.status == "trash":
+            sess.status = "ready"
+        sess.is_tenure_active = True
+
+    db.commit()
+
+
+def list_trash_tenures(db: Session) -> list[InsuranceTenure]:
+    return _list_trash_items(db, InsuranceTenure)
+
+
 # ---------------------------------------------------------------- combined
 
 def list_trash_categorized(db: Session, user, retention_days: int) -> dict:
@@ -257,6 +317,18 @@ def list_trash_categorized(db: Session, user, retention_days: int) -> dict:
          "deleted_at": a.deleted_at.isoformat() if a.deleted_at else None}
         for a in list_trash_template_assets(db)
     ]
+    tenures = [
+        {
+            "id": t.id,
+            "vehicle_no": t.vehicle_no,
+            "customer_name": t.customer_name,
+            "stage": t.stage,
+            "coverage_start_date": t.coverage_start_date.isoformat() if t.coverage_start_date else None,
+            "coverage_end_date": t.coverage_end_date.isoformat() if t.coverage_end_date else None,
+            "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
+        }
+        for t in list_trash_tenures(db)
+    ]
     return {
         "retention_policy": "manual_reference_aware_purge",
         "sessions": sessions,
@@ -265,6 +337,7 @@ def list_trash_categorized(db: Session, user, retention_days: int) -> dict:
         "our_special_variants": variants,
         "client_records": records,
         "assets": assets,
+        "tenures": tenures,
     }
 
 
@@ -427,6 +500,35 @@ def permanent_delete_template_asset(db: Session, user, asset_id: str) -> None:
     db.commit()
 
 
+def permanent_delete_tenure(db: Session, user, tenure_id: str, storage=None) -> None:
+    _ = storage
+    _require_admin_for_category(user)
+    tenure = db.get(InsuranceTenure, tenure_id)
+    if not tenure or not tenure.deleted_at:
+        raise AppError("Trash motor deal not found.", 404)
+
+    # Clear self-referential links & unlink sessions before removing the tenure row
+    db.execute(
+        update(InsuranceTenure)
+        .where(InsuranceTenure.previous_tenure_id == tenure.id)
+        .values(previous_tenure_id=None)
+    )
+    db.execute(
+        update(InsuranceTenure)
+        .where(InsuranceTenure.superseded_by_tenure_id == tenure.id)
+        .values(superseded_by_tenure_id=None)
+    )
+    db.execute(
+        update(SessionModel)
+        .where(SessionModel.tenure_id == tenure.id)
+        .values(tenure_id=None, is_tenure_active=False)
+    )
+    db.execute(delete(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == tenure.id))
+    _remove_trash_entries(db, "insurance_tenure", [tenure.id])
+    db.delete(tenure)
+    db.commit()
+
+
 def permanent_delete_trash_record(db: Session, user, trash_id: str, storage) -> None:
     """Permanently delete a single item from the trash using its TrashRecord ID."""
     trash_record = db.query(TrashRecord).filter(TrashRecord.id == trash_id).first()
@@ -448,13 +550,23 @@ def permanent_delete_trash_record(db: Session, user, trash_id: str, storage) -> 
         permanent_delete_client_record(db, user, entity_id)
     elif entity_type == "template_asset":
         permanent_delete_template_asset(db, user, entity_id)
+    elif entity_type == "insurance_tenure":
+        permanent_delete_tenure(db, user, entity_id, storage)
     else:
         raise AppError(f"Unknown trash entity type: {entity_type}", 400)
 
 
 def empty_all_trash(db: Session, user, storage) -> dict:
     """Permanently delete everything currently in the trash."""
-    counts: dict[str, int] = {"sessions": 0, "templates": 0, "our_specials": 0, "our_special_variants": 0, "client_records": 0, "assets": 0}
+    counts: dict[str, int] = {
+        "sessions": 0,
+        "templates": 0,
+        "our_specials": 0,
+        "our_special_variants": 0,
+        "client_records": 0,
+        "assets": 0,
+        "tenures": 0,
+    }
 
     for uploaded in list_trash(db, user):
         permanent_delete_session(db, user, uploaded.id, storage)
@@ -481,5 +593,8 @@ def empty_all_trash(db: Session, user, storage) -> dict:
     for asset in list_trash_template_assets(db):
         permanent_delete_template_asset(db, user, asset.id)
         counts["assets"] += 1
+    for tenure in list_trash_tenures(db):
+        permanent_delete_tenure(db, user, tenure.id, storage)
+        counts["tenures"] += 1
 
     return counts

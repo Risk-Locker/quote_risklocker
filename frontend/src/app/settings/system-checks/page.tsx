@@ -52,8 +52,8 @@ const LIVE_API_PROBES: Array<{ key: string; label: string; path: string }> = [
   { key: "/upload", label: "Upload & Gemini Quota", path: "/settings/limits" },
   { key: "/sessions", label: "Sessions & Sandbox Feed", path: "/sessions?limit=1" },
   { key: "/builder/global-benefits", label: "Global Benefit Concepts", path: "/business/benefit-concepts?page=1&page_size=5" },
-  { key: "/builder/templates/quotation-templates", label: "Published Templates", path: "/templates/published" },
-  { key: "/settings/extraction/road-tax", label: "JPJ Road Tax Rules", path: "/road-tax/rules" },
+  { key: "/builder/templates/quotation-templates", label: "Published Templates", path: "/business/templates/published" },
+  { key: "/settings/extraction/road-tax", label: "JPJ Road Tax Rules", path: "/admin/road-tax-rules" },
   { key: "/settings/system-checks", label: "Database Health", path: "/health" },
 ];
 

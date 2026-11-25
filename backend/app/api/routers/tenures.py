@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 from collections import defaultdict
+from decimal import Decimal
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -13,8 +14,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import current_user
+from app.api.deps import current_user, settings_dep
+from app.auth.rbac import require_role
+from app.core.config import Settings
 from app.db.session import get_db
+from app.models.enums import Role
 from app.services.realtime_hub import publish_realtime_update
 from app.models.tables import (
     CustomerAccount,
@@ -27,6 +31,7 @@ from app.models.tables import (
 )
 from app.services.customer_account_service import resolve_or_create_customer
 from app.services.insurance_tenure_service import (
+    _calculate_policy_end_date,
     auto_project_next_renewal,
     ensure_next_year_renewal_tenures,
     get_tenure_timeline,
@@ -35,7 +40,20 @@ from app.services.insurance_tenure_service import (
     shift_tenure_dates,
     update_tenure_status,
 )
+from app.services.ledger_query_service import (
+    LedgerFilterSpec,
+    apply_ledger_filters,
+    compute_months_summary,
+    compute_stage_summary,
+    compute_yoy_stats,
+    format_decimal_amount,
+    load_authoritative_comparison_map,
+    normalize_anchor,
+    normalize_policy_status,
+    parse_year_month,
+)
 from app.services.quotation_reference_service import generate_quotation_reference
+from app.services.trash_service import soft_delete_tenure
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +165,9 @@ class UpdateTenureLedgerRequest(BaseModel):
     coverage_start_date: str | None = None
     coverage_end_date: str | None = None
     winning_company_name: str | None = None
+    miss_reason: str | None = None
+    external_insurer: str | None = None
+    create_next_year_deal: bool | None = None
 
 
 class BulkConfirmHitRequest(BaseModel):
@@ -160,6 +181,7 @@ def create_tenure(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Create a new insurance tenure directly from staff comparison ledger input."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     # Resolve or create customer if IC or name given
     cust_id = None
     if payload.ic_no or payload.customer_name:
@@ -245,8 +267,9 @@ def prune_tenure_superseded_quotations(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Maintenance endpoint to prune superseded quotation files for a tenure."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
-    if not tenure:
+    if not tenure or tenure.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Tenure not found")
     from app.services.storage_janitor_service import prune_superseded_quotations
     return prune_superseded_quotations(db=db, tenure_id=tenure_id, dry_run=dry_run)
@@ -268,12 +291,16 @@ def list_calendar_sessions(
             selectinload(SessionModel.draft),
             selectinload(SessionModel.tenure),
         )
-        .where(SessionModel.status != "trash")
+        .outerjoin(SessionModel.tenure)
+        .where(
+            SessionModel.status != "trash",
+            or_(SessionModel.tenure_id.is_(None), InsuranceTenure.deleted_at.is_(None)),
+        )
     )
 
     if vehicle_no and vehicle_no.strip():
         veh = vehicle_no.strip().upper()
-        stmt = stmt.join(SessionModel.tenure).where(InsuranceTenure.vehicle_no == veh)
+        stmt = stmt.where(InsuranceTenure.vehicle_no == veh)
 
     sessions = list(db.scalars(stmt).all())
 
@@ -349,260 +376,101 @@ def list_calendar_sessions(
 @router.get("/stage-summary")
 def get_tenure_stage_summary(
     year: int | None = Query(None, description="Year to filter e.g. 2026"),
-    month: int | None = Query(None, ge=1, le=12, description="Month 1-12"),
+    month: str | None = Query(None, description="Month 1-12 or YYYY-MM"),
+    anchor: str = Query("all", description="Anchor lens: all, expiring, or starting"),
+    category: str | None = Query(None, description="active, lost, or all"),
+    status: str | None = Query(None),
+    policy_status: str = Query("all", description="all, issued, or pending"),
+    search: str | None = Query(None),
     show_hidden: bool = False,
+    show_discarded: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Retrieve live counts for the 10 stage KPI summary cards matching active filter."""
-    query = select(
-        InsuranceTenure.stage,
-        InsuranceTenure.coverage_start_date,
-        InsuranceTenure.coverage_end_date,
-        InsuranceTenure.expiry_month,
+    """Retrieve live counts for the stage KPI summary cards matching active filter."""
+    _ = user
+    parsed_year, parsed_month = parse_year_month(year, month)
+    spec = LedgerFilterSpec(
+        year=parsed_year,
+        month=parsed_month,
+        anchor=normalize_anchor(anchor),
+        category=category,
+        status=status,
+        policy_status=normalize_policy_status(policy_status),
+        search=search,
+        show_hidden=show_hidden,
+        show_discarded=show_discarded,
     )
-
-    query = query.where(InsuranceTenure.is_projected == False)
-    if not show_hidden:
-        query = query.where(InsuranceTenure.is_hidden == False)
-    query = query.where(InsuranceTenure.is_discarded == False)
-
-    if year and month and isinstance(month, int):
-        _, last_day = calendar.monthrange(year, month)
-        start_of_month = datetime(year, month, 1, 0, 0, 0, tzinfo=timezone.utc)
-        end_of_month = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
-        query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month)
-        )
-    elif year:
-        start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-        end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
-        query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
-        )
-
-    rows = db.execute(query).all()
-    stage_counts: dict[str, int] = defaultdict(int)
-    for stg, s_dt, e_dt, exp_m in rows:
-        if stg:
-            stage_counts[stg] += 1
-
-    return {
-        "quotations": stage_counts.get("Quotations", 0),
-        "material_to_client": stage_counts.get("Material to Client", 0),
-        "issue_policy": stage_counts.get("Issue Policy", 0),
-        "ucd_invoice_to_client": stage_counts.get("UCD Invoice to Client", 0),
-        "ucd_receipt_to_client": stage_counts.get("UCD Receipt to Client", 0),
-        "pending_payment": stage_counts.get("Pending Payment", 0),
-        "pending_delivery": stage_counts.get("Pending Delivery", 0),
-        "close_win": stage_counts.get("Close - Win", 0),
-        "close_lose": stage_counts.get("Close - Lose", 0),
-        "others": stage_counts.get("Others", 0),
-        "total": sum(stage_counts.values()),
-    }
+    return compute_stage_summary(db, spec)
 
 
 @router.get("/months")
 def list_tenure_months(
+    anchor: str = Query("all", description="Anchor lens: all, expiring, or starting"),
+    category: str | None = Query(None, description="active, lost, or all"),
+    stage: str | None = Query(None),
+    status: str | None = Query(None),
+    policy_status: str = Query("all", description="all, issued, or pending"),
+    search: str | None = Query(None),
     show_hidden: bool = False,
+    show_discarded: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Retrieve list of available months with start, end, and total tenure statistics."""
-    stmt = select(
-        InsuranceTenure.id,
-        InsuranceTenure.vehicle_no,
-        InsuranceTenure.coverage_start_date,
-        InsuranceTenure.coverage_end_date,
-        InsuranceTenure.expiry_month,
-        InsuranceTenure.status,
-        InsuranceTenure.stage,
-        InsuranceTenure.covernote_session_id,
-        InsuranceTenure.policy_number,
-        InsuranceTenure.previous_tenure_id,
+    """Retrieve list of available months with start, end, and anchor-matched total statistics."""
+    _ = user
+    spec = LedgerFilterSpec(
+        anchor=normalize_anchor(anchor),
+        category=category,
+        stage=stage,
+        status=status,
+        policy_status=normalize_policy_status(policy_status),
+        search=search,
+        show_hidden=show_hidden,
+        show_discarded=show_discarded,
     )
-    stmt = stmt.where(InsuranceTenure.is_projected == False)
-    stmt = stmt.where(InsuranceTenure.is_discarded == False)
-    if not show_hidden:
-        stmt = stmt.where(InsuranceTenure.is_hidden == False)
-
-    all_tenures = db.execute(stmt).all()
-
-    month_data: dict[str, dict[str, Any]] = defaultdict(lambda: {
-        "start_count": 0,
-        "end_count": 0,
-        "tenure_ids": set(),
-        "vehicles": set(),
-        "hit": 0,
-        "miss": 0,
-    })
-
-    for t_id, veh, start_dt, end_dt, exp_m, t_status, stage, cn_sess_id, pol_no, prev_tenure_id in all_tenures:
-        is_issued = bool(
-            stage in ("Issue Policy", "Close - Win")
-            or t_status in ("hit", "bound")
-            or cn_sess_id is not None
-            or pol_no
-        )
-        is_renewal = prev_tenure_id is not None
-
-        # Start month
-        if start_dt:
-            s_ym = start_dt.strftime("%Y-%m")
-            month_data[s_ym]["start_count"] += 1
-            month_data[s_ym]["tenure_ids"].add(t_id)
-            if veh:
-                month_data[s_ym]["vehicles"].add(veh)
-
-            if t_status == "hit":
-                month_data[s_ym]["hit"] += 1
-            elif t_status == "miss":
-                month_data[s_ym]["miss"] += 1
-
-        # End / Expiry month (cars expiring / renewing in this month)
-        # CRITICAL INVARIANT: Only officially issued policies OR original intake deals can project expiry.
-        # Unissued renewal tenures (e.g. 2027 awaiting cover note) cannot project phantom expiry into 2028!
-        can_project = is_issued or (not is_renewal)
-        if can_project:
-            e_ym = None
-            if end_dt:
-                e_ym = end_dt.strftime("%Y-%m")
-            elif exp_m:
-                e_ym = exp_m[:7]
-
-            if e_ym:
-                month_data[e_ym]["end_count"] += 1
-                if veh:
-                    month_data[e_ym]["vehicles"].add(veh)
-
-    result: list[dict[str, Any]] = []
-    for y in range(2024, 2031):
-        for m in range(1, 13):
-            key = f"{y:04d}-{m:02d}"
-            info = month_data.get(key)
-            if info:
-                tot = len(info["tenure_ids"])
-                hit_cnt = info["hit"]
-                miss_cnt = info["miss"]
-                end_cnt = info["end_count"]
-                pending_cnt = end_cnt if tot == 0 else max(0, tot - hit_cnt - miss_cnt)
-                result.append({
-                    "month": key,
-                    "total": tot,
-                    "start_count": info["start_count"],
-                    "end_count": end_cnt,
-                    "cars": len(info["vehicles"]),
-                    "hit": hit_cnt,
-                    "miss": miss_cnt,
-                    "pending": pending_cnt,
-                })
-            else:
-                result.append({
-                    "month": key,
-                    "total": 0,
-                    "start_count": 0,
-                    "end_count": 0,
-                    "cars": 0,
-                    "hit": 0,
-                    "miss": 0,
-                    "pending": 0,
-                })
-
-    result.sort(key=lambda x: x["month"])
-    return {"months": result}
+    return compute_months_summary(db, spec)
 
 
 @router.get("")
 def list_tenures(
     month: str | None = None,
     year: int | None = None,
+    anchor: str = Query("all", description="Anchor lens: all, expiring, or starting"),
     search: str | None = None,
     status: str | None = None,
     stage: str | None = None,
     category: str | None = None,
+    policy_status: str = Query("all", description="all, issued, or pending"),
     sub_agent: str | None = None,
     show_hidden: bool = False,
     show_discarded: bool = False,
-    sort_by: str | None = Query("last_activity", description="Sort by last_activity, vehicle_no, customer_name, stage, coverage_end_date"),
+    sort_by: str | None = Query("last_activity", description="Sort by last_activity, vehicle_no, customer_name, stage, coverage_end_date, coverage_period, created_at, pic"),
     sort_dir: str | None = Query("desc", description="Sort direction asc or desc"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    query = select(InsuranceTenure).where(InsuranceTenure.is_projected == False)
+    _ = user
+    norm_anchor = normalize_anchor(anchor)
+    parsed_year, parsed_month = parse_year_month(year, month)
+    target_year = parsed_year
 
-    if not show_hidden:
-        query = query.where(InsuranceTenure.is_hidden == False)
-
-    if not show_discarded:
-        query = query.where(InsuranceTenure.is_discarded == False)
-
-    target_year: int | None = None
-    target_month: int | None = None
-
-    # 1. Year and Month filtering
-    if month and month.strip() != "all":
-        m_str = month.strip()
-        y_val: int | None = None
-        m_val: int | None = None
-        if "-" in m_str:
-            parts = m_str.split("-")
-            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                y_val = int(parts[0])
-                m_val = int(parts[1])
-        elif m_str.isdigit() and year:
-            y_val = year
-            m_val = int(m_str)
-
-        if y_val and m_val:
-            target_year = y_val
-            target_month = m_val
-            _, last_day = calendar.monthrange(y_val, m_val)
-            start_of_month = datetime(y_val, m_val, 1, 0, 0, 0, tzinfo=timezone.utc)
-            end_of_month = datetime(y_val, m_val, last_day, 23, 59, 59, tzinfo=timezone.utc)
-
-            query = query.where(
-                InsuranceTenure.coverage_start_date.between(start_of_month, end_of_month)
-            )
-        else:
-            query = query.where(InsuranceTenure.coverage_start_date.isnot(None))
-
-    elif year and str(year) != "all":
-        target_year = year
-        start_of_year = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-        end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
-
-        query = query.where(
-            InsuranceTenure.coverage_start_date.between(start_of_year, end_of_year)
-        )
-
-    # 2. Category filtering: active (exclude Close - Lose & Others) vs lost vs all
-    if category == "active":
-        query = query.where(~InsuranceTenure.stage.in_(["Close - Lose", "Others"]))
-    elif category == "lost":
-        query = query.where(InsuranceTenure.stage.in_(["Close - Lose", "Others"]))
-
-    # 3. Specific stage filter
-    if stage and stage != "all":
-        query = query.where(InsuranceTenure.stage == stage.strip())
-
-    if status and status != "all":
-        query = query.where(InsuranceTenure.status == status.strip())
-
-    if sub_agent:
-        query = query.where(InsuranceTenure.sub_agent_name.ilike(f"%{sub_agent.strip()}%"))
-
-    if search:
-        term = f"%{search.strip()}%"
-        query = query.where(
-            or_(
-                InsuranceTenure.vehicle_no.ilike(term),
-                InsuranceTenure.customer_name.ilike(term),
-                InsuranceTenure.comment.ilike(term),
-                InsuranceTenure.sub_agent_name.ilike(term),
-            )
-        )
+    spec = LedgerFilterSpec(
+        year=parsed_year,
+        month=parsed_month,
+        anchor=norm_anchor,
+        category=category,
+        stage=stage,
+        status=status,
+        policy_status=normalize_policy_status(policy_status),
+        sub_agent=sub_agent,
+        search=search,
+        show_hidden=show_hidden,
+        show_discarded=show_discarded,
+    )
+    query = apply_ledger_filters(select(InsuranceTenure), spec, include_period=True)
 
     # Dynamic sorting
     actual_sort_by = (
@@ -626,20 +494,45 @@ def list_tenures(
     elif s_by == "stage":
         sort_col = InsuranceTenure.stage
         query = query.order_by(sort_col.desc().nullslast() if is_desc else sort_col.asc().nullsfirst(), InsuranceTenure.vehicle_no.asc())
-    elif s_by == "coverage_end_date":
-        sort_col = InsuranceTenure.coverage_end_date
+    elif s_by in ("coverage_end_date", "coverage_period"):
+        sort_col = InsuranceTenure.coverage_end_date if s_by == "coverage_end_date" else InsuranceTenure.coverage_start_date
+        query = query.order_by(sort_col.desc().nullslast() if is_desc else sort_col.asc().nullsfirst(), InsuranceTenure.vehicle_no.asc())
+    elif s_by == "created_at":
+        sort_col = InsuranceTenure.created_at
+        query = query.order_by(sort_col.desc().nullslast() if is_desc else sort_col.asc().nullsfirst(), InsuranceTenure.vehicle_no.asc())
+    elif s_by == "pic":
+        sort_col = InsuranceTenure.sub_agent_name
         query = query.order_by(sort_col.desc().nullslast() if is_desc else sort_col.asc().nullsfirst(), InsuranceTenure.vehicle_no.asc())
     else:
-        # Default: last_activity
         if is_desc:
             query = query.order_by(InsuranceTenure.last_activity_at.desc().nullslast(), InsuranceTenure.coverage_end_date.asc())
         else:
             query = query.order_by(InsuranceTenure.last_activity_at.asc().nullsfirst(), InsuranceTenure.coverage_end_date.asc())
 
-    # Count total
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
 
-    # Paginate and pre-load relations
+    from app.services.ledger_query_service import is_issued_policy_expr
+
+    tab_base_spec = LedgerFilterSpec(
+        year=parsed_year,
+        month=parsed_month,
+        anchor=norm_anchor,
+        category="active",
+        stage=stage,
+        status=status,
+        policy_status="all",
+        sub_agent=sub_agent,
+        search=search,
+        show_hidden=show_hidden,
+        show_discarded=show_discarded,
+    )
+    tab_base_query = apply_ledger_filters(select(InsuranceTenure.id), tab_base_spec, include_period=True)
+    active_total = db.scalar(select(func.count()).select_from(tab_base_query.subquery())) or 0
+    issued_count = db.scalar(
+        select(func.count()).select_from(tab_base_query.where(is_issued_policy_expr()).subquery())
+    ) or 0
+    pending_count = max(0, active_total - issued_count)
+
     p = page if isinstance(page, int) else 1
     ps = page_size if isinstance(page_size, int) else 50
     offset = (p - 1) * ps
@@ -656,8 +549,8 @@ def list_tenures(
     )
     tenures = list(db.scalars(paged_query).all())
 
-    # Batch-load all active sessions and pre-load drafts for all page tenures in one query
     tenure_ids = [t.id for t in tenures]
+    comp_by_session, comp_by_company = load_authoritative_comparison_map(db, tenure_ids)
     cn_session_ids = [t.covernote_session_id for t in tenures if t.covernote_session_id]
     sessions_by_tenure: dict[str, list[SessionModel]] = defaultdict(list)
     if tenure_ids:
@@ -667,7 +560,7 @@ def list_tenures(
         all_sessions = list(
             db.scalars(
                 select(SessionModel)
-                .options(selectinload(SessionModel.draft))
+                .options(selectinload(SessionModel.draft), selectinload(SessionModel.uploaded_file))
                 .where(
                     where_cond,
                     SessionModel.status != "trash",
@@ -685,14 +578,11 @@ def list_tenures(
     now = datetime.now(timezone.utc)
     items = []
     for t in tenures:
-        # Use pre-loaded active child sessions for this tenure
         sessions = sessions_by_tenure.get(t.id, [])
 
-        # Determine if this tenure is viewed as an UPCOMING RENEWAL for target_year
         is_upcoming_renewal = False
-        if target_year and t.coverage_start_date:
-            if t.coverage_start_date.year < target_year:
-                is_upcoming_renewal = True
+        if target_year and t.coverage_start_date and t.coverage_start_date.year < target_year:
+            is_upcoming_renewal = True
 
         sourced = []
         gen_quotes = []
@@ -700,25 +590,32 @@ def list_tenures(
             if getattr(s, "document_type", "quotation") == "covernote" or s.id == t.covernote_session_id:
                 continue
 
-            # When viewing an upcoming renewal (e.g. 2027), suppress quotes from prior tenure years (2026)
-            if is_upcoming_renewal:
-                s_yr = s.coverage_start_date.year if s.coverage_start_date else (s.created_at.year if s.created_at else None)
-                if s_yr and target_year is not None and s_yr < target_year:
-                    continue
-
             draft = s.draft
             f = draft.fields if draft else {}
+
             def _val(k: str) -> Any:
                 item = f.get(k)
                 return item.get("value") if isinstance(item, dict) else item
 
-            tot = _val("total_amount") or _val("total_payable")
-            sum_ins = _val("sum_insured") or _val("coverage_amount")
-            comp = s.detected_company or "Unknown"
+            s_comp_id = getattr(s, "company_id", None) or (getattr(draft, "company_id", None) if draft else None)
+            comp_entry = comp_by_session.get((t.id, s.id))
+            if comp_entry is None and s_comp_id:
+                comp_entry = comp_by_company.get((t.id, s_comp_id))
+
+            raw_tot = comp_entry.total_payable if comp_entry is not None else (_val("total_amount") or _val("total_payable"))
+            tot = format_decimal_amount(raw_tot)
+            raw_sum_ins = (
+                comp_entry.sum_insured
+                if (comp_entry is not None and comp_entry.sum_insured)
+                else (_val("sum_insured") or _val("coverage_amount"))
+            )
+            sum_ins = format_decimal_amount(raw_sum_ins)
+            comp = (comp_entry.company_name if comp_entry and comp_entry.company_name else None) or s.detected_company or "Unknown"
 
             is_win = bool(
-                (t.winning_quotation_ref and s.quotation_ref == t.winning_quotation_ref)
-                or (t.winning_company_id and getattr(s, "company_id", None) == t.winning_company_id)
+                (comp_entry is not None and comp_entry.is_recommended)
+                or (t.winning_quotation_ref and s.quotation_ref == t.winning_quotation_ref)
+                or (t.winning_company_id and s_comp_id == t.winning_company_id)
             )
             s_fn = s.uploaded_file.original_filename if s.uploaded_file else f"{comp}.pdf"
             s_start = s.coverage_start_date.isoformat() if s.coverage_start_date else None
@@ -727,6 +624,16 @@ def list_tenures(
                 f"{s.coverage_start_date.strftime('%d/%m/%Y')} - {s.coverage_end_date.strftime('%d/%m/%Y')}"
                 if (s.coverage_start_date and s.coverage_end_date)
                 else None
+            )
+
+            try:
+                sort_payable = Decimal(str(tot).replace(",", "").strip()) if tot is not None else Decimal("999999999")
+            except Exception:
+                sort_payable = Decimal("999999999")
+            sort_rank = (
+                (comp_entry.manual_rank or comp_entry.rank or 999)
+                if comp_entry is not None
+                else 999
             )
 
             sourced.append({
@@ -743,6 +650,8 @@ def list_tenures(
                 "document_type": getattr(s, "document_type", "quotation"),
                 "policy_number": getattr(s, "policy_number", None),
                 "is_winner": is_win,
+                "_sort_rank": sort_rank,
+                "_sort_payable": sort_payable,
             })
 
             if s.quotation_ref and s.quotation_ref.startswith("RL"):
@@ -753,17 +662,23 @@ def list_tenures(
                     "status": s.quotation_status,
                 })
 
+        sourced.sort(key=lambda q: (not q["is_winner"], q["_sort_rank"], q["_sort_payable"]))
+        for q in sourced:
+            q.pop("_sort_rank", None)
+            q.pop("_sort_payable", None)
+
         stage_up = t.stage_updated_at if t.stage_updated_at.tzinfo else t.stage_updated_at.replace(tzinfo=timezone.utc)
         days_in_stage = max(0, (now - stage_up).days) if t.stage_updated_at else 0
 
-        # Locate active cover note session for this tenure
         cn_sess = next((s for s in sessions if s.id == t.covernote_session_id), None)
         if not cn_sess:
             cn_sess = next((s for s in sessions if getattr(s, "document_type", "quotation") == "covernote"), None)
 
+        has_real_policy_number = bool(t.policy_number and t.policy_number.strip())
         covernote_info = None
         if cn_sess:
             f_cn = cn_sess.draft.fields if cn_sess.draft and isinstance(cn_sess.draft.fields, dict) else {}
+
             def _cn_val(k: str) -> Any:
                 item = f_cn.get(k)
                 return item.get("value") if isinstance(item, dict) else item
@@ -793,8 +708,7 @@ def list_tenures(
                 "uploaded_file_id": cn_sess.uploaded_file_id,
                 "file_name": cn_sess.uploaded_file.original_filename if cn_sess.uploaded_file else f"{cn_sess.detected_company or 'Policy'}.pdf",
             }
-        elif (t.policy_number or t.won_premium is not None or t.winning_company_id or t.stage in ("Issue Policy", "Close - Win") or t.status == "hit"):
-            # Fallback if covernote session not explicitly linked, but tenure was won/issued
+        elif has_real_policy_number or t.stage == "Close - Win" or t.status == "hit":
             s_date = t.coverage_start_date
             e_date = t.coverage_end_date
             s_fmt = s_date.strftime("%d/%m/%Y") if s_date else ""
@@ -813,10 +727,11 @@ def list_tenures(
                 "windscreen": None,
                 "towing": "Unlimited",
                 "uploaded_file_id": None,
-                "file_name": "Policy.pdf",
+                "file_name": None,
             }
 
         win_quote = next((sq for sq in sourced if sq.get("is_winner")), None)
+        has_selected_winner = bool(t.winning_company_id or t.won_premium is not None or win_quote)
         winning_file_id = (cn_sess.uploaded_file_id if cn_sess else None) or (win_quote.get("uploaded_file_id") if win_quote else None)
         winning_file_name = (cn_sess.uploaded_file.original_filename if cn_sess and cn_sess.uploaded_file else None) or (win_quote.get("file_name") if win_quote else None)
 
@@ -829,37 +744,24 @@ def list_tenures(
                 if not l_act_tz or s_act_tz > l_act_tz:
                     latest_act = s_act_tz
 
-        if is_upcoming_renewal:
-            out_stage = "Quotations"
-            out_status = "draft"
-            out_is_covernote_issued = False
-            out_winning_file_id = None
-            out_winning_file_name = None
-            out_won_premium = None
-            out_covernote_policy = None
+        upcoming_renewal_start = None
+        upcoming_renewal_end = None
+        if is_upcoming_renewal and t.coverage_end_date:
+            renew_start = t.coverage_end_date + timedelta(days=1)
+            renew_end = _calculate_policy_end_date(renew_start)
+            upcoming_renewal_start = renew_start.isoformat()
+            upcoming_renewal_end = renew_end.isoformat()
 
-            if t.coverage_end_date:
-                renew_start = t.coverage_end_date + timedelta(days=1)
-                renew_end = renew_start + timedelta(days=364)
-                out_cov_start = renew_start.isoformat()
-                out_cov_end = renew_end.isoformat()
-                out_exp_month = renew_end.strftime("%Y-%m")
-            else:
-                fallback_year = target_year or (t.coverage_start_date.year + 1 if t.coverage_start_date else 2027)
-                out_cov_start = datetime(fallback_year, 1, 1, tzinfo=timezone.utc).isoformat()
-                out_cov_end = datetime(fallback_year, 12, 31, tzinfo=timezone.utc).isoformat()
-                out_exp_month = f"{fallback_year}-12"
-        else:
-            out_stage = t.stage or "Quotations"
-            out_status = t.status
-            out_covernote_policy = covernote_info
-            out_is_covernote_issued = bool(covernote_info)
-            out_winning_file_id = winning_file_id
-            out_winning_file_name = winning_file_name
-            out_won_premium = float(t.won_premium) if t.won_premium is not None else None
-            out_cov_start = t.coverage_start_date.isoformat()
-            out_cov_end = t.coverage_end_date.isoformat()
-            out_exp_month = t.expiry_month
+        out_stage = t.stage or "Quotations"
+        out_status = t.status
+        out_covernote_policy = covernote_info
+        out_is_covernote_issued = bool(covernote_info)
+        out_winning_file_id = winning_file_id
+        out_winning_file_name = winning_file_name
+        out_won_premium = float(t.won_premium) if t.won_premium is not None else None
+        out_cov_start = t.coverage_start_date.isoformat()
+        out_cov_end = t.coverage_end_date.isoformat()
+        out_exp_month = t.expiry_month
 
         items.append({
             "id": t.id,
@@ -876,6 +778,10 @@ def list_tenures(
             "previous_coverage_start_date": t.coverage_start_date.isoformat(),
             "previous_coverage_end_date": t.coverage_end_date.isoformat(),
             "is_upcoming_renewal": is_upcoming_renewal,
+            "upcoming_renewal_start": upcoming_renewal_start,
+            "upcoming_renewal_end": upcoming_renewal_end,
+            "has_selected_winner": has_selected_winner,
+            "previous_tenure_id": t.previous_tenure_id,
             "status": out_status,
             "stage": out_stage,
             "business_type": t.business_type or "Renewal",
@@ -935,6 +841,9 @@ def list_tenures(
     return {
         "items": items,
         "total": total,
+        "active_total": active_total,
+        "issued_count": issued_count,
+        "pending_count": pending_count,
         "page": page,
         "page_size": page_size,
     }
@@ -948,8 +857,9 @@ def update_tenure_ledger_fields(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Inline update operational fields on a tenure directly from the Motor Renewal Ledger."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
-    if not tenure:
+    if not tenure or tenure.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Tenure not found")
 
     now = datetime.now(timezone.utc)
@@ -1033,13 +943,15 @@ def update_tenure_ledger_fields(
         try:
             s_dt = datetime.strptime(payload.coverage_start_date.strip()[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
             tenure.coverage_start_date = s_dt
-            tenure.expiry_month = f"{s_dt.year}-{s_dt.month:02d}"
+            if not (payload.coverage_end_date and payload.coverage_end_date.strip()) and tenure.coverage_end_date:
+                tenure.expiry_month = f"{tenure.coverage_end_date.year}-{tenure.coverage_end_date.month:02d}"
         except Exception:
             pass
     if payload.coverage_end_date is not None and payload.coverage_end_date.strip():
         try:
             e_dt = datetime.strptime(payload.coverage_end_date.strip()[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
             tenure.coverage_end_date = e_dt
+            tenure.expiry_month = f"{e_dt.year}-{e_dt.month:02d}"
         except Exception:
             pass
     if payload.winning_quotation_ref is not None:
@@ -1158,6 +1070,14 @@ def update_tenure_ledger_fields(
 
     if payload.is_discarded is not None:
         tenure.is_discarded = payload.is_discarded
+    if payload.miss_reason is not None:
+        tenure.miss_reason = payload.miss_reason.strip() or None
+    if payload.external_insurer is not None and payload.external_insurer.strip():
+        ext_txt = f"External insurer: {payload.external_insurer.strip()}"
+        if not tenure.miss_reason:
+            tenure.miss_reason = ext_txt
+        elif ext_txt not in tenure.miss_reason:
+            tenure.miss_reason = f"{tenure.miss_reason} ({ext_txt})"
     if payload.external_policy_start_date is not None:
         try:
             tenure.external_policy_start_date = (
@@ -1203,8 +1123,13 @@ def update_tenure_ledger_fields(
 
     if payload.is_discarded or tenure.is_discarded:
         remove_auto_created_next_year_tenure(db, tenure)
-    elif is_hit or is_miss:
+    elif is_hit:
         create_next_year_renewal_tenure(db, tenure, user_id=user.id)
+    elif is_miss:
+        if payload.create_next_year_deal is not False:
+            create_next_year_renewal_tenure(db, tenure, user_id=user.id)
+        else:
+            remove_auto_created_next_year_tenure(db, tenure)
     elif was_hit and not is_hit:
         remove_auto_created_next_year_tenure(db, tenure)
 
@@ -1227,6 +1152,7 @@ def bulk_confirm_hit(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Bulk confirm multiple tenures as won (Hit / Issued Policy) and roll forward next year renewals."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     from app.services.insurance_tenure_service import (
         create_next_year_renewal_tenure,
         record_stage_timestamp,
@@ -1235,7 +1161,7 @@ def bulk_confirm_hit(
     updated_ids: list[str] = []
     for tid in payload.tenure_ids:
         t = db.get(InsuranceTenure, tid)
-        if t and not t.is_discarded:
+        if t and not t.is_discarded and t.deleted_at is None:
             t.stage = "Close - Win"
             t.status = "hit"
             record_stage_timestamp(t, "Close - Win")
@@ -1255,8 +1181,9 @@ def set_tenure_as_main(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Mark this tenure as the approved/main policy for this vehicle and cohort."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
-    if not tenure:
+    if not tenure or tenure.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Tenure not found")
 
     tenure.is_main = True
@@ -1282,120 +1209,22 @@ def set_tenure_as_main(
 
 @router.get("/stats/yoy")
 def get_tenure_yoy_stats(
+    anchor: str = Query("all", description="Anchor lens: all, expiring, or starting"),
+    category: str | None = Query(None, description="active, lost, or all"),
     show_hidden: bool = False,
+    show_discarded: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Retrieve year-over-year tenure statistics (counts, cars, growth, active vs lost)."""
-    stmt = select(
-        InsuranceTenure.id,
-        InsuranceTenure.vehicle_no,
-        InsuranceTenure.coverage_start_date,
-        InsuranceTenure.coverage_end_date,
-        InsuranceTenure.expiry_month,
-        InsuranceTenure.stage,
-        InsuranceTenure.status,
-        InsuranceTenure.covernote_session_id,
-        InsuranceTenure.policy_number,
-        InsuranceTenure.previous_tenure_id,
+    """Retrieve year-over-year tenure statistics matching the shared ledger filter predicate."""
+    _ = user
+    spec = LedgerFilterSpec(
+        anchor=normalize_anchor(anchor),
+        category=category,
+        show_hidden=show_hidden,
+        show_discarded=show_discarded,
     )
-    stmt = stmt.where(InsuranceTenure.is_projected == False)
-    stmt = stmt.where(InsuranceTenure.is_discarded == False)
-    if not show_hidden:
-        stmt = stmt.where(InsuranceTenure.is_hidden == False)
-
-    rows = db.execute(stmt).all()
-
-    year_data: dict[str, dict[str, Any]] = defaultdict(lambda: {
-        "active": 0,
-        "lost": 0,
-        "tenure_ids": set(),
-        "vehicles": set(),
-    })
-
-    all_years_tenures: set[str] = set()
-    all_years_vehicles: set[str] = set()
-    all_active = 0
-    all_lost = 0
-
-    for t_id, veh, start_dt, end_dt, exp_m, stage, status, cn_sess_id, pol_no, prev_tenure_id in rows:
-        is_issued = bool(
-            stage in ("Issue Policy", "Close - Win")
-            or status in ("hit", "bound")
-            or cn_sess_id is not None
-            or pol_no
-        )
-        is_renewal = prev_tenure_id is not None
-        if is_issued or not is_renewal:
-            all_years_tenures.add(t_id)
-        if veh:
-            all_years_vehicles.add(veh)
-        is_lost = stage in ("Close - Lose", "Others")
-        if is_lost:
-            all_lost += 1
-        else:
-            all_active += 1
-
-        # Determine year(s)
-        # 1. Total policies in start year: unissued renewals do not count as policies; original intake deals do
-        if start_dt:
-            y_start = str(start_dt.year)
-            if not is_renewal or is_issued:
-                year_data[y_start]["tenure_ids"].add(t_id)
-            if veh:
-                year_data[y_start]["vehicles"].add(veh)
-            if is_lost:
-                year_data[y_start]["lost"] += 1
-            else:
-                year_data[y_start]["active"] += 1
-
-        # 2. Cars up for renewal in future year: anchored on expiry / end date
-        # CRITICAL INVARIANT: Only officially ISSUED policies OR original intake deals can project expiry.
-        # Unissued renewal tenures (e.g. 2027 awaiting cover note) cannot project phantom renewal years (2028)!
-        can_project = is_issued or (not is_renewal)
-        if can_project:
-            y_end = None
-            if end_dt:
-                y_end = str(end_dt.year)
-            elif exp_m and len(exp_m) >= 4 and exp_m[:4].isdigit():
-                y_end = exp_m[:4]
-
-            if y_end and (not start_dt or str(start_dt.year) != y_end):
-                # Future renewal year: include vehicle & active/lost, but NOT in tenure_ids (so total policies = 0)
-                if veh:
-                    year_data[y_end]["vehicles"].add(veh)
-                if is_lost:
-                    year_data[y_end]["lost"] += 1
-                else:
-                    year_data[y_end]["active"] += 1
-
-    sorted_years = sorted(year_data.keys())
-    result_list = []
-    prev_total = None
-    for y in sorted_years:
-        tot = len(year_data[y]["tenure_ids"])
-        growth = None
-        if prev_total is not None and prev_total > 0:
-            growth = round(((tot - prev_total) / prev_total) * 100, 1)
-        prev_total = tot
-        result_list.append({
-            "year": y,
-            "total": tot,
-            "cars": len(year_data[y]["vehicles"]),
-            "active": year_data[y]["active"],
-            "lost": year_data[y]["lost"],
-            "growth_percentage": growth,
-        })
-
-    return {
-        "years": result_list,
-        "all_years": {
-            "total": len(all_years_tenures),
-            "cars": len(all_years_vehicles),
-            "active": all_active,
-            "lost": all_lost,
-        },
-    }
+    return compute_yoy_stats(db, spec)
 
 
 @router.post("/sync-next-year-renewals")
@@ -1405,6 +1234,7 @@ def sync_next_year_renewals(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Admin endpoint to ensure next-year renewals are synced for all active vehicles."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     created = ensure_next_year_renewal_tenures(db, target_year=target_year, user_id=user.id)
     return {
         "status": "success",
@@ -1422,26 +1252,21 @@ class BulkDeleteTenuresRequest(BaseModel):
 def bulk_delete_tenures(
     payload: BulkDeleteTenuresRequest,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Delete multiple vehicle renewal policy tenures from the ledger in bulk."""
+    """Soft-delete multiple vehicle renewal policy tenures into 30-day Trash in bulk."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     deleted_ids: list[str] = []
     for tid in payload.tenure_ids:
         tenure = db.get(InsuranceTenure, tid)
-        if not tenure:
+        if not tenure or tenure.deleted_at is not None:
             continue
-        child_sessions = db.scalars(
-            select(SessionModel).where(SessionModel.tenure_id == tid)
-        ).all()
-        for s in child_sessions:
-            s.tenure_id = None
-            s.is_tenure_active = False
-            s.status = "trash"
-        db.delete(tenure)
+        soft_delete_tenure(db, settings, user, tenure, commit=False)
         deleted_ids.append(tid)
 
     db.commit()
-    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="Tenures deleted", extra_scopes=("comparison",))
+    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="Tenures moved to Trash", extra_scopes=("comparison",))
     return {"success": True, "deleted_count": len(deleted_ids), "deleted_ids": deleted_ids}
 
 
@@ -1449,36 +1274,38 @@ def bulk_delete_tenures(
 def delete_tenure_endpoint(
     tenure_id: str,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Delete a vehicle renewal policy tenure from the ledger."""
+    """Soft-delete a vehicle renewal policy tenure into 30-day Trash."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
-    if not tenure:
+    if not tenure or tenure.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Tenure not found")
 
-    # Unlink or trash child sessions safely
-    child_sessions = db.scalars(
-        select(SessionModel).where(SessionModel.tenure_id == tenure_id)
-    ).all()
-    for s in child_sessions:
-        s.tenure_id = None
-        s.is_tenure_active = False
-        s.status = "trash"
-
-    db.delete(tenure)
-    db.commit()
-    publish_realtime_update(scope="ledger", resource_id=tenure_id, actor=user, summary="Tenure deleted", extra_scopes=("comparison",))
+    soft_delete_tenure(db, settings, user, tenure, commit=True)
+    publish_realtime_update(scope="ledger", resource_id=tenure_id, actor=user, summary="Tenure moved to Trash", extra_scopes=("comparison",))
     return {"success": True, "deleted_tenure_id": tenure_id}
 
 
 @router.get("/yoy-stats")
 def get_tenure_yoy_stats_alias(
+    anchor: str = Query("all", description="Anchor lens: all, expiring, or starting"),
+    category: str | None = Query(None, description="active, lost, or all"),
     show_hidden: bool = False,
+    show_discarded: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Alias for /stats/yoy to satisfy ledger statistics queries."""
-    return get_tenure_yoy_stats(show_hidden=show_hidden, db=db, user=user)
+    return get_tenure_yoy_stats(
+        anchor=anchor,
+        category=category,
+        show_hidden=show_hidden,
+        show_discarded=show_discarded,
+        db=db,
+        user=user,
+    )
 
 
 @router.get("/pics")
@@ -1512,8 +1339,9 @@ def generate_tenure_quote(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Generate or assign an official Risklocker quotation reference for an insurer under this tenure."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     tenure = db.get(InsuranceTenure, tenure_id)
-    if not tenure:
+    if not tenure or tenure.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Tenure not found")
 
     sess = db.get(SessionModel, payload.session_id)
@@ -1547,6 +1375,7 @@ def update_tenure_outcome(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Update status, winning quote, won premium, or hit/miss notes for this tenure."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         updated = update_tenure_status(
             db,
@@ -1576,6 +1405,7 @@ def project_tenure_renewal(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Auto-projecting renewal slots is disabled. Policies strictly follow uploaded quotes."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     return {
         "success": True,
         "message": "Auto-projection disabled. Policies are created when uploaded by staff.",
@@ -1591,6 +1421,7 @@ def shift_tenure_coverage_dates(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Shift tenure coverage dates (+1yr -1d sync) for late renewals or customer adjustments."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         updated = shift_tenure_dates(
             db,
@@ -1619,6 +1450,7 @@ def lapse_tenure(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Mark tenure as lapsed (unrenewed/customer discontinued) while preserving historical record."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     try:
         lapsed = mark_tenure_lapsed(
             db,

@@ -8,12 +8,13 @@ import { fileUrl } from "@/lib/api";
 import type { TenureRow } from "../types";
 import { HighlightText } from "../HighlightText";
 
-type QuoteStatusTone = "covernote" | "previous" | "awaiting" | "none";
+type QuoteStatusTone = "covernote" | "previous" | "winner" | "awaiting" | "none";
 
 const STATUS_CHIP: Record<QuoteStatusTone, { label: string; className: string }> = {
   covernote: { label: "Cover Note", className: "bg-emerald-50 text-emerald-800 border-emerald-200" },
   previous: { label: "Previous Policy", className: "bg-blue-50 text-blue-800 border-blue-200" },
-  awaiting: { label: "Awaiting Cover Note", className: "bg-amber-50 text-amber-800 border-amber-200" },
+  winner: { label: "Winner Selected · Awaiting CN", className: "bg-amber-50 text-amber-800 border-amber-200" },
+  awaiting: { label: "Comparing Quotes", className: "bg-neutral-100 text-neutral-700 border-neutral-200" },
   none: { label: "No quotes yet", className: "bg-neutral-100 text-neutral-600 border-neutral-200" },
 };
 
@@ -42,28 +43,43 @@ function resolveQuoteHeadline(t: TenureRow): QuoteHeadline {
         : null,
     };
   }
-  const quotes = t.sourced_quotes || [];
+  const quotes = tenureOrNull(t.sourced_quotes);
   if (quotes.length === 0) {
+    if (t.has_selected_winner || t.winning_company_name || t.won_premium !== null) {
+      return {
+        company: t.winning_company_name || null,
+        amount: toDisplayAmount(t.won_premium),
+        tone: "winner",
+        pdf: t.winning_file_id
+          ? { fileId: t.winning_file_id, label: t.winning_file_name || "Won PDF", title: "Open Won Quotation PDF" }
+          : null,
+      };
+    }
     return { company: null, amount: null, tone: "none", pdf: null };
   }
-  const winner = quotes.find((q) => q.is_winner && q.uploaded_file_id);
-  const isSealed = Boolean(winner?.is_winner || t.stage === "Close - Win" || t.status === "hit");
+  const winner = quotes.find((q) => q.is_winner);
+  const leading = winner || quotes[0];
+  const isSealed = Boolean(winner?.is_winner || t.has_selected_winner || t.stage === "Close - Win" || t.status === "hit");
   let pdf: QuoteHeadline["pdf"] = null;
   if (t.winning_file_id) {
     pdf = { fileId: t.winning_file_id, label: "Won PDF", title: "Open Won Quotation PDF" };
-  } else if (winner?.uploaded_file_id) {
+  } else if (leading?.uploaded_file_id) {
     pdf = {
-      fileId: winner.uploaded_file_id,
+      fileId: leading.uploaded_file_id,
       label: isSealed ? "Accepted PDF" : "Leading PDF",
-      title: `Open ${isSealed ? "Accepted" : "Leading"} Quotation PDF (${winner.company})`,
+      title: `Open ${isSealed ? "Accepted" : "Leading"} Quotation PDF (${leading.company})`,
     };
   }
   return {
-    company: t.winning_company_name || quotes[0].company,
-    amount: toDisplayAmount(t.won_premium) ?? toDisplayAmount(quotes[0].total_payable),
-    tone: "awaiting",
+    company: t.winning_company_name || leading.company,
+    amount: toDisplayAmount(t.won_premium) ?? toDisplayAmount(leading.total_payable),
+    tone: isSealed ? "winner" : "awaiting",
     pdf,
   };
+}
+
+function tenureOrNull<T>(arr: T[] | undefined | null): T[] {
+  return Array.isArray(arr) ? arr : [];
 }
 
 function ComparisonLink({ tenureId, count }: { tenureId: string; count: number }) {
@@ -83,7 +99,7 @@ function ComparisonLink({ tenureId, count }: { tenureId: string; count: number }
 function PdfLink({ pdf, search, compact }: { pdf: NonNullable<QuoteHeadline["pdf"]>; search: string; compact: boolean }) {
   return (
     <a
-      href={fileUrl(pdf.fileId)}
+      href={fileUrl(`/uploaded-files/${pdf.fileId}/content`)}
       target="_blank"
       rel="noopener noreferrer"
       className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 px-1.5 rounded border border-rose-200 transition-colors min-w-0"
