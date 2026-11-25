@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -201,4 +202,133 @@ def format_coverage_value(val: object, coverage_format: str | None = None) -> st
         return f"{text_val} KM" if not text_val.lower().endswith("km") else text_val
 
     return text_val
+
+
+_NON_INFORMATIVE_LIMIT_TOKENS = {
+    "",
+    "included",
+    "included standard cover",
+    "standard",
+    "yes",
+    "true",
+    "selected",
+    "optional",
+    "foc",
+    "as quoted",
+    "none",
+    "null",
+    "nil",
+    "-",
+    "—",
+}
+
+
+def _parse_positive_money(raw: object) -> float | None:
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, dict):
+        raw = raw.get("amount") if raw.get("amount") is not None else raw.get("value")
+    s = re.sub(r"[^0-9.]", "", str(raw or ""))
+    if not s:
+        return None
+    try:
+        val = float(s)
+        return val if val > 0 else None
+    except ValueError:
+        return None
+
+
+def benefit_auto_coverage_domain(concept_key: str | None, label: str | None) -> str:
+    """Classify a benefit into one of the 3 automatic coverage domains or 'none'."""
+    combined = f"{concept_key or ''} {label or ''}".lower().replace("_", " ").replace("-", " ")
+    if any(
+        tok in combined
+        for tok in (
+            "windscreen",
+            "wndscrn",
+            "w screen",
+            "cermin",
+            "endorsement 89",
+            "endt 89",
+            "endorsement 97",
+            "endt 97",
+        )
+    ):
+        return "windscreen"
+    if any(tok in combined for tok in ("towing", "roadside assistance", "auto assist", "e assist smart driver")):
+        if "ev battery" not in combined and "out of charge" not in combined and "international" not in combined:
+            return "towing"
+    if any(
+        tok in combined
+        for tok in (
+            "betterment",
+            "endorsement 113",
+            "endt 113",
+            "endorsement 030",
+            "endorsement 30",
+            "make vehicle aged",
+        )
+    ):
+        return "betterment"
+    return "none"
+
+
+def is_auto_coverage_allowed_for_benefit(
+    concept_key: str | None,
+    label: str | None,
+    raw_limit: object,
+    raw_cost: object = None,
+) -> bool:
+    """Strict Zero-Fake-Coverage Gate for automatic extraction/rescan.
+
+    Only Windscreen (PDF sum insured), Towing (km / Unlimited), and Betterment
+    (vehicle age / waiver text) may populate an automatic coverage value. All
+    other benefits (LLOP, LLP, Special Perils, Private Car 365, SRCC, etc.)
+    keep coverage empty unless manually edited by a user.
+    """
+    if raw_limit is None:
+        return False
+    if isinstance(raw_limit, dict):
+        role = str(raw_limit.get("semantic_role") or "").strip().lower()
+        if role == "premium":
+            return False
+        if raw_limit.get("type") == "distance":
+            if raw_limit.get("unlimited") is True:
+                limit_str = "Unlimited"
+            elif raw_limit.get("value") is not None and raw_limit.get("unit"):
+                limit_str = f"{raw_limit.get('value')} {raw_limit.get('unit')}".strip()
+            else:
+                limit_str = str(raw_limit.get("display_text") or raw_limit.get("value") or "").strip()
+        else:
+            limit_str = str(raw_limit.get("display_text") or raw_limit.get("value") or "").strip()
+            if not limit_str and raw_limit.get("unlimited") is True:
+                limit_str = "Unlimited"
+    else:
+        limit_str = str(raw_limit).strip()
+
+    low = limit_str.lower().rstrip(" .")
+    if low in _NON_INFORMATIVE_LIMIT_TOKENS:
+        return False
+
+    limit_num = _parse_positive_money(raw_limit)
+    cost_num = _parse_positive_money(raw_cost)
+    if limit_num is not None and cost_num is not None and abs(limit_num - cost_num) <= 0.01:
+        return False
+
+    domain = benefit_auto_coverage_domain(concept_key, label)
+    if domain == "windscreen":
+        if "%" in limit_str:
+            return False
+        return limit_num is not None and limit_num >= 200.0
+    if domain == "towing":
+        if "unlimited" in low or re.search(r"\b\d[\d,]*(?:\.\d+)?\s*(?:km|kilometres?)\b", low):
+            return True
+        return False
+    if domain == "betterment":
+        if re.match(r"^(?:rm|myr)\b", low) or (limit_num is not None and "year" not in low and "yr" not in low):
+            return False
+        return "year" in low or "yr" in low or "waiv" in low
+
+    return False
+
 

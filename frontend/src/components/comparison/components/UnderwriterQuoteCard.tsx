@@ -590,45 +590,50 @@ export function UnderwriterQuoteCard({
             )}
           </div>
 
-          {/* Betterment Co-pay / Waiver */}
+          {/* Betterment Waiver */}
           <div className="h-8 flex items-center justify-between pt-2">
             <div className="flex items-center gap-1 text-[#6e6e73]">
-              <span>Betterment:</span>
-              {renderReviewFlag("waiver_betterment", "Betterment")}
+              <span>Betterment Waiver:</span>
+              {renderReviewFlag("waiver_betterment", "Betterment Waiver")}
             </div>
-            {onPatchEntryField ? (
-              <InlineComparisonFieldEditor
-                field="waiver_betterment"
-                label="Betterment"
-                currentValue={entry.waiver_betterment ? "No (0%)" : entry.betterment_display || "Yes"}
-                isOverridden={isFieldOverridden("waiver_betterment") || isFieldOverridden("betterment_rate")}
-                companyName={entry.company_name}
-                manufactureYear={tenure.manufacture_year}
-                bettermentRate={entry.betterment_rate}
-                isBettermentAuto={entry.betterment_is_auto}
-                onSave={(patch) => onPatchEntryField(entry, patch)}
-              >
-                <span
-                  className={`font-bold ${(entry.betterment_display && entry.betterment_display.startsWith("No")) || entry.waiver_betterment
-                      ? "text-emerald-700"
-                      : "text-amber-700"
-                    }`}
-                  title="Malaysian Tariff Scale: <5 yrs: 0%, 5 yrs: 15%, 6 yrs: 20%, 7 yrs: 25%, 8 yrs: 30%, 9 yrs: 35%, 10+ yrs: 40%"
+            {(() => {
+              const betDisplay = entry.betterment_display || (entry.waiver_betterment ? "Yes (0%)" : "No");
+              const isWaived = Boolean(entry.waiver_betterment) || betDisplay.startsWith("Yes");
+              const isBareNo = betDisplay.trim().toLowerCase() === "no";
+              const colorCls = isWaived
+                ? "text-emerald-700"
+                : isBareNo
+                  ? "text-[#6e6e73]"
+                  : "text-amber-700";
+              return onPatchEntryField ? (
+                <InlineComparisonFieldEditor
+                  field="waiver_betterment"
+                  label="Betterment Waiver"
+                  currentValue={betDisplay}
+                  isOverridden={isFieldOverridden("waiver_betterment") || isFieldOverridden("betterment_rate")}
+                  companyName={entry.company_name}
+                  manufactureYear={tenure.manufacture_year}
+                  waiverBetterment={entry.waiver_betterment}
+                  bettermentRate={entry.betterment_rate}
+                  isBettermentAuto={entry.betterment_is_auto}
+                  onSave={(patch) => onPatchEntryField(entry, patch)}
                 >
-                  {entry.betterment_display || (entry.waiver_betterment ? "No (0%)" : "Yes")}
+                  <span
+                    className={`font-bold ${colorCls}`}
+                    title="Malaysian Tariff Scale: <5 yrs: Yes (0%), 5 yrs: No (15%), 6 yrs: No (20%), 7 yrs: No (25%), 8 yrs: No (30%), 9 yrs: No (35%), 10+ yrs: No (40%); TPO/TPFT: No"
+                  >
+                    {betDisplay}
+                  </span>
+                </InlineComparisonFieldEditor>
+              ) : (
+                <span
+                  className={`font-bold cursor-help ${colorCls}`}
+                  title="Malaysian Tariff Scale: <5 yrs: Yes (0%), 5 yrs: No (15%), 6 yrs: No (20%), 7 yrs: No (25%), 8 yrs: No (30%), 9 yrs: No (35%), 10+ yrs: No (40%); TPO/TPFT: No"
+                >
+                  {betDisplay}
                 </span>
-              </InlineComparisonFieldEditor>
-            ) : (
-              <span
-                className={`font-bold cursor-help ${(entry.betterment_display && entry.betterment_display.startsWith("No")) || entry.waiver_betterment
-                    ? "text-emerald-700"
-                    : "text-amber-700"
-                  }`}
-                title="Malaysian Tariff Scale: <5 yrs: 0%, 5 yrs: 15%, 6 yrs: 20%, 7 yrs: 25%, 8 yrs: 30%, 9 yrs: 35%, 10+ yrs: 40%"
-              >
-                {entry.betterment_display || (entry.waiver_betterment ? "No (0%)" : "Yes")}
-              </span>
-            )}
+              );
+            })()}
           </div>
 
           {/* Excess */}

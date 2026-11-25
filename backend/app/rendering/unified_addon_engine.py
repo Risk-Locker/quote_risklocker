@@ -1146,6 +1146,28 @@ def build_unified_matrix_cards(
             ):
                 formatted_val = ""
 
+        # Strict Zero-Fake-Coverage Guard: never display premium cost or RM amounts on non-Windscreen/Towing/Betterment selected riders
+        has_manual_override = bool(item.get("has_manual_value_override"))
+        is_bundle_eff_pre = bool(item.get("is_bundle_effect") or item.get("cost_status") == "bundle_included")
+        if formatted_val and not has_manual_override and not is_bundle_eff_pre:
+            cand_price_obj = item.get("price") or item.get("optional_price")
+            p_raw = (cand_price_obj.get("amount") if cand_price_obj.get("amount") is not None else cand_price_obj.get("value")) if isinstance(cand_price_obj, dict) else cand_price_obj
+            if p_raw is not None:
+                try:
+                    p_n = float(re.sub(r"[^0-9.]", "", str(p_raw)) or "nan")
+                    v_n = float(re.sub(r"[^0-9.]", "", str(formatted_val)) or "nan")
+                    if p_n > 0 and abs(p_n - v_n) < 0.01:
+                        formatted_val = ""
+                except Exception:
+                    pass
+            if formatted_val and not is_betterment and cat_id != "windscreen" and cat_id != "towing":
+                if (
+                    cat_id in {"llop", "llp", "special_perils", "srcc", "all_drivers", "ncd_protector"}
+                    or bool(item.get("is_bundle"))
+                    or (sel and bool(re.match(r"^\s*(?:rm|myr)\s*[\d,]+", formatted_val, re.IGNORECASE)))
+                ):
+                    formatted_val = ""
+
         # Check if coverage limit is explicitly hidden (Windscreen is strictly mandatory on Malaysian motor quotes)
         is_hide_cov = bool(
             item.get("hide_coverage")

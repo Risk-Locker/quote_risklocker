@@ -40,6 +40,7 @@ export interface ReviewModalsProps {
   resolvingConflict: boolean;
   handleResolveConflict: () => void;
   toastMessage: string | null;
+  onDismissToast?: () => void;
   pendingExportAction: "download_pdf" | "copy_png" | "download_png" | null;
   setPendingExportAction: (val: "download_pdf" | "copy_png" | "download_png" | null) => void;
   confirmAndExecuteExport: (isSentToClient: boolean) => void;
@@ -71,6 +72,7 @@ export function ReviewModals({
   resolvingConflict,
   handleResolveConflict,
   toastMessage,
+  onDismissToast,
   pendingExportAction,
   setPendingExportAction,
   confirmAndExecuteExport,
@@ -462,9 +464,23 @@ export function ReviewModals({
 
       {/* 3. Floating Action Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-[var(--rl-radius-sm)] border border-neutral-800 bg-neutral-900/95 px-4 py-3 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all">
+        <div
+          role="status"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-[var(--rl-radius-sm)] border border-neutral-800 bg-neutral-900/95 px-4 py-3 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all"
+        >
           <CheckCircle size={16} weight="fill" className="text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
+          {onDismissToast ? (
+            <button
+              type="button"
+              onClick={onDismissToast}
+              className="ml-1 rounded p-0.5 text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors cursor-pointer"
+              aria-label="Dismiss notification"
+              title="Dismiss"
+            >
+              <X size={14} weight="bold" />
+            </button>
+          ) : null}
         </div>
       )}
 

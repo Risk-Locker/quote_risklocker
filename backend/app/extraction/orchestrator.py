@@ -7,6 +7,8 @@ import re
 
 from app.core.errors import AIExtractionUnavailableException
 from app.extraction.brand_logo_scanner import (
+    _match_canonical_brand,
+    extract_liberty_group_spatial_brand,
     extract_page1_primary_brand_signals,
     is_liberty_group_document,
     render_page1_logo_crop,
@@ -18,6 +20,7 @@ from app.extraction.draft_mapper import build_draft
 from app.extraction.layout import detect_layout
 from app.extraction.native_pdf import extract_native
 from app.extraction.ocr import run_enhanced_reading
+from app.extraction.page_filter import slice_pdf_bytes_excluding_pages, split_operative_pages
 from app.extraction.types import CandidateValue
 
 
@@ -33,15 +36,37 @@ def _augment_liberty_company_candidates(
     logo_crop_png: bytes | None,
     logo_color_meta: dict,
 ) -> None:
-    """Run visual logo + Page 1 verification whenever Liberty-group brands compete."""
+    """Run deterministic Page 1 spatial footer website + visual logo verification whenever Liberty-group brands compete."""
     if not is_liberty_group_document(combined_text, page1_text, source_filename):
         return
+
+    # 1. Deterministic bottom-right footer Website domain check (ground truth across Liberty / Kurnia / AmAssurance)
+    spatial_verdict = extract_liberty_group_spatial_brand(pdf_bytes, page1_text, db_companies=db_companies)
+    if spatial_verdict and float(spatial_verdict.get("confidence") or 0.0) >= 0.99:
+        canonical = str(spatial_verdict.get("canonical_company") or spatial_verdict.get("insurance_company") or "").strip()
+        if canonical:
+            candidates.setdefault("insurance_company", []).insert(
+                0,
+                CandidateValue(
+                    field="insurance_company",
+                    value=canonical,
+                    source_method="logo_vision_verified",
+                    score=0.998,
+                    page=1,
+                    evidence=str(spatial_verdict.get("reasoning") or f"Footer website: {spatial_verdict.get('domain')}"),
+                ),
+            )
+            if gemini_res is not None:
+                gemini_res["insurance_company"] = canonical
+            return
+
     p1_sig = extract_page1_primary_brand_signals(page1_text)
     if p1_sig.get("winning_brand"):
+        canon_p1 = _match_canonical_brand(str(p1_sig["winning_brand"]), db_companies)
         candidates.setdefault("insurance_company", []).append(
             CandidateValue(
                 field="insurance_company",
-                value=str(p1_sig["winning_brand"]),
+                value=canon_p1,
                 source_method="page1_brand_signal",
                 score=0.97,
                 page=1,
@@ -125,10 +150,16 @@ class ExtractionOrchestrator:
         combined_text = "\n".join(part for part in [native.raw_text, ocr_text] if part)
         ocr_page_text = [{"page": 1, "text": ocr_text, "source_method": "ocr"}] if ocr_text.strip() else []
         combined_page_text = [*native.page_text, *ocr_page_text]
+        operative_page_text, pds_page_nums = split_operative_pages(combined_page_text)
+        operative_words = [w for w in native.words if int(w.get("page", 1)) not in pds_page_nums]
+        operative_text = (
+            "\n".join(str(p.get("text") or "") for p in operative_page_text if str(p.get("text") or "").strip()).strip()
+            or combined_text
+        )
         candidates = find_candidates(
-            combined_text,
-            combined_page_text,
-            native.words,
+            operative_text,
+            operative_page_text,
+            operative_words,
             aliases=db_aliases,
             source_filename=source_filename or file_path.name,
             db_brands=db_brands,
@@ -143,6 +174,7 @@ class ExtractionOrchestrator:
             from app.extraction.gemini_extractor import extract_with_gemini_sync, get_key_pool
 
             pdf_bytes = file_path.read_bytes()
+            operative_pdf_bytes = slice_pdf_bytes_excluding_pages(pdf_bytes, pds_page_nums)
             pool_keys = get_key_pool().get_all_keys()
             if not pool_keys:
                 if fail_closed:
@@ -153,15 +185,15 @@ class ExtractionOrchestrator:
                     )
                 warnings.append("AI Notice: No GEMINI_API_KEY configured. Extracted via native PDF/OCR fallback.")
             elif len(pdf_bytes) > 500:
-                page1_text = str((combined_page_text[0] if combined_page_text else {}).get("text") or "")
+                page1_text = str((operative_page_text[0] if operative_page_text else {}).get("text") or "")
                 logo_crop_png: bytes | None = None
                 logo_color_meta: dict = {}
-                if is_liberty_group_document(combined_text, page1_text, source_filename or file_path.name):
+                if is_liberty_group_document(operative_text, page1_text, source_filename or file_path.name):
                     logo_crop_png, logo_color_meta = render_page1_logo_crop(pdf_bytes)
                 item_idx = abs(hash(source_filename or file_path.name)) % 100
                 gemini_res = extract_with_gemini_sync(
-                    pdf_bytes,
-                    document_text=combined_text,
+                    operative_pdf_bytes,
+                    document_text=operative_text,
                     source_filename=source_filename or file_path.name,
                     db_companies=db_companies,
                     db_benefit_concepts=db_benefit_concepts,
@@ -176,7 +208,7 @@ class ExtractionOrchestrator:
                 _augment_liberty_company_candidates(
                     pdf_bytes=pdf_bytes,
                     page1_text=page1_text,
-                    combined_text=combined_text,
+                    combined_text=operative_text,
                     source_filename=source_filename or file_path.name,
                     db_companies=db_companies,
                     candidates=candidates,
@@ -276,44 +308,46 @@ class ExtractionOrchestrator:
                         # Find matching concept robustly across id/concept_id, key/concept_key, name/label
                         matched_concept = None
                         b_norm = b_label.lower().replace(" ", "-").replace("_", "-")
-                        for c in (db_benefit_concepts or []):
-                            c_k = (c.get("concept_key") or c.get("key") or "").lower().replace("_", "-")
-                            c_lbl = (c.get("label") or c.get("name") or "").lower()
-                            if b_key and c_k and (c_k == b_key.lower().replace("_", "-")):
-                                matched_concept = c
-                                break
-                            if c_lbl and (c_lbl == b_label.lower() or c_lbl in b_label.lower() or b_label.lower() in c_lbl):
-                                matched_concept = c
-                                break
-                            if b_norm and c_k and (c_k in b_norm or b_norm in c_k):
-                                matched_concept = c
-                                break
+                        b_neg_blob = f"{b_label} {b_raw}".lower()
+                        is_llop_negligent = (
+                            "negligent act" in b_neg_blob
+                            or "llna" in b_norm
+                            or "llop" in b_norm
+                        )
+                        if is_llop_negligent:
+                            for c in (db_benefit_concepts or []):
+                                c_k = (c.get("concept_key") or c.get("key") or "").lower().replace("_", "-")
+                                if c_k == "legal-liability-of-passengers":
+                                    matched_concept = c
+                                    break
+                        if matched_concept is None:
+                            for c in (db_benefit_concepts or []):
+                                c_k = (c.get("concept_key") or c.get("key") or "").lower().replace("_", "-")
+                                if "negligent" in b_neg_blob and c_k == "legal-liability-to-passengers":
+                                    continue
+                                c_lbl = (c.get("label") or c.get("name") or "").lower()
+                                if b_key and c_k and (c_k == b_key.lower().replace("_", "-")):
+                                    matched_concept = c
+                                    break
+                                if c_lbl and (c_lbl == b_label.lower() or c_lbl in b_label.lower() or b_label.lower() in c_lbl):
+                                    matched_concept = c
+                                    break
+                                if b_norm and c_k and (c_k in b_norm or b_norm in c_k):
+                                    matched_concept = c
+                                    break
 
                         concept_id = (matched_concept.get("concept_id") or matched_concept.get("id")) if matched_concept else None
                         c_key = (matched_concept.get("concept_key") or matched_concept.get("key")) if matched_concept else (b_key or b_norm)
 
-                        clean_cov = re.sub(r"[^0-9.]", "", cov_limit)
-                        clean_cost = re.sub(r"[^0-9.]", "", cost)
-                        clean_val = re.sub(r"[^0-9.]", "", b_val)
+                        from app.domain.benefits import is_auto_coverage_allowed_for_benefit
 
-                        # Genuine coverage limit must be non-zero and distinct from premium price
-                        final_cov_limit = ""
-                        if clean_cov:
-                            try:
-                                c_num = float(clean_cov)
-                                p_num = float(clean_cost) if clean_cost else None
-                                if c_num > 0 and (p_num is None or abs(c_num - p_num) > 0.01):
-                                    final_cov_limit = cov_limit
-                            except Exception:
-                                final_cov_limit = cov_limit
-                        elif clean_val and clean_cost:
-                            try:
-                                v_num = float(clean_val)
-                                p_num = float(clean_cost)
-                                if v_num > 0 and abs(v_num - p_num) > 0.01 and b_val.lower() not in {"included", "standard", "yes", "true"}:
-                                    final_cov_limit = b_val
-                            except Exception:
-                                pass
+                        # Strict Zero-Fake-Coverage Gate: only Windscreen, Towing, and Betterment allow automatic coverage limits
+                        candidate_cov = ""
+                        if cov_limit and is_auto_coverage_allowed_for_benefit(c_key, b_label, cov_limit, cost):
+                            candidate_cov = cov_limit
+                        elif b_val and is_auto_coverage_allowed_for_benefit(c_key, b_label, b_val, cost):
+                            candidate_cov = b_val
+                        final_cov_limit = candidate_cov
 
                         typed_val = None
                         if final_cov_limit:
@@ -471,7 +505,7 @@ class ExtractionOrchestrator:
         fields, draft_warnings, draft_status = build_draft(
             candidates,
             benefit_lines=benefit_lines,
-            raw_text=combined_text,
+            raw_text=operative_text,
         )
         warnings.extend(draft_warnings)
 
@@ -484,7 +518,7 @@ class ExtractionOrchestrator:
             if detected_packs:
                 candidate_payload["detected_packs"] = detected_packs
         reading_quality = "ready" if draft_status == "Ready" else "cannot_read" if draft_status == "Cannot Read" else "check_needed"
-        fallback_lines = extract_benefit_lines(combined_page_text, concepts=db_benefit_concepts or [])
+        fallback_lines = extract_benefit_lines(operative_page_text, concepts=db_benefit_concepts or [])
         if not benefit_lines:
             benefit_lines = fallback_lines
         elif fallback_lines:

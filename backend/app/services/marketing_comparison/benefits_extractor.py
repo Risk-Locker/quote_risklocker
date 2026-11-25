@@ -23,6 +23,7 @@ from app.models.tables import (
     InsuranceCompany,
     Session as SessionModel,
 )
+from app.extraction.page_filter import extract_operative_text_from_record
 from app.services.benefit_evaluation_engine import BenefitEvaluationEngine, EvaluatedBenefit
 from app.services.marketing_comparison.ncd_evaluator import (
     check_has_betterment_peril,
@@ -34,6 +35,17 @@ from app.services.marketing_comparison.ncd_evaluator import (
 from app.services.marketing_comparison.towing_evaluator import (
     resolve_insurer_towing_limit,
 )
+
+def _get_operative_ext_text_and_pds_pages(ext_rec: Any) -> tuple[str, set[int]]:
+    """Return non-PDS operative document text and excluded PDS page numbers."""
+    if not ext_rec:
+        return "", set()
+    return extract_operative_text_from_record(
+        page_text=getattr(ext_rec, "page_text", None),
+        raw_text=getattr(ext_rec, "raw_text", None),
+        ocr_text=getattr(ext_rec, "ocr_text", None),
+    )
+
 
 def _extract_vehicle_year_from_draft(f: dict[str, Any]) -> int | None:
     """Extract vehicle manufacture year from draft fields."""
@@ -351,14 +363,17 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
             up_file = getattr(s_obj, "uploaded_file", None)
             ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
             if ext_rec:
-                # 3a. 2D Spatial Words Alignment on extraction_record
+                operative_txt, pds_pages = _get_operative_ext_text_and_pds_pages(ext_rec)
+                # 3a. 2D Spatial Words Alignment on extraction_record (excluding PDS pages)
                 words = getattr(ext_rec, "words", None) or []
                 if isinstance(words, list) and words:
                     for w in words:
+                        w_page = int(w.get("page", 1))
+                        if w_page in pds_pages:
+                            continue
                         t = str(w.get("text", "")).lower().strip(" :*")
                         if t in ("basic", "premium asas", "caruman asas", "sumbangan asas"):
                             w_top = float(w.get("top", 0))
-                            w_page = int(w.get("page", 1))
                             row_words = [
                                 rw for rw in words
                                 if int(rw.get("page", 1)) == w_page
@@ -386,7 +401,13 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
                         c_val = cands.get(ck)
                         if isinstance(c_val, list) and c_val:
                             for item in c_val:
-                                item_v = item.get("value") if isinstance(item, dict) else item
+                                if isinstance(item, dict):
+                                    item_page = item.get("page")
+                                    if item_page is not None and int(item_page) in pds_pages:
+                                        continue
+                                    item_v = item.get("value")
+                                else:
+                                    item_v = item
                                 val = _to_float(item_v)
                                 if is_valid_bp(val):
                                     return val, term_label
@@ -394,8 +415,8 @@ def _extract_exact_basic_figure(f: dict[str, Any], company_name: str = "", s_obj
                             val = _to_float(c_val)
                             if is_valid_bp(val):
                                 return val, term_label
-                # 4. Fallback: OCR / Raw text regex scan on extraction_record
-                text_to_search = (getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")
+                # 4. Fallback: OCR / Operative text regex scan on extraction_record
+                text_to_search = operative_txt
                 if text_to_search:
                     m = re.search(
                         r"(?i)(?:basic\s+premium|premium\s+asas|basic\s+contribution|sumbangan\s+asas)[\s\S]{0,60}?(?:RM|MYR)?\s*([\d,]+\.\d{2})",
@@ -474,8 +495,9 @@ def format_canonical_perils(combined_text: str, tokens: list[str] | None = None)
     if any(k in text for k in ("towing", "tunda", "24/7 emergency", "unlimited towing", "towing mileage", "extra towing", "towing upgrade", "towing assistance", "breakdown assistance", "auto assist", "tele bantuan", "mestari assist", "e-assist", "road rangers")) or re.search(r"\b(?:endorsement|end|end\.)\s*89\b", text) or ("89" in end_tokens):
         add("TOWING")
 
-    # 3. LLP (Legal Liability to Passengers / Endorsement 100)
-    if any(k in text for k in ("legal liability to passenger", "liability to passenger", "legal liability to pax", "lltp", "end 100", "endorsement 100", "end. 100")) or re.search(r"\bllp\b", text) or re.search(r"\b(?:endorsement|end|end\.)\s*100\b", text) or ("100" in end_tokens):
+    # 3. LLP (Legal Liability to Passengers / Endorsement 100) — exclude 'LLP for Negligent Acts' (which is LLOP)
+    text_for_llp = re.sub(r"\bllp\s+for\s+negligent\s+acts?\b", " ", text, flags=re.IGNORECASE)
+    if any(k in text_for_llp for k in ("legal liability to passenger", "liability to passenger", "legal liability to pax", "lltp", "end 100", "endorsement 100", "end. 100")) or re.search(r"\bllp\b", text_for_llp) or re.search(r"\b(?:endorsement|end|end\.)\s*100\b", text_for_llp) or ("100" in end_tokens):
         add("LLP")
 
     # 4. LLOP (Legal Liability of Passengers / Endorsement 72)
@@ -606,9 +628,12 @@ def _extract_vehicle_sum_insured(f: dict[str, Any], s_obj: Any = None) -> float:
         up_file = getattr(s_obj, "uploaded_file", None)
         ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
         if ext_rec:
-            # Check blocks first (e.g. Sompo: 'RM 161,000.00 \n VCC655 \n Vehicle Agreed Value')
+            operative_txt, pds_pages = _get_operative_ext_text_and_pds_pages(ext_rec)
+            # Check blocks first (e.g. Sompo: 'RM 161,000.00 \n VCC655 \n Vehicle Agreed Value'), skipping PDS pages
             blocks = getattr(ext_rec, "blocks", []) or []
             for b in blocks:
+                if isinstance(b, dict) and b.get("page") is not None and int(b["page"]) in pds_pages:
+                    continue
                 b_text = b.get("text", "") if isinstance(b, dict) else str(b)
                 if any(k in b_text.lower() for k in ("agreed value", "sum insured", "sum covered", "nilai yang dipersetujui")):
                     m_b = re.findall(r"(?:RM|MYR)?\s*([\d,]{5,}(?:\.\d{2})?)", b_text, re.IGNORECASE)
@@ -616,7 +641,7 @@ def _extract_vehicle_sum_insured(f: dict[str, Any], s_obj: Any = None) -> float:
                         nums = [_to_float(x) for x in m_b if _to_float(x) >= 10000.0 and not _is_suspicious_chassis_or_engine(_to_float(x))]
                         if nums:
                             return max(nums)
-            combined_txt = (getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")
+            combined_txt = operative_txt
             # Strict regex: must immediately follow the label with colon/dash, avoiding cross-label jumping into chassis number
             m_txt = re.findall(r"(?i)(?:vehicle\s*agreed\s*value|vehicle\s*sum\s*insured|sum\s*insured\s*\(agreed\s*value\)|sum\s*covered)\s*[:=\-]?\s*(?:RM|MYR)?\s*([\d,]{4,}(?:\.\d{2})?)", combined_txt)
             if m_txt:
@@ -690,7 +715,8 @@ def _extract_valuation_type(f: dict[str, Any], s_obj: Any = None) -> tuple[str, 
         up_file = getattr(s_obj, "uploaded_file", None)
         ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
         if ext_rec:
-            combined = ((getattr(ext_rec, "ocr_text", "") or "") + "\n" + (getattr(ext_rec, "raw_text", "") or "")).lower()
+            operative_txt, _pds_pages = _get_operative_ext_text_and_pds_pages(ext_rec)
+            combined = operative_txt.lower()
             if combined:
                 # Check for explicit negation first: e.g. "AGREED VALUE : NO" (STMB)
                 if re.search(r"(?i)agreed\s*value\s*[:]?\s*(?:no|tidak|\b0\b|false)", combined):
@@ -746,9 +772,8 @@ def _extract_excess(f: dict[str, Any], s_obj: Any = None) -> float:
         up_file = getattr(s_obj, "uploaded_file", None)
         ext_rec = getattr(up_file, "extraction_record", None) if up_file else None
         if ext_rec:
-            ocr_text = getattr(ext_rec, "ocr_text", "") or ""
-            raw_text = getattr(ext_rec, "raw_text", "") or ""
-            strict_val = extract_strict_schedule_excess(ocr_text or raw_text)
+            operative_txt, _pds_pages = _get_operative_ext_text_and_pds_pages(ext_rec)
+            strict_val = extract_strict_schedule_excess(operative_txt)
             if strict_val is not None:
                 return strict_val
 
@@ -849,6 +874,7 @@ def prefetch_comparison_benefit_context(
                     ExtractionRecord.uploaded_file_id,
                     ExtractionRecord.raw_text,
                     ExtractionRecord.ocr_text,
+                    ExtractionRecord.page_text,
                     ExtractionRecord.benefit_lines,
                 )
             )
@@ -1089,11 +1115,18 @@ def _resolve_comparison_benefits(
                         ExtractionRecord.uploaded_file_id,
                         ExtractionRecord.raw_text,
                         ExtractionRecord.ocr_text,
+                        ExtractionRecord.page_text,
                         ExtractionRecord.benefit_lines,
                     )
                 )
                 .where(ExtractionRecord.uploaded_file_id == session.uploaded_file_id)
             )
+        operative_txt, pds_pages = _get_operative_ext_text_and_pds_pages(ext_rec)
+        if pds_pages and ext_lines:
+            ext_lines = [
+                el for el in ext_lines
+                if getattr(el, "page_number", None) is None or int(el.page_number) not in pds_pages
+            ]
         for el in ext_lines:
             if el.raw_label:
                 tokens.append(el.raw_label)
@@ -1101,13 +1134,14 @@ def _resolve_comparison_benefits(
                 tokens.append(el.normalized_label)
 
         if ext_rec:
-            if ext_rec.raw_text:
-                tokens.append(ext_rec.raw_text)
-            if ext_rec.ocr_text:
-                tokens.append(ext_rec.ocr_text)
+            if operative_txt:
+                tokens.append(operative_txt)
             if isinstance(ext_rec.benefit_lines, list):
                 for bl in ext_rec.benefit_lines:
                     if isinstance(bl, dict):
+                        bl_page = bl.get("page_number") or bl.get("page")
+                        if bl_page is not None and int(bl_page) in pds_pages:
+                            continue
                         for bk in ("raw_label", "normalized_label", "label", "benefit_name", "description"):
                             if bl.get(bk):
                                 tokens.append(str(bl[bk]))
@@ -1283,19 +1317,25 @@ def _resolve_comparison_benefits(
         has_llp = False
     elif llp_manual_override:
         has_llp = is_special_perils_value_included(llp_field_raw.get("value"))
+    elif "llp_llop" in active_domains or bool({"100", "72"}.intersection(end_tokens)) or bool(re.search(r"\b(?:endorsement|endt?\.?)\s*(?:100|72)\b", combined_text)):
+        has_llp = True
     else:
+        _llp_exclude_re = re.compile(
+            r"\b(?:offence\s+under\s+the\s+law|without\s+extending|against\s+claims\s+from\s+passengers|"
+            r"excludes?|not\s+covered|not\s+included|tidak\s+termasuk)\b",
+            re.IGNORECASE,
+        )
+        _llp_pos_re = re.compile(
+            r"\b(?:legal\s+liability\s+to\s+passenger|legal\s+liability\s+of\s+passenger|"
+            r"liability\s+to\s+passenger|liability\s+of\s+passenger|llp|llop|lltp)\b",
+            re.IGNORECASE,
+        )
         has_llp = any(
-            kw in combined_text
-            for kw in (
-                "legal liability to passenger",
-                "legal liability of passenger",
-                "liability to passenger",
-                "liability of passenger",
-                "llp",
-                "llop",
-                "lltp",
-            )
-        ) or bool(re.search(r"\b(?:endorsement|end|end\.)\s*(?:100|72)\b", combined_text)) or bool({"100", "72"}.intersection(end_tokens))
+            _llp_pos_re.search(ln) and not _llp_exclude_re.search(ln)
+            for tok in tokens
+            for ln in str(tok).splitlines()
+            if ln.strip()
+        )
     llp_val = "Included" if has_llp else None
 
     # --- TOWING ---
@@ -1562,7 +1602,7 @@ def _resolve_comparison_benefits(
             "is_included": True,
         })
 
-    if (llp_val or "LLP" in canonical_perils_list) and not _is_peril_already_represented(("liability to passenger", "llp", "lltp")):
+    if ("LLP" in canonical_perils_list or (llp_val and "LLOP" not in canonical_perils_list)) and not _is_peril_already_represented(("liability to passenger", "llp", "lltp", "negligent act")):
         seen_peril_names.add("legal liability to passengers (llp)")
         detailed_perils.append({
             "name": "Legal Liability to Passengers (LLP)",

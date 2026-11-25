@@ -171,7 +171,7 @@ export function PreviousPolicyValuationPane({
               </div>
               {previous_policy.betterment_display ? (
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-neutral-500">Betterment:</span>
+                  <span className="text-neutral-500">Betterment Waiver:</span>
                   <span className="font-mono font-medium text-neutral-800">{previous_policy.betterment_display}</span>
                 </div>
               ) : null}
@@ -691,27 +691,38 @@ export function PreviousPolicyValuationPane({
                   )}
                 </div>
                 <div className="flex justify-between items-center text-[11px]">
-                  <span className="text-neutral-500">Betterment:</span>
-                  {onPatchCovernoteField ? (
-                    <InlineComparisonFieldEditor
-                      field="waiver_betterment"
-                      label="Betterment"
-                      currentValue={cn.waiver_betterment ? "No (0%)" : cn.betterment_display || "Yes"}
-                      companyName={cn.company_name}
-                      manufactureYear={cn.manufacture_year || tenure.manufacture_year}
-                      bettermentRate={cn.betterment_rate}
-                      isBettermentAuto={cn.betterment_is_auto}
-                      onSave={onPatchCovernoteField}
-                    >
-                      <span className={`font-bold ${cn.waiver_betterment ? "text-emerald-700" : "text-amber-700"}`}>
-                        {cn.betterment_display || (cn.waiver_betterment ? "No (0%)" : "Yes")}
+                  <span className="text-neutral-500">Betterment Waiver:</span>
+                  {(() => {
+                    const cnBetDisp = cn.betterment_display || (cn.waiver_betterment ? "Yes (0%)" : "No");
+                    const isCnWaived = Boolean(cn.waiver_betterment) || cnBetDisp.startsWith("Yes");
+                    const isCnBareNo = cnBetDisp.trim().toLowerCase() === "no";
+                    const cnBetColor = isCnWaived
+                      ? "text-emerald-700"
+                      : isCnBareNo
+                        ? "text-neutral-600"
+                        : "text-amber-700";
+                    return onPatchCovernoteField ? (
+                      <InlineComparisonFieldEditor
+                        field="waiver_betterment"
+                        label="Betterment Waiver"
+                        currentValue={cnBetDisp}
+                        companyName={cn.company_name}
+                        manufactureYear={cn.manufacture_year || tenure.manufacture_year}
+                        waiverBetterment={cn.waiver_betterment}
+                        bettermentRate={cn.betterment_rate}
+                        isBettermentAuto={cn.betterment_is_auto}
+                        onSave={onPatchCovernoteField}
+                      >
+                        <span className={`font-bold ${cnBetColor}`}>
+                          {cnBetDisp}
+                        </span>
+                      </InlineComparisonFieldEditor>
+                    ) : (
+                      <span className={`font-bold ${cnBetColor}`}>
+                        {cnBetDisp}
                       </span>
-                    </InlineComparisonFieldEditor>
-                  ) : (
-                    <span className={`font-bold ${cn.waiver_betterment ? "text-emerald-700" : "text-amber-700"}`}>
-                      {cn.betterment_display || (cn.waiver_betterment ? "No (0%)" : "Yes")}
-                    </span>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
 

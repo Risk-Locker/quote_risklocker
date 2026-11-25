@@ -90,6 +90,17 @@ def apply_towing_advantage_rule(entries: Sequence[Any]) -> list[Any]:
     return items
 
 
+def _has_betterment_waiver(entry: Any) -> bool:
+    """Return True strictly when Betterment Waiver (0% co-pay) applies, never for bare 'No' / TPO."""
+    if bool(getattr(entry, "waiver_betterment", False)):
+        return True
+    disp = str(getattr(entry, "betterment_display", "") or "").strip().lower()
+    if disp in ("no", "n/a", "n/a (third party)"):
+        return False
+    raw_rate = getattr(entry, "betterment_rate", None)
+    return raw_rate is not None and float(raw_rate) <= 0.0
+
+
 def _entry_strengths(entry: Any) -> list[str]:
     """Extract key underwriting protection strengths for an entry."""
     strengths: list[str] = []
@@ -104,9 +115,8 @@ def _entry_strengths(entry: Any) -> list[str]:
     exc = float(getattr(entry, "excess", 0) or 0)
     if exc <= 0.0:
         strengths.append("RM 0 Excess")
-    bet_rate = float(getattr(entry, "betterment_rate", 0) or 0)
-    if bool(getattr(entry, "waiver_betterment", False)) or bet_rate <= 0.0:
-        strengths.append("0% Betterment")
+    if _has_betterment_waiver(entry):
+        strengths.append("Betterment Waiver (0%)")
     sp = str(getattr(entry, "special_perils", "") or "").strip()
     if sp and sp.lower() not in ("", "-", "—", "none", "not included"):
         strengths.append("Flood / Special Perils")
@@ -208,9 +218,9 @@ def _format_prev_policy_yoy_insight(
     if "unlimited" in curr_tow.lower() and "unlimited" not in prev_tow:
         benefits.append("upgraded to Unlimited Towing")
 
-    if bool(getattr(entry, "waiver_betterment", False)) or float(getattr(entry, "betterment_rate", 0) or 0) <= 0.0:
+    if _has_betterment_waiver(entry):
         if prev_policy.get("waiver_betterment") is False:
-            benefits.append("0% Betterment")
+            benefits.append("Betterment Waiver (0%)")
 
     if reasons and benefits:
         return f"Vs Last Year: {delta_head} due to {', '.join(reasons[:2])}; {'; '.join(benefits[:2])}."
@@ -302,7 +312,7 @@ def evaluate_logical_value_rerank(
         exc = float(getattr(e, "excess", 0) or 0)
         if exc > 0:
             bonus -= min(exc * 0.10, 50.0)
-        if bool(getattr(e, "waiver_betterment", False)) or float(getattr(e, "betterment_rate", 0) or 0) <= 0.0:
+        if _has_betterment_waiver(e):
             bonus += 20.0
         sp = str(getattr(e, "special_perils", "") or "").strip().lower()
         if sp and sp not in ("", "-", "—", "none", "not included"):

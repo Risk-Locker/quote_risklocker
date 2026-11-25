@@ -6,6 +6,7 @@ import hashlib
 import re
 from decimal import Decimal, InvalidOperation
 
+from app.extraction.page_filter import is_pds_page_text
 from app.services.bundle_plan_matcher import is_base_auto365_policy_label
 
 
@@ -24,6 +25,8 @@ SELECTED_HEADINGS = (
     "extra coverages",
     "additional coverage",
     "additional covers",
+    "additional benefits",
+    "additional policy",
     "endorsements",
     "policy endorsements",
     "schedule of benefits",
@@ -317,17 +320,9 @@ def is_spurious_benefit_line(raw: str) -> bool:
     return False
 
 
-def is_pds_text(text: str) -> bool:
+def is_pds_text(text: str, *, page_number: int | None = None) -> bool:
     """Check if document text or page belongs to a Product Disclosure Sheet (PDS) or Policy Wording."""
-    lower = text.lower()
-    return any(marker in lower for marker in (
-        "product disclosure sheet",
-        "lembaran maklumat produk",
-        "policy wording",
-        "terms and conditions",
-        "/prn/pds",
-        "pds/vc",
-    ))
+    return is_pds_page_text(text, page_number=page_number)
 
 
 MONEY_RE = re.compile(
@@ -345,11 +340,14 @@ BENEFIT_KEYWORDS = (
 def _normalized(value: str) -> str:
     value = re.sub(r"^(?:☑|☒|✓|✔|☐|□|\[[xX ]\]|[•\-\*\+])\s*", "", value)
     value = re.sub(r"\s+", " ", value).strip(" :-;.").lower()
-    # Normalize common abbreviations
+    # Normalize common abbreviations (handle 'LLP for Negligent Acts' / 'LLNA' before generic 'LLP')
     value = re.sub(r"\bw/screen\b|\bwscreen\b", "windscreen", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bllp\s+for\s+negligent\s+acts?\b|\bllna\b", "legal liability of passengers for negligent acts", value, flags=re.IGNORECASE)
     value = re.sub(r"\blltp\b", "legal liability to passengers", value, flags=re.IGNORECASE)
     value = re.sub(r"\bllop\b", "legal liability of passengers", value, flags=re.IGNORECASE)
     value = re.sub(r"\blltr\b", "legal liability to pillion", value, flags=re.IGNORECASE)
+    if "negligent" not in value:
+        value = re.sub(r"\bllp\b", "legal liability to passengers", value, flags=re.IGNORECASE)
     # Strip trailing numbers/parameters ONLY if preceded by currency/keywords OR followed by units
     value = re.sub(r"\s+(?:(?:rm|myr|premium|limit|sum\s+insured)\s*[\d,.]+|[\d,.]+\s*(?:km|kilometres?|days?|times?|years?|months?)).*$", "", value, flags=re.IGNORECASE)
     # Strip any trailing parens with money like (RM 2,650.00)
@@ -382,15 +380,42 @@ def _format_display_money(amount_str: str) -> str:
         return f"RM{amount_str}"
 
 
+def _extract_trailing_line_premium(raw: str) -> str | None:
+    """Extract a standalone RM price from a rider line such as '(Unlimited Towing) 138.00'."""
+    clean_raw = re.sub(r"\b\d+(?:\.\d+)?%", "", raw)
+    amounts: list[str] = []
+    for m in MONEY_RE.finditer(clean_raw):
+        if m.group(1):
+            amounts.append(_money(f"{m.group(1)}.{m.group(2) or '00'}"))
+        elif m.group(3):
+            amounts.append(_money(m.group(3)))
+    if not amounts:
+        return None
+    try:
+        if Decimal(amounts[-1]) > Decimal("0.00"):
+            return amounts[-1]
+    except InvalidOperation:
+        return None
+    return None
+
+
 def _typed_value(raw: str, normalized: str) -> dict | None:
     if is_spurious_benefit_line(raw):
         return None
     # 1. Distance
     distance = re.search(r"\b(\d[\d,]*(?:\.\d+)?)\s*(km|kilometres?)\b", raw, re.IGNORECASE)
     if distance:
-        return {"type": "distance", "value": distance.group(1).replace(",", ""), "unit": "km", "unlimited": False}
+        res: dict = {"type": "distance", "value": distance.group(1).replace(",", ""), "unit": "km", "unlimited": False}
+        prem_amt = _extract_trailing_line_premium(raw)
+        if prem_amt:
+            res["premium"] = {"amount": prem_amt, "currency": "MYR"}
+        return res
     if re.search(r"\bunlimited\b", raw, re.IGNORECASE) and "tow" in normalized:
-        return {"type": "distance", "value": None, "unit": "km", "unlimited": True}
+        res = {"type": "distance", "value": None, "unit": "km", "unlimited": True}
+        prem_amt = _extract_trailing_line_premium(raw)
+        if prem_amt:
+            res["premium"] = {"amount": prem_amt, "currency": "MYR"}
+        return res
 
     # 2. Duration / Warranty
     duration = re.search(r"\b(\d+)\s*(years?|yrs?|months?|mths?)\b", raw, re.IGNORECASE)
@@ -434,18 +459,20 @@ def _typed_value(raw: str, normalized: str) -> dict | None:
             "premium": {"amount": cost_val, "currency": "MYR"},
         }
 
+    from app.domain.benefits import benefit_auto_coverage_domain
+
     premium_match = re.search(r"premium\s*RM?\s*(\d[\d,]*(?:\.\d+)?)", clean_raw, re.IGNORECASE)
     amount = amounts[0]
     is_table_cost = bool(re.search(r"[:\-]\s*(?:RM|MYR)?\s*[\d,]+(?:\.\d{2})?", clean_raw, re.IGNORECASE))
     is_liability_driver = any(token in normalized for token in ("passenger", "driver", "all drivers", "lltp", "llop", "pillion"))
+    cov_domain = benefit_auto_coverage_domain(None, normalized)
 
     if premium_match:
-        value = {"type": "money", "value": "0.00", "currency": "MYR", "semantic_role": "amount", "premium": {"amount": _money(premium_match.group(1)), "currency": "MYR"}}
-    elif is_table_cost or (is_liability_driver and not any(token in normalized for token in ("windscreen", "peril", "flood", "theft", "loss", "key", "seat", "cart"))):
-        value = {"type": "money", "value": "0.00", "currency": "MYR", "semantic_role": "amount", "premium": {"amount": amount, "currency": "MYR"}}
+        value = {"type": "money", "value": "0.00", "currency": "MYR", "semantic_role": "premium", "premium": {"amount": _money(premium_match.group(1)), "currency": "MYR"}}
+    elif is_table_cost or is_liability_driver or cov_domain != "windscreen":
+        value = {"type": "money", "value": "0.00", "currency": "MYR", "semantic_role": "premium", "premium": {"amount": amount, "currency": "MYR"}}
     else:
-        role = "insured_limit" if any(token in normalized for token in ("windscreen", "cover", "allowance", "benefit", "peril", "flood", "theft", "loss", "key", "seat")) else "amount"
-        value = {"type": "money", "value": amount, "currency": "MYR", "semantic_role": role}
+        value = {"type": "money", "value": amount, "currency": "MYR", "semantic_role": "insured_limit"}
     return value
 
 
@@ -672,6 +699,52 @@ def _looks_like_benefit(raw: str, concepts: list[dict], in_section: bool) -> boo
     return False
 
 
+_STACKED_DECIMAL_RE = re.compile(r"^\s*(?:RM|MYR)?\s*(\d{1,3}(?:,\d{3})*\.\d{2})\s*$", re.IGNORECASE)
+_STACKED_BULLET_RE = re.compile(r"^\s*[-•*]\s*[A-Za-z]")
+
+
+def _pair_stacked_benefit_amounts(raw_lines: list[str]) -> list[str]:
+    """Pair Lonpac-style stacked benefit bullets with the matching block of decimal prices below them."""
+    non_empty = [ln.strip() for ln in raw_lines if ln and ln.strip()]
+    out: list[str] = []
+    i = 0
+    total = len(non_empty)
+
+    while i < total:
+        line = non_empty[i]
+        if _STACKED_BULLET_RE.match(line) and not ACCOUNTING_ROW_RE.search(line.lstrip("-•* ").strip()):
+            bullet_block: list[str] = []
+            j = i
+            while j < total:
+                cand = non_empty[j]
+                if not _STACKED_BULLET_RE.match(cand):
+                    break
+                stripped_cand = cand.lstrip("-•* ").strip()
+                if ACCOUNTING_ROW_RE.search(stripped_cand) or is_spurious_benefit_line(stripped_cand):
+                    break
+                clean_for_money = re.sub(r"\b\d+(?:\.\d+)?%", "", cand)
+                if len(MONEY_RE.findall(clean_for_money)) >= 2:
+                    break
+                bullet_block.append(cand)
+                j += 1
+
+            n_bullets = len(bullet_block)
+            if n_bullets >= 1 and j + n_bullets <= total:
+                amt_matches = [_STACKED_DECIMAL_RE.match(non_empty[j + k]) for k in range(n_bullets)]
+                next_after = non_empty[j + n_bullets] if (j + n_bullets) < total else ""
+                if all(amt_matches) and not (next_after and _STACKED_DECIMAL_RE.match(next_after)):
+                    for b_line, m_amt in zip(bullet_block, amt_matches):
+                        assert m_amt is not None
+                        out.append(f"{b_line} RM {m_amt.group(1)}")
+                    i = j + n_bullets
+                    continue
+
+        out.append(line)
+        i += 1
+
+    return out
+
+
 def _stitch_lines(raw_lines: list[str]) -> list[str]:
     stitched: list[str] = []
     for line in raw_lines:
@@ -725,33 +798,29 @@ def extract_benefit_lines(
     section_state = "unknown"
     section_label: str | None = None
     ordinal = 0
-    in_pds_doc = False
 
     for page in sorted(page_text, key=lambda item: int(item.get("page", 0))):
         page_number = int(page.get("page") or 1)
         raw_page_text = str(page.get("text") or "")
-        page_is_pds = is_pds_text(raw_page_text)
-        if page_is_pds:
-            in_pds_doc = True
-        else:
-            if "quotation" in raw_page_text.lower() and not is_pds_text(raw_page_text):
-                in_pds_doc = False
+        if is_pds_page_text(raw_page_text, page_number=page_number):
+            scope, section_state = "outside", "unknown"
+            section_label = None
+            continue
 
-        stitched_lines = _stitch_lines(raw_page_text.splitlines())
+        paired_lines = _pair_stacked_benefit_amounts(raw_page_text.splitlines())
+        stitched_lines = _stitch_lines(paired_lines)
         for raw in stitched_lines:
             heading = _heading_scope(raw)
             if heading:
                 h_scope, h_state = heading
-                if in_pds_doc or h_scope == "pds":
-                    in_pds_doc = True
+                if h_scope == "pds":
                     scope, section_state = "pds", "unknown"
                 else:
                     scope, section_state = h_scope, h_state
                 section_label = raw[:255]
                 continue
 
-            # If inside a PDS document, skip all lines from becoming quotation benefit candidates
-            if in_pds_doc:
+            if scope == "pds":
                 continue
 
             # Check for compact endorsement list line: e.g. "Endorsements Attached: 02, 57, 72, 89, 97, 100, 112"

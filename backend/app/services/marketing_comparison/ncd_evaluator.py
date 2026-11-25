@@ -71,30 +71,75 @@ def calculate_vehicle_age(
     return calculate_exact_vehicle_age(reg_date, coverage_start_date)
 
 
+def format_betterment_waiver_display(
+    waiver_betterment: bool,
+    betterment_rate: float | None,
+    *,
+    bare_no: bool = False,
+) -> str:
+    """Format Betterment Waiver display label using customer-intuitive polarity.
+
+    - Waived / Exempt (0% co-payment): 'Yes (0%)'
+    - Co-payment applies (15%..40%): 'No (15%)' .. 'No (40%)'
+    - Not applicable / TPO / TPFT / manual bare No: 'No'
+    """
+    if waiver_betterment:
+        return "Yes (0%)"
+    if bare_no or betterment_rate is None:
+        return "No"
+    r = round(float(betterment_rate), 2)
+    if r <= 0.0:
+        return "No"
+    fmt = int(r) if float(r).is_integer() else r
+    return f"No ({fmt}%)"
+
+
+def normalize_betterment_display(
+    raw_display: str | None,
+    waiver_betterment: bool,
+    betterment_rate: float | None,
+) -> str:
+    """Normalize legacy DB betterment_display strings into Yes (0%) / No (X%) / No."""
+    txt = str(raw_display or "").strip()
+    low = txt.lower()
+    if not txt:
+        return format_betterment_waiver_display(waiver_betterment, betterment_rate)
+    if low in ("no (0%)", "yes (0%)"):
+        return "Yes (0%)"
+    if low in ("n/a (third party)", "n/a", "no"):
+        return "No"
+    m_legacy_pct = re.match(r"^yes\s*\((\d+(?:\.\d+)?)%\)$", txt, re.IGNORECASE)
+    if m_legacy_pct and float(m_legacy_pct.group(1)) > 0.0:
+        return f"No ({m_legacy_pct.group(1)}%)"
+    if low == "yes":
+        return format_betterment_waiver_display(False, betterment_rate)
+    return txt
+
+
 def get_standard_betterment_rate(age_in_years: int) -> tuple[float, str]:
-    """Calculate Malaysian Tariff standard scale for Betterment co-payment:
-    < 5 years: 0% ("No (0%)")
-    5 years: 15% ("Yes (15%)")
-    6 years: 20% ("Yes (20%)")
-    7 years: 25% ("Yes (25%)")
-    8 years: 30% ("Yes (30%)")
-    9 years: 35% ("Yes (35%)")
-    >= 10 years: 40% ("Yes (40%)")
+    """Calculate Malaysian Tariff standard scale for Betterment Waiver status:
+    < 5 years: 0% ("Yes (0%)")
+    5 years: 15% ("No (15%)")
+    6 years: 20% ("No (20%)")
+    7 years: 25% ("No (25%)")
+    8 years: 30% ("No (30%)")
+    9 years: 35% ("No (35%)")
+    >= 10 years: 40% ("No (40%)")
     """
     if age_in_years < 5:
-        return 0.0, "No (0%)"
+        return 0.0, "Yes (0%)"
     elif age_in_years == 5:
-        return 15.0, "Yes (15%)"
+        return 15.0, "No (15%)"
     elif age_in_years == 6:
-        return 20.0, "Yes (20%)"
+        return 20.0, "No (20%)"
     elif age_in_years == 7:
-        return 25.0, "Yes (25%)"
+        return 25.0, "No (25%)"
     elif age_in_years == 8:
-        return 30.0, "Yes (30%)"
+        return 30.0, "No (30%)"
     elif age_in_years == 9:
-        return 35.0, "Yes (35%)"
+        return 35.0, "No (35%)"
     else:  # >= 10
-        return 40.0, "Yes (40%)"
+        return 40.0, "No (40%)"
 
 
 def check_has_betterment_peril(
@@ -134,30 +179,46 @@ def evaluate_betterment_rules(
     coverage_start_date: Any = None,
     coverage_type: str | None = None,
     company_obj: Any = None,
-) -> tuple[bool, float, str]:
-    """Evaluate Waiver of Betterment and Betterment Co-Payment Rate based on DB underwriting rules.
+) -> tuple[bool, float | None, str]:
+    """Evaluate Betterment Waiver and Betterment Co-Payment Rate based on DB underwriting rules.
 
     Uses exact completed calendar years via calculate_exact_vehicle_age when registration_date is available,
     or completed years (`quote_y - veh_yom`) without off-by-1 thresholds when only YOM is provided.
-    Third Party / TPO motor policies do not cover Own Damage repair, so betterment is strictly N/A.
+    Third Party (TPO) and Third Party Fire & Theft (TPFT) policies do not cover Own Damage collision
+    repair, so Betterment Waiver is strictly 'No' with rate=None.
     """
     from app.domain.betterment_engine import calculate_exact_vehicle_age
     from app.services.marketing_comparison.company_rules import resolve_company_betterment_rule
 
-    cov_str = str(coverage_type or "").strip().lower()
-    is_third_party = (
-        cov_str in ("third party", "tpo", "third_party", "third party only")
-        or ("third" in cov_str and "fire" not in cov_str and "theft" not in cov_str)
+    cov_raw = str(coverage_type or "").strip().lower()
+    cov_clean = re.sub(
+        r"\bcomprehensive\b(?=\s+(?:lite|plus)\s*\(\s*(?:tpft|tpo|third\s+party))",
+        "",
+        cov_raw,
+        flags=re.IGNORECASE,
+    ).strip()
+    is_non_od_third_party = cov_clean in {
+        "third party",
+        "tpo",
+        "tp",
+        "third_party",
+        "third party only",
+        "tpft",
+        "third_party_fire_theft",
+    } or any(
+        k in cov_clean
+        for k in ("third party", "third_party", "tpo", "tpft", "fire & theft", "fire and theft")
     )
-    if is_third_party:
-        return False, 0.0, "N/A (Third Party)"
 
-    quote_y = quote_year or datetime.now().year
-    veh_yom = yom if (yom and yom > 1900) else None
     auto_waive, max_waiver_years, _ = resolve_company_betterment_rule(
         company_name=company_name,
         company_obj=company_obj,
     )
+    if is_non_od_third_party or (max_waiver_years <= 0 and not auto_waive):
+        return False, None, "No"
+
+    quote_y = quote_year or datetime.now().year
+    veh_yom = yom if (yom and yom > 1900) else None
 
     if registration_date:
         veh_age = calculate_exact_vehicle_age(registration_date, coverage_start_date or f"{quote_y}-01-01")
@@ -174,12 +235,12 @@ def evaluate_betterment_rules(
 
     # 1st Condition: Vehicles under 5 completed years are exempt from betterment co-payment (0%)
     if is_under_5:
-        return True, 0.0, "No (0%)"
+        return True, 0.0, "Yes (0%)"
 
     # 2nd Condition: Insurers with automatic waiver (e.g. QBE Comprehensive Private up to 10 completed years)
     if auto_waive and is_comprehensive_private:
         if (registration_date or veh_yom) and within_waiver_cap:
-            return True, 0.0, "No (0%)"
+            return True, 0.0, "Yes (0%)"
         rate, disp = get_standard_betterment_rate(veh_age)
         return False, rate, disp
 
@@ -189,7 +250,7 @@ def evaluate_betterment_rules(
         return False, rate, disp
 
     if within_waiver_cap:
-        return True, 0.0, "No (0%)"
+        return True, 0.0, "Yes (0%)"
     rate, disp = get_standard_betterment_rate(veh_age)
     return False, rate, disp
 
@@ -202,7 +263,7 @@ def calculate_betterment_rate(
 
     auto_waive, max_years, _ = resolve_company_betterment_rule(company_name=company_name, company_obj=company_obj)
     if auto_waive and age_in_years <= max_years:
-        return 0.0, "No (0%)"
+        return 0.0, "Yes (0%)"
     return get_standard_betterment_rate(age_in_years)
 
 
@@ -292,7 +353,9 @@ def rank_comparison_entries(
         if tot <= 0.0:
             tot = float("inf")
         exc = float(e.excess) if e.excess is not None else 0.0
-        bet = float(e.betterment_rate) if e.betterment_rate is not None else 0.0
+        bet = 0.0 if bool(getattr(e, "waiver_betterment", False)) else (
+            float(e.betterment_rate) if e.betterment_rate is not None else 100.0
+        )
         tow = _towing_sort_value(e.towing_km or e.towing_limit)
         return (tot, exc, bet, tow)
 

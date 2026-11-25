@@ -69,7 +69,7 @@ export function ManualQuoteModal({
   const [agreedValue, setAgreedValue] = useState(true);
   const [waiverBetterment, setWaiverBetterment] = useState(true);
   const [bettermentRate, setBettermentRate] = useState<number | null>(null);
-  const [bettermentMode, setBettermentMode] = useState<"auto" | "waived" | "copay">("auto");
+  const [bettermentMode, setBettermentMode] = useState<"auto" | "waived" | "no" | "copay">("auto");
   const [extraAddons, setExtraAddons] = useState<Record<string, string>>({});
   const [excess, setExcess] = useState("0");
   const [windscreen, setWindscreen] = useState("");
@@ -106,10 +106,11 @@ export function ManualQuoteModal({
       setTowingLimit(initialData.towing_limit || "Unlimited");
       setAgreedValue(initialData.agreed_value ?? true);
       const wb = Boolean(initialData.waiver_betterment ?? true);
+      const bRateNum = initialData.betterment_rate != null ? Number(initialData.betterment_rate) : null;
       setWaiverBetterment(wb);
-      setBettermentRate(initialData.betterment_rate != null ? Number(initialData.betterment_rate) : null);
+      setBettermentRate(bRateNum);
       setBettermentMode(
-        initialData.betterment_is_auto ? "auto" : wb ? "waived" : "copay"
+        initialData.betterment_is_auto ? "auto" : wb ? "waived" : bRateNum != null && bRateNum > 0 ? "copay" : "no"
       );
       setExtraAddons(
         initialData.extra_addons && typeof initialData.extra_addons === "object"
@@ -216,6 +217,9 @@ export function ManualQuoteModal({
     if (sel.mode === "waived") {
       setWaiverBetterment(true);
       setBettermentRate(0);
+    } else if (sel.mode === "no") {
+      setWaiverBetterment(false);
+      setBettermentRate(null);
     } else if (sel.mode === "copay") {
       setWaiverBetterment(false);
       setBettermentRate(sel.betterment_rate ?? 20);
@@ -798,7 +802,7 @@ export function ManualQuoteModal({
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
-                  Waiver of Betterment
+                  Betterment Waiver
                 </label>
                 <BettermentEditorControls
                   waiverBetterment={waiverBetterment}
@@ -947,14 +951,14 @@ export function ManualQuoteModal({
                       <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
                         <span className="text-[10px] text-[#6e6e73] block">Betterment Scale</span>
                         <span className="font-bold text-[#1b1717]">
-                          {initialData?.betterment_rate != null ? `${initialData.betterment_rate}%` : (initialData?.betterment_display || "0%")}
+                          {initialData?.betterment_rate != null ? `${initialData.betterment_rate}%` : (initialData?.betterment_display || "No")}
                         </span>
                       </div>
 
                       <div className="p-2 rounded-lg bg-white border border-[#e5e5ea]">
                         <span className="text-[10px] text-[#6e6e73] block">Waiver Status</span>
-                        <span className={`font-bold ${waiverBetterment ? "text-emerald-700" : "text-amber-700"}`}>
-                          {waiverBetterment ? "Waived (0% Co-pay)" : "Standard Tariff Co-pay"}
+                        <span className={`font-bold ${waiverBetterment ? "text-emerald-700" : bettermentRate != null && bettermentRate > 0 ? "text-amber-700" : "text-neutral-600"}`}>
+                          {waiverBetterment ? "Waived — Yes (0%)" : bettermentRate != null && bettermentRate > 0 ? `No (${bettermentRate}% Co-pay)` : "No (Not Applicable)"}
                         </span>
                       </div>
                     </div>

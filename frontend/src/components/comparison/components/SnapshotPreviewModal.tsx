@@ -692,9 +692,9 @@ export function SnapshotPreviewModal({
                             </div>
 
                             <div className="flex items-center justify-between gap-2">
-                              <span style={{ color: "#6B7280" }}>Betterment:</span>
+                              <span style={{ color: "#6B7280" }}>Betterment Waiver:</span>
                               <span className="font-bold text-right" style={{ color: "#4B4F56" }}>
-                                {card.betterment_display || (card.waiver_betterment ? "No (0%)" : "Yes")}
+                                {card.betterment_display || (card.waiver_betterment ? "Yes (0%)" : "No")}
                               </span>
                             </div>
 

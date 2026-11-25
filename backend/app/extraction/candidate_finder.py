@@ -98,7 +98,7 @@ DEFAULT_ALIASES = {
     "cover_end_date": ["cover end", "period to", "to date", "expiry date", "until date", "sehingga", "tarikh tamat"],
     "car_brand": ["make", "brand", "car"],
     "car_model": ["model", "vehicle model"],
-    "engine_cc": ["engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc", "motor capacity", "keupayaan motor", "electric motor", "motor output", "output", "kw", "watt"],
+    "engine_cc": ["c.c / watts", "c.c/watts", "cc / watts", "tonnage", "engine cc", "capacity", "cubic capacity", "engine capacity", "keupayaan enjin", "cc", "motor capacity", "keupayaan motor", "electric motor", "motor output", "kw", "kilowatt"],
     "excess_amount": ["excess amount", "excess all claims", "excess", "policy excess", "voluntary excess", "ekses", "ekses polisi", "ekses sukarela", "lebihan"],
     "compulsory_excess": ["compulsory excess", "ekses wajib", "ekses mandatori"],
     "valid_until": ["quotation validity", "tarikh sah quotation", "tarikh sah", "tempoh sah", "sah laku sehingga", "valid until", "validity period", "validity date", "validity", "this quotation will expire on", "quotation will expire on", "expire on", "expiry date", "tarikh luput", "sah sehingga"],
@@ -577,6 +577,11 @@ def _semantic_label_map() -> list[tuple[str, str]]:
         ("year of manufacture", "vehicle_year"),
         ("year of make", "vehicle_year"),
         ("year", "vehicle_year"),
+        ("c.c / watts", "engine_cc"),
+        ("c.c/watts", "engine_cc"),
+        ("cc / watts", "engine_cc"),
+        ("c.c.", "engine_cc"),
+        ("tonnage", "engine_cc"),
         ("engine capacity", "engine_cc"),
         ("cubic capacity", "engine_cc"),
         ("capacity", "engine_cc"),
@@ -687,6 +692,8 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
                     continue
             if field == "compulsory_excess" and any(k in head or k in normalized for k in ["policy", "polisi", "voluntary"]):
                 continue
+            if field == "engine_cc" and any(k in head or k in normalized for k in ("seating", "passenger", "seat")):
+                continue
             matched = False
             if has_colon:
                 matched = head == label or head.endswith(label) or head.startswith(label)
@@ -694,6 +701,14 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
                 matched = normalized == label or normalized.startswith(f"{label} ") or normalized.endswith(f" {label}") or normalized.endswith(label) or f" {label} " in normalized or f" {label}:" in normalized
             if matched:
                 value = _line_value(line, lines, index)
+                if field == "engine_cc" and value:
+                    val_stripped = value.strip()
+                    if label == "tonnage" and not re.search(r"(?i)\b(?:ton(?:s|nes?)?|mt|kg|cc|kw)\b", val_stripped):
+                        if re.fullmatch(r"\d{1,4}(?:\.\d+)?", val_stripped):
+                            value = f"{val_stripped} TON"
+                    elif label in {"c.c / watts", "c.c/watts", "cc / watts", "c.c."} and re.fullmatch(r"\d{3,6}(?:\.\d+)?", val_stripped):
+                        if float(val_stripped) > 16_000.0:
+                            value = f"{val_stripped} W"
                 if field == "excess_amount":
                     # Check if forward value is from a narrative disclaimer sentence
                     narrative_fwd = False
@@ -874,8 +889,8 @@ def _add_optional_covers(text: str, page_text: list[dict], results: dict[str, li
     if page_text:
         valid_pages_text = [
             str(p.get("text") or "")
-            for p in page_text
-            if not is_pds_text(str(p.get("text") or ""))
+            for idx, p in enumerate(page_text, start=1)
+            if not is_pds_text(str(p.get("text") or ""), page_number=int(p.get("page") or idx))
         ]
         target_text = "\n".join(valid_pages_text) if valid_pages_text else text
     else:
@@ -933,9 +948,21 @@ def _add_messy_compact_text(
         if token and token in compact:
             _add_static(results, "coverage_type", cov_val, "messy_compact_window", 0.82, coverage, text, page_text)
             break
-    cc_match = re.search(r"(?P<cc>\d{3,5}(?:\.\d+)?)\s*(?P<unit>KG|TON|CC|C\.C|KW|W|L)(?![A-Z])", compact)
+    cc_match = re.search(r"\b(?P<cc>\d{1,5}(?:\.\d+)?)\s*(?P<unit>KG|TONS?|CC|C\.C\.?|KW|KILOWATTS?|WATTS?)\b", text.upper())
+    if not cc_match:
+        cc_match = re.search(
+            r"(?P<cc>\d{3,5}(?:\.\d+)?)\s*(?P<unit>KG|TON|CC|C\.C|KW)(?![A-Z])",
+            compact,
+        )
     if cc_match:
-        unit_tok = cc_match.group("unit").upper().replace("C.C", "CC")
+        unit_raw = cc_match.group("unit").upper()
+        unit_tok = (
+            "CC" if unit_raw in {"C.C", "C.C."}
+            else "TON" if unit_raw == "TONS"
+            else "KW" if unit_raw in {"KILOWATT", "KILOWATTS"}
+            else "W" if unit_raw in {"WATT", "WATTS"}
+            else unit_raw
+        )
         _add_static(results, "engine_cc", f"{cc_match.group('cc')} {unit_tok}", "messy_compact_window", 0.78, cc_match.group(0), text, page_text)
 
 
@@ -1197,6 +1224,10 @@ def find_candidates(
                 if field == "compulsory_excess":
                     prefix = text[max(0, match.start() - 20) : match.start()].lower()
                     if any(k in prefix for k in ["policy", "polisi"]):
+                        continue
+                if field == "engine_cc":
+                    prefix = text[max(0, match.start() - 20) : match.start()].lower()
+                    if any(k in prefix for k in ("seating", "passenger")):
                         continue
                 if field in {"sum_insured", "coverage_amount", "market_value", "agreed_value"}:
                     surrounding = text[max(0, match.start() - 30) : min(len(text), match.end() + 30)].lower()

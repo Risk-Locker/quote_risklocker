@@ -652,7 +652,7 @@ export default function SessionsPage() {
 
                             <div className="inline-flex items-center">
                               <Link
-                                href={`/sessions/${s.id}` as Route}
+                                href={(s.is_test ? `/sessions/sandbox/${s.id}` : `/sessions/${s.id}`) as Route}
                                 target={openInNewTab ? "_blank" : undefined}
                                 rel={openInNewTab ? "noopener noreferrer" : undefined}
                                 className={`inline-flex items-center gap-1.5 h-8 px-3 bg-[var(--rl-black)] hover:bg-black text-white text-xs font-semibold transition-colors ${
@@ -665,7 +665,7 @@ export default function SessionsPage() {
                               </Link>
                               {!openInNewTab && (
                                 <Link
-                                  href={`/sessions/${s.id}` as Route}
+                                  href={(s.is_test ? `/sessions/sandbox/${s.id}` : `/sessions/${s.id}`) as Route}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center justify-center h-8 px-1.5 rounded-r-[var(--rl-radius-sm)] border border-l-0 border-[var(--rl-black)] bg-neutral-800 hover:bg-black text-white transition-colors"

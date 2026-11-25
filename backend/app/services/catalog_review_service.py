@@ -835,11 +835,12 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
         (("windscreen", "wndscrn", "w screen", "cermin", "cermin berlapis", "endorsement 89", "endt 89", "endorsement 97"), "windscreen"),
         (("any authorised driver", "any authorized driver", "all rider", "semua penunggang", "authorised driver", "pemandu yang diberi kuasa", "all driver", "endorsement 108"), "all-drivers"),
         (("make vehicle aged", "vehicle aged 6", "endorsement 113", "endt 113", "endorsement 030", "endorsement 30", "waiver of betterment", "betterment"), "betterment-protection"),
-        (("legal liab of passenger", "legal liability of passenger", "negligent acts", "endorsement 72", "endt 72", "llop"), "legal-liability-of-passengers"),
+        (("legal liab of passenger", "legal liability of passenger", "negligent act", "llna", "endorsement 72", "endt 72", "llop"), "legal-liability-of-passengers"),
         (("legal liability to passenger", "passenger liability cover", "endorsement 100", "endt 100", "lltp", "llp"), "legal-liability-to-passengers"),
         (("convulsions of nature", "inclusion of special perils", "special perils", "endorsement 57", "endt 57"), "special-perils"),
         (("strike riot", "civil commotion", "endorsement 101", "endorsement 106", "106 a", "srcc"), "strike-riot-civil-commotion"),
-        (("unlimited towing", "24 hour auto assist", "e assist smart driver", "emergency towing", "roadside assistance"), "towing"),
+        (("unlimited towing", "24 hour auto assist", "emergency towing", "roadside assistance"), "towing"),
+        (("e assist smart driver", "smart driver pa", "sdpa pa 96"), "smart-driver-pa"),
         (("repair warranty", "workmanship warranty", "panel workmanship"), "repair-workmanship-warranty"),
         (("assessed repair time", "endorsement 112", "endt 112", "cart"), "repair-allowance"),
         (("ncd relief", "ncd protector", "endorsement 111", "endt 111"), "ncd-relief"),
@@ -924,8 +925,11 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
 
         if not target_concept_id:
             line_norm = _norm(line.raw_label or line.normalized_label)
+            is_llop_negligent_line = "negligent act" in line_norm or "llna" in line_norm
             # 1. Exact or phrase match against real quotation phrase table
             for phrases, target_ckey in real_quotation_phrase_map:
+                if is_llop_negligent_line and target_ckey == "legal-liability-to-passengers":
+                    continue
                 if any(p in line_norm for p in phrases):
                     c_match = concepts_by_key.get(target_ckey)
                     if c_match:
@@ -933,15 +937,21 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                         break
             # 2. Exact or word-bounded match against 534 BenefitAlias rows & match_dataset
             if not target_concept_id and line_norm in alias_norm_to_concept:
-                target_concept_id = alias_norm_to_concept[line_norm].id
+                cand_c = alias_norm_to_concept[line_norm]
+                if not (is_llop_negligent_line and cand_c.concept_key == "legal-liability-to-passengers"):
+                    target_concept_id = cand_c.id
             if not target_concept_id:
                 for alias_k, c_obj in alias_norm_to_concept.items():
+                    if is_llop_negligent_line and c_obj.concept_key == "legal-liability-to-passengers":
+                        continue
                     if len(alias_k) >= 5 and f" {alias_k} " in f" {line_norm} ":
                         target_concept_id = c_obj.id
                         break
             # 3. Concept label fallback
             if not target_concept_id:
                 for norm_k, c_obj in concepts_by_norm.items():
+                    if is_llop_negligent_line and c_obj.concept_key == "legal-liability-to-passengers":
+                        continue
                     if len(line_norm) >= 6 and (norm_k in line_norm or re.search(r"\b" + re.escape(line_norm) + r"\b", norm_k)):
                         if line_norm in {"total", "cover", "plan", "contribution", "premium", "driver", "vehicle", "basic", "gross"}:
                             continue
@@ -981,6 +991,13 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 extra_text=line_full_text,
             )
 
+        from app.domain.benefits import is_auto_coverage_allowed_for_benefit
+
+        target_concept = all_concepts.get(str(target_concept_id))
+        target_ckey = getattr(target_concept, "concept_key", None) if target_concept else None
+        if cov_limit and not is_auto_coverage_allowed_for_benefit(target_ckey, raw_lbl_str, cov_limit, premium_cost):
+            cov_limit = None
+
         extracted = line.extracted_value if isinstance(line.extracted_value, dict) else None
         if isinstance(extracted, dict):
             sem_role = str(extracted.get("semantic_role") or "").lower()
@@ -988,10 +1005,12 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
             # Never treat a pure premium/fee extraction or 'Included' marker as a coverage limit override
             if sem_role == "premium" or (sem_role == "amount" and ext_val_str in {"", "0", "0.0", "0.00"}) or ext_val_str in {"included", "selected", "yes", "standard"}:
                 extracted = None
+            elif not is_auto_coverage_allowed_for_benefit(target_ckey, raw_lbl_str, extracted, premium_cost):
+                extracted = None
         if extracted is None:
             ev_dict = line.evidence if isinstance(line.evidence, dict) else {}
             ev_str = str(cov_limit or ev_dict.get("coverage_limit") or ev_dict.get("limit") or "")
-            if ev_str and ev_str.lower() not in {"included", "standard", "yes", "true", "selected", "optional"}:
+            if ev_str and ev_str.lower() not in {"included", "standard", "yes", "true", "selected", "optional"} and is_auto_coverage_allowed_for_benefit(target_ckey, raw_lbl_str, ev_str, premium_cost):
                 has_digits = bool(re.search(r"\d", ev_str))
                 is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", ev_str, re.IGNORECASE))
                 if is_pure_money:
@@ -1099,7 +1118,10 @@ def auto_apply_extracted_benefits(db, draft: QuotationDraft) -> dict:
                 decision.disposition = "mapped"
                 decision.selection_id = selection_id
             else:
-                current.typed_value_override = extracted
+                if extracted is not None:
+                    current.typed_value_override = extracted
+                elif not (isinstance(current.evidence_snapshot, dict) and current.evidence_snapshot.get("manually_edited")):
+                    current.typed_value_override = None
                 if premium_cost:
                     clean_p = str(premium_cost).upper().replace("RM", "").replace(",", "").strip()
                     try:

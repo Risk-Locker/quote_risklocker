@@ -141,8 +141,14 @@ def render_page1_logo_crop(pdf_bytes: bytes) -> tuple[bytes | None, dict[str, An
 
 
 def _clean_page1_boilerplate(page1_text: str) -> str:
-    cleaned = re.sub(r"\bkurnia\s+one\s+touch(?:\s+mobile\s+app)?\b", " ", page1_text or "", flags=re.IGNORECASE)
+    # Normalize line-wrapped promo & URL strings first
+    normalized = re.sub(r"([a-z0-9-])\s*\.\s*([a-z]{2,})", r"\1.\2", page1_text or "", flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bkurnia\s+one\s+touch(?:\s+mobile\s+app)?\b", " ", normalized, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bdownload\s+kurnia\b", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bAMGEN\s+J\d+\b", " ", cleaned, flags=re.IGNORECASE)
+    # Remove shared footer/emblem phrases common to ALL 3 Liberty-group brands
+    cleaned = re.sub(r"\bliberty\s+insurance\s+tower\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bby\s+liberty\s+insurance\b", " ", cleaned, flags=re.IGNORECASE)
     lines: list[str] = []
     for line in cleaned.splitlines():
         low = line.lower()
@@ -153,6 +159,99 @@ def _clean_page1_boilerplate(page1_text: str) -> str:
     return "\n".join(lines)
 
 
+def _match_brand_domain(text: str) -> tuple[str | None, str | None]:
+    """Match an exclusive Liberty-group brand website domain from normalized text."""
+    compact = re.sub(r"\s+", "", (text or "").lower())
+    if not compact:
+        return None, None
+    has_am = "amassurance.com.my" in compact or "www.amassurance.com" in compact
+    has_lib = "libertyinsurance.com.my" in compact or "www.libertyinsurance.com" in compact or "libertyinsurance.com" in compact
+    has_kur = "kurnia.com.my" in compact or "www.kurnia.com" in compact or "kurnia.com" in compact
+    hits = [(b, d) for flag, b, d in (
+        (has_am, "AmAssurance", "www.amassurance.com.my"),
+        (has_lib, "Liberty", "www.libertyinsurance.com.my" if "libertyinsurance.com.my" in compact else "www.libertyinsurance.com"),
+        (has_kur, "Kurnia", "www.kurnia.com"),
+    ) if flag]
+    if len(hits) == 1:
+        return hits[0]
+    return None, None
+
+
+def extract_liberty_group_spatial_brand(
+    pdf_bytes: bytes,
+    page1_text: str = "",
+    db_companies: Sequence[dict] | None = None,
+) -> dict[str, Any] | None:
+    """Deterministic spatial Page 1 footer website + header color detector for Liberty / Kurnia / AmAssurance.
+
+    All three brands share 'Liberty General Insurance Berhad', 'Liberty Insurance Tower',
+    'auto365', and 'Kurnia One Touch Mobile App'. The bottom-right Website field on schedule pages
+    (www.amassurance.com.my vs www.libertyinsurance.com(.my) vs www.kurnia.com) is the single
+    deterministic text ground truth, cross-checked against Page 1 logo chromaticity.
+    """
+    if not pdf_bytes or len(pdf_bytes) < 100:
+        return None
+    try:
+        import fitz
+    except Exception:
+        return None
+
+    try:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            if doc.page_count < 1:
+                return None
+            max_pages = min(doc.page_count, 3)
+            for idx in range(max_pages):
+                page = doc[idx]
+                full_p_text = (page.get_text("text") or "").lower()
+                if any(cue in full_p_text for cue in ("mmip", "malaysian motor insurance pool", "malaysia motor insurance pool")):
+                    return {
+                        "insurance_company": "MMIP",
+                        "canonical_company": _match_canonical_brand("MMIP", db_companies),
+                        "confidence": 1.0,
+                        "method": "mmip_override",
+                        "domain": "",
+                        "reasoning": "MMIP pool marker detected on document.",
+                    }
+                if any(pds in full_p_text for pds in ("product disclosure sheet", "personal data protection", "lembaran maklumat produk")):
+                    continue
+
+                w, h = page.rect.width, page.rect.height
+                # 1. Primary: bottom-right Website box (x >= 58%, y >= 80%)
+                br_rect = fitz.Rect(w * 0.58, h * 0.80, w, h)
+                br_text = page.get_text("text", clip=br_rect) or ""
+                brand, domain = _match_brand_domain(br_text)
+                if brand:
+                    canonical = _match_canonical_brand(brand, db_companies)
+                    return {
+                        "insurance_company": brand,
+                        "canonical_company": canonical,
+                        "confidence": 0.995,
+                        "method": "page1_footer_website",
+                        "domain": domain,
+                        "reasoning": f"Bottom-right footer website uniquely matched {domain} on page {idx + 1}.",
+                    }
+
+                # 2. Secondary: entire footer band (y >= 80%) ignoring shared head-office address
+                footer_rect = fitz.Rect(0, h * 0.80, w, h)
+                footer_text = page.get_text("text", clip=footer_rect) or ""
+                footer_cleaned = _clean_page1_boilerplate(footer_text)
+                brand, domain = _match_brand_domain(footer_cleaned)
+                if brand:
+                    canonical = _match_canonical_brand(brand, db_companies)
+                    return {
+                        "insurance_company": brand,
+                        "canonical_company": canonical,
+                        "confidence": 0.99,
+                        "method": "page1_footer_website",
+                        "domain": domain,
+                        "reasoning": f"Footer band website uniquely matched {domain} on page {idx + 1}.",
+                    }
+    except Exception as exc:
+        logger.debug("Spatial footer brand extraction failed: %s", exc)
+    return None
+
+
 def extract_page1_primary_brand_signals(page1_text: str) -> dict[str, Any]:
     """Score exclusive brand domains/headers on Page 1 without PDPA cross-brand pollution."""
     if not (page1_text or "").strip():
@@ -160,23 +259,24 @@ def extract_page1_primary_brand_signals(page1_text: str) -> dict[str, Any]:
 
     cleaned = _clean_page1_boilerplate(page1_text)
     low = cleaned.lower()
+    compact_low = re.sub(r"\s+", "", low)
     # Mask shared parent legal underwriter before scoring standalone 'liberty insurance'
     liberty_masked = re.sub(r"\bliberty\s+general\s+insurance(?:\s+berhad)?\b", " ", low)
 
     scores = {"Liberty": 0, "Kurnia": 0, "AmAssurance": 0}
     evidence: list[str] = []
 
-    if "libertyinsurance.com.my" in low:
+    if "libertyinsurance.com.my" in compact_low or "libertyinsurance.com" in compact_low:
         scores["Liberty"] += 12
-        evidence.append("libertyinsurance.com.my")
-    if "liberty insurance tower" in low or "liberty insurance berhad" in low:
+        evidence.append("libertyinsurance.com")
+    if "liberty insurance berhad" in low:
         scores["Liberty"] += 8
-        evidence.append("liberty_office_or_berhad")
+        evidence.append("liberty_berhad")
     if re.search(r"\bliberty\s+insurance\b", liberty_masked):
         scores["Liberty"] += 6
         evidence.append("liberty_insurance")
 
-    if "kurnia.com" in low:
+    if "kurnia.com" in compact_low:
         scores["Kurnia"] += 12
         evidence.append("kurnia.com")
     if any(k in low for k in ("kurnia insurans", "kurnia insurance", "kurnia auto assist")):
@@ -186,7 +286,7 @@ def extract_page1_primary_brand_signals(page1_text: str) -> dict[str, Any]:
         scores["Kurnia"] += 4
         evidence.append("kurnia_token")
 
-    if "amassurance.com.my" in low:
+    if "amassurance.com.my" in compact_low or "www.amassurance.com" in compact_low:
         scores["AmAssurance"] += 12
         evidence.append("amassurance.com.my")
     if re.search(r"\bamassurance\b", low):

@@ -985,6 +985,10 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             if "icon_hint" in prev_typed and "icon_hint" not in typed_override:
                 typed_override["icon_hint"] = prev_typed["icon_hint"]
         selected.typed_value_override = typed_override
+        if isinstance(typed_override, dict) and str(typed_override.get("display_text") or typed_override.get("value") or "").strip():
+            ev_snap = dict(selected.evidence_snapshot or {})
+            ev_snap["manually_edited"] = True
+            selected.evidence_snapshot = ev_snap
     if "price" in operation or selected.price is None:
         selected.price = price
     if "label" in operation or "label_override" in operation:
@@ -1111,6 +1115,10 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
                 if "display_text" in prev_typed and "display_text" not in validated and not (isinstance(raw, dict) and "display_text" in raw):
                     validated["display_text"] = prev_typed["display_text"]
                 selection.typed_value_override = validated
+                if str(validated.get("display_text") or validated.get("value") or "").strip():
+                    ev_snap = dict(selection.evidence_snapshot or {})
+                    ev_snap["manually_edited"] = True
+                    selection.evidence_snapshot = ev_snap
             except ValidationError as exc:
                 raise AppError("The quotation-specific benefit value is invalid.", 422) from exc
     if selection.state != ReviewedBenefitState.CURRENT.value:
@@ -1812,7 +1820,7 @@ def apply_workspace_patch(
                                 )
                                 ce.waiver_betterment = has_bet_active
                                 ce.betterment_rate = 0.0 if has_bet_active else b_rate
-                                ce.betterment_display = "No (0%)" if has_bet_active else b_disp
+                                ce.betterment_display = "Yes (0%)" if has_bet_active else b_disp
 
                             for clr_key in ("windscreen_sum_insured", "special_perils", "llp_llop", "towing_limit", "waiver_betterment", "motor_premium"):
                                 record_manual_overrides(ce, clear_field=clr_key)

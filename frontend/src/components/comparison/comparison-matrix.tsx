@@ -214,7 +214,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       towing_km?: string;
       agreed_value: boolean;
       waiver_betterment?: boolean;
-      betterment_rate?: number;
+      betterment_rate?: number | null;
       betterment_display?: string;
       betterment_is_auto?: boolean;
       excess?: number;

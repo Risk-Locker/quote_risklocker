@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { Route } from "next";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
@@ -728,6 +728,7 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
 
               export function SessionWorkspaceProvider({ sessionId, children }: { sessionId: string; children: ReactNode }) {
                 const router = useRouter();
+                const pathname = usePathname();
                 const [serverSnapshot, setServerSnapshot] = useState<WorkspaceSnapshot | null>(null);
                 const [workingSnapshot, setWorkingSnapshot] = useState<WorkspaceSnapshot | null>(null);
                 const [loading, setLoading] = useState(true);
@@ -772,6 +773,29 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                 useEffect(() => {
                   reload().catch(() => undefined);
                 }, [reload]);
+
+                // Canonicalize URL between /sessions/[id] and /sessions/sandbox/[id] + tag browser tab for test sessions
+                useEffect(() => {
+                  if (loading || !serverSnapshot) return;
+                  const isTest = Boolean(serverSnapshot.is_test);
+                  const onSandboxPath = pathname?.startsWith("/sessions/sandbox/") ?? false;
+                  const qs = typeof window !== "undefined" ? window.location.search : "";
+                  if (isTest && !onSandboxPath) {
+                    router.replace(`/sessions/sandbox/${serverSnapshot.session_id}${qs}` as Route, { scroll: false });
+                  } else if (!isTest && onSandboxPath) {
+                    router.replace(`/sessions/${serverSnapshot.session_id}${qs}` as Route, { scroll: false });
+                  }
+                }, [loading, serverSnapshot, pathname, router]);
+
+                useEffect(() => {
+                  if (!serverSnapshot?.is_test || typeof document === "undefined") return;
+                  const prevTitle = document.title;
+                  const refLabel = serverSnapshot.quotation_ref || "Test Quotation";
+                  document.title = `[SANDBOX] ${refLabel} · RiskLocker`;
+                  return () => {
+                    document.title = prevTitle;
+                  };
+                }, [serverSnapshot?.is_test, serverSnapshot?.quotation_ref]);
 
                 const pruneAutoTotalClearIfClean = useCallback(() => {
                   if (operationsRef.current.size === 1 && operationsRef.current.has("fields.total_amount")) {

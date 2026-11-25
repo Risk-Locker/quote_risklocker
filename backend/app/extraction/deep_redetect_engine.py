@@ -12,6 +12,7 @@ from typing import Any, Callable
 from app.core.errors import AppError
 from app.core.workspace import qc_temp_directory
 from app.extraction.brand_logo_scanner import (
+    extract_liberty_group_spatial_brand,
     extract_page1_primary_brand_signals,
     is_liberty_group_document,
     render_page1_logo_crop,
@@ -22,6 +23,7 @@ from app.extraction.draft_mapper import build_draft
 from app.extraction import gemini_extractor
 from app.extraction.native_pdf import extract_native
 from app.extraction.ocr import run_enhanced_reading
+from app.extraction.page_filter import slice_pdf_bytes_excluding_pages, split_operative_pages
 
 logger = logging.getLogger(__name__)
 
@@ -108,29 +110,43 @@ def _run_pass1_native_and_logo_crop(
     combined_text = "\n".join(part for part in (native.raw_text, ocr_text) if part).strip()
     ocr_pages = [{"page": 1, "text": ocr_text, "source_method": "ocr"}] if ocr_text.strip() else []
     page_text = [*(native.page_text or []), *ocr_pages]
-    page1_text = str((page_text[0] if page_text else {}).get("text") or "")
+    operative_pages, pds_pages = split_operative_pages(page_text)
+    operative_words = [w for w in (native.words or []) if int(w.get("page", 1)) not in pds_pages]
+    operative_text = (
+        "\n".join(str(p.get("text") or "") for p in operative_pages if str(p.get("text") or "").strip()).strip()
+        or combined_text
+    )
+    operative_pdf_bytes = slice_pdf_bytes_excluding_pages(pdf_bytes, pds_pages)
+    page1_text = str((operative_pages[0] if operative_pages else (page_text[0] if page_text else {})).get("text") or "")
 
     candidates = find_candidates(
-        combined_text,
-        page_text,
-        native.words,
+        operative_text,
+        operative_pages,
+        operative_words,
         aliases=db_context.get("db_aliases"),
         source_filename=source_filename,
         db_brands=db_context.get("db_brands"),
         db_models=db_context.get("db_models"),
         db_companies=db_context.get("db_companies"),
     )
-    native_fields, _, _ = build_draft(candidates, raw_text=combined_text)
+    native_fields, _, _ = build_draft(candidates, raw_text=operative_text)
     logo_crop_png, logo_color_meta = render_page1_logo_crop(pdf_bytes)
     p1_signals = extract_page1_primary_brand_signals(page1_text)
+    spatial_brand = extract_liberty_group_spatial_brand(
+        pdf_bytes,
+        page1_text,
+        db_companies=db_context.get("db_companies") or [],
+    )
     return {
-        "raw_text": combined_text,
+        "raw_text": operative_text,
+        "operative_pdf_bytes": operative_pdf_bytes,
         "page1_text": page1_text,
         "native_fields": native_fields,
         "candidates": candidates,
         "logo_crop_png": logo_crop_png,
         "logo_color_meta": logo_color_meta,
         "p1_signals": p1_signals,
+        "spatial_brand": spatial_brand,
     }
 
 
@@ -289,7 +305,24 @@ def run_deep_redetect_pipeline(
     brand_verdict: dict[str, Any] | None = None
     passes_used = 1
     is_mmip = _check_mmip_override(pass1, source_filename)
-    if not is_mmip and _should_verify_brand_visually(pass1, cur_map, source_filename):
+    if is_mmip:
+        brand_verdict = {
+            "insurance_company": "MMIP",
+            "canonical_company": "MMIP",
+            "confidence": 1.0,
+            "reasoning": "MMIP pool indicator present in document.",
+        }
+    elif pass1.get("spatial_brand") and float(pass1["spatial_brand"].get("confidence") or 0.0) >= 0.99:
+        brand_verdict = pass1["spatial_brand"]
+        _emit(
+            on_progress,
+            "brand_logo_vision",
+            "Pass 2/4 · Verified insurer footer website",
+            str(brand_verdict.get("reasoning") or "Matched authoritative Page 1 footer website domain."),
+            35,
+            {"brand_verdict": brand_verdict.get("canonical_company"), "domain": brand_verdict.get("domain")},
+        )
+    elif _should_verify_brand_visually(pass1, cur_map, source_filename):
         _emit(
             on_progress,
             "brand_logo_vision",
@@ -308,13 +341,6 @@ def run_deep_redetect_pipeline(
             timeout_seconds=18.0,
         )
         passes_used += 1
-    elif is_mmip:
-        brand_verdict = {
-            "insurance_company": "MMIP",
-            "canonical_company": "MMIP",
-            "confidence": 1.0,
-            "reasoning": "MMIP pool indicator present in document.",
-        }
     _check_cancel(cancel_event)
 
     # Pass 3: Fresh Full-Document Multimodal AI Extraction
@@ -333,7 +359,7 @@ def run_deep_redetect_pipeline(
             f"'{brand_verdict['canonical_company']}' ({brand_verdict.get('reasoning', '')})."
         )
     gemini_res = gemini_extractor.extract_with_gemini_sync(
-        pdf_bytes,
+        pass1.get("operative_pdf_bytes") or pdf_bytes,
         document_text=pass1["raw_text"] or None,
         source_filename=source_filename,
         db_companies=ctx.get("db_companies") or [],
@@ -381,7 +407,7 @@ def run_deep_redetect_pipeline(
             brand_verdict,
         )
         verified_res = gemini_extractor.extract_with_gemini_sync(
-            pdf_bytes,
+            pass1.get("operative_pdf_bytes") or pdf_bytes,
             document_text=pass1["raw_text"] or None,
             source_filename=source_filename,
             db_companies=ctx.get("db_companies") or [],

@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageLoading } from "@/components/ui/page-loading";
-import { ArrowSquareOut, DownloadSimple, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, DownloadSimple, Flask, X } from "@phosphor-icons/react";
 import {
   useWorkspaceActions,
   useWorkspaceData,
@@ -401,6 +401,20 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
 
   return (
     <div className="flex flex-col lg:h-[calc(100dvh-45px)] lg:overflow-hidden">
+      {workspace.is_test ? (
+        <div
+          role="status"
+          className="shrink-0 flex flex-wrap items-center justify-between gap-2 bg-amber-50 border-b border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-950"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <Flask size={14} weight="bold" className="text-amber-700 shrink-0" />
+            <span>SANDBOX TEST SESSION — Isolated from live Client Records, Tenures &amp; Hit/Miss Tracking</span>
+          </span>
+          <span className="rounded bg-amber-200/70 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-950">
+            /sessions/sandbox/{workspace.session_id}
+          </span>
+        </div>
+      ) : null}
       <ReviewHeaderCard
         workspace={workspace}
         companyName={companyName}
@@ -573,6 +587,7 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
           resolvingConflict={conflictAndAi.resolvingConflict}
           handleResolveConflict={conflictAndAi.handleResolveConflict}
           toastMessage={state.toastMessage}
+          onDismissToast={() => state.setToastMessage(null)}
           pendingExportAction={exports.pendingExportAction}
           setPendingExportAction={exports.setPendingExportAction}
           confirmAndExecuteExport={exports.confirmAndExecuteExport}

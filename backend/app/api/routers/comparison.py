@@ -830,7 +830,9 @@ def patch_comparison_entry(
     from app.services.marketing_comparison.ncd_evaluator import (
         check_has_betterment_peril,
         evaluate_betterment_rules,
+        format_betterment_waiver_display,
         get_standard_betterment_rate,
+        normalize_betterment_display,
     )
     from app.services.marketing_comparison.workspace_sync import sync_session_draft_from_comparison
 
@@ -895,22 +897,28 @@ def patch_comparison_entry(
     b_mode = (payload.betterment_mode or "").strip().lower()
     if b_mode == "auto":
         clear_field = "waiver_betterment"
+    elif b_mode in ("no", "none", "na", "not_applicable"):
+        entry.waiver_betterment = False
+        entry.betterment_rate = None
+        entry.betterment_display = "No"
+        edited_fields.extend(["waiver_betterment", "betterment_rate"])
+    elif b_mode == "waived":
+        entry.waiver_betterment = True
+        entry.betterment_rate = 0.0
+        entry.betterment_display = "Yes (0%)"
+        edited_fields.extend(["waiver_betterment", "betterment_rate"])
     elif payload.betterment_rate is not None:
         b_rate_val = round(float(payload.betterment_rate), 2)
         entry.waiver_betterment = b_rate_val == 0.0
         entry.betterment_rate = b_rate_val
-        entry.betterment_display = (
-            "No (0%)"
-            if b_rate_val == 0.0
-            else f"Yes ({int(b_rate_val) if float(b_rate_val).is_integer() else b_rate_val}%)"
-        )
+        entry.betterment_display = format_betterment_waiver_display(entry.waiver_betterment, b_rate_val)
         edited_fields.extend(["waiver_betterment", "betterment_rate"])
-    elif payload.waiver_betterment is not None or b_mode in ("waived", "copay"):
-        waived_flag = (b_mode == "waived") if b_mode in ("waived", "copay") else bool(payload.waiver_betterment)
+    elif payload.waiver_betterment is not None or b_mode == "copay":
+        waived_flag = False if b_mode == "copay" else bool(payload.waiver_betterment)
         entry.waiver_betterment = waived_flag
         if entry.waiver_betterment:
             entry.betterment_rate = 0.0
-            entry.betterment_display = "No (0%)"
+            entry.betterment_display = "Yes (0%)"
         else:
             veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if (tenure and getattr(tenure, "tracked_vehicle", None)) else None
             quote_year = tenure.coverage_start_date.year if (tenure and tenure.coverage_start_date) else datetime.now(timezone.utc).year
@@ -1044,17 +1052,24 @@ def patch_comparison_entry(
                 quote_year = tenure.coverage_start_date.year if (tenure and tenure.coverage_start_date) else datetime.now(timezone.utc).year
                 has_p = check_has_betterment_peril(f_rev, b_rev.get("combined_text", ""))
                 comp_obj = db.get(InsuranceCompany, s_rev.company_id) if getattr(s_rev, "company_id", None) else None
+                reg_raw_rev = f_rev.get("registration_date") or f_rev.get("reg_date")
+                reg_dt_rev = reg_raw_rev.get("value") if isinstance(reg_raw_rev, dict) else reg_raw_rev
+                cov_raw_rev = f_rev.get("coverage_type")
+                cov_val_rev = cov_raw_rev.get("value") if isinstance(cov_raw_rev, dict) else (cov_raw_rev or getattr(s_rev, "coverage_type", None))
                 w_auto, r_auto, d_auto = evaluate_betterment_rules(
                     yom=veh_yom,
                     quote_year=quote_year,
                     company_name=entry.company_name,
                     has_betterment_peril=has_p,
+                    registration_date=reg_dt_rev,
                     coverage_start_date=tenure.coverage_start_date if tenure else None,
+                    coverage_type=cov_val_rev,
                     company_obj=comp_obj,
                 )
                 entry.waiver_betterment = w_auto
                 entry.betterment_rate = r_auto
                 entry.betterment_display = d_auto
+                clear_field = "waiver_betterment"
             elif clear_field == "windscreen_sum_insured":
                 entry.windscreen_sum_insured = b_rev.get("windscreen_sum_insured")
             elif clear_field == "excess":
@@ -1092,7 +1107,13 @@ def patch_comparison_entry(
             return "" if s in {"", "-", "—", "none", "nil", "no", "not included", "not covered", "tiada"} else s
 
         def _matches_detected_val(fk: str, cur_val: Any, base_val: Any) -> bool:
-            if fk in ("sum_insured", "motor_premium", "excess", "windscreen_sum_insured", "betterment_rate"):
+            if fk == "betterment_rate":
+                if cur_val is None and base_val is None:
+                    return True
+                if (cur_val is None) != (base_val is None):
+                    return False
+                return abs(float(cur_val) - float(base_val)) < 0.01
+            if fk in ("sum_insured", "motor_premium", "excess", "windscreen_sum_insured"):
                 return abs(float(cur_val or 0.0) - float(base_val or 0.0)) < 0.01
             if fk in ("agreed_value", "waiver_betterment"):
                 return bool(cur_val) == bool(base_val)
@@ -1117,10 +1138,24 @@ def patch_comparison_entry(
             auto_cleared_fields.append("valuation_type")
         if "valuation_type" in auto_cleared_fields and "agreed_value" not in auto_cleared_fields:
             auto_cleared_fields.append("agreed_value")
-        if "waiver_betterment" in auto_cleared_fields and "betterment_rate" not in auto_cleared_fields:
-            auto_cleared_fields.append("betterment_rate")
-        if "betterment_rate" in auto_cleared_fields and "waiver_betterment" not in auto_cleared_fields:
-            auto_cleared_fields.append("waiver_betterment")
+        # Only auto-clear waiver_betterment / betterment_rate when BOTH match the detected baseline
+        if ("waiver_betterment" in auto_cleared_fields or "betterment_rate" in auto_cleared_fields):
+            wb_matches = "waiver_betterment" in detected_baseline and _matches_detected_val(
+                "waiver_betterment", entry.waiver_betterment, detected_baseline["waiver_betterment"]
+            )
+            br_matches = "betterment_rate" in detected_baseline and _matches_detected_val(
+                "betterment_rate", entry.betterment_rate, detected_baseline["betterment_rate"]
+            )
+            if wb_matches and br_matches:
+                for bf in ("waiver_betterment", "betterment_rate"):
+                    if bf not in auto_cleared_fields:
+                        auto_cleared_fields.append(bf)
+            else:
+                for bf in ("waiver_betterment", "betterment_rate"):
+                    if bf in auto_cleared_fields:
+                        auto_cleared_fields.remove(bf)
+                    if bf in edited_fields and bf not in remaining_edited:
+                        remaining_edited.append(bf)
         edited_fields = [f for f in remaining_edited if f not in auto_cleared_fields]
 
     sync_fields = list(dict.fromkeys([*edited_fields, *auto_cleared_fields]))
@@ -1133,7 +1168,8 @@ def patch_comparison_entry(
         )
         for cf in auto_cleared_fields:
             record_manual_overrides(entry, clear_field=cf)
-        if b_mode == "auto":
+        if b_mode == "auto" or clear_field in ("waiver_betterment", "betterment_rate"):
+            record_manual_overrides(entry, clear_field="waiver_betterment")
             record_manual_overrides(entry, clear_field="betterment_rate")
         entry.version = (entry.version or 1) + 1
 
@@ -1151,6 +1187,8 @@ def patch_comparison_entry(
                 "valuation_type": entry.valuation_type,
                 "waiver_betterment": entry.waiver_betterment,
                 "betterment_rate": float(entry.betterment_rate) if entry.betterment_rate is not None else None,
+                "betterment_mode": b_mode,
+                "betterment_display": entry.betterment_display,
                 "towing_limit": entry.towing_limit,
                 "special_perils": entry.special_perils or "Not Included",
                 "llp_llop": entry.llp_llop or "Not Included",
@@ -1287,8 +1325,8 @@ def patch_comparison_entry(
         "agreed_value": entry.agreed_value,
         "valuation_type": entry.valuation_type,
         "waiver_betterment": entry.waiver_betterment,
-        "betterment_rate": float(entry.betterment_rate or 0.0),
-        "betterment_display": entry.betterment_display,
+        "betterment_rate": float(entry.betterment_rate) if entry.betterment_rate is not None else None,
+        "betterment_display": normalize_betterment_display(entry.betterment_display, entry.waiver_betterment, entry.betterment_rate),
         "towing_limit": entry.towing_limit,
         "towing_km": entry.towing_limit if "towing_limit" in get_entry_overrides(entry) else (entry.towing_km or entry.towing_limit),
         "special_perils": entry.special_perils,

@@ -196,3 +196,169 @@ def test_candidate_finder_ignores_pds_pages_for_optional_covers():
     # Optional covers must NOT be added because 'Windscreen' and 'Special Perils' only appear in the PDS
     assert "optional_covers" not in results or not results["optional_covers"]
     assert "benefits_selected" not in results or not results["benefits_selected"]
+
+
+def test_page_filter_lonpac_6page_pds_vs_covernote_and_tune_schedule():
+    """Verify per-page PDS classification trims Lonpac/Tune PDS pages while preserving Cover Notes & active schedules."""
+    from app.extraction.page_filter import split_operative_pages
+
+    lonpac_quote_pages = [
+        {"page": 1, "text": "MOTOR INSURANCE QUOTATION SLIP\nName : LIM HAU YANG\nPREMIUM COMPUTATION\nTotal Payable\n10,326.19"},
+        {"page": 2, "text": "Disclaimer:\nThe premium stated in this document is an indicative and non-binding.\nQUOTATION DATE : 20/11/2026"},
+        {"page": 3, "text": "Quotation No : QJV26063148JHR\n26/PRN/PDS/VP02/Sep v-1.1.0\nPRODUCT DISCLOSURE SHEET\nKnow Your Coverage\nAs an illustration, for RM1,659.00 annual premium\nSpecial Perils / Flood"},
+        {"page": 4, "text": "26/PRN/PDS/VP02/Sep v-1.1.0\nIMPORTANT INFORMATION YOU SHOULD KNOW\nCan I cancel my policy?"},
+        {"page": 5, "text": "26/PRN/PDS/VP02/Sep v-1.1.0\nPRODUCT DISCLOSURE SHEET\nWhat is E-Assist Smart Driver (Personal Accident Insurance)?\nKnow Your Coverage\nSection C: Electric Vehicle (EV) Benefits\nReimbursement of Towing Charges to the nearest Charging Station due to Electric Vehicle Battery depletion"},
+        {"page": 6, "text": "26/PRN/PDS/VP02/Sep v-1.1.0\nIMPORTANT INFORMATION YOU SHOULD KNOW\nCan I cancel my policy?"},
+    ]
+    op_pages, pds_nums = split_operative_pages(lonpac_quote_pages)
+    assert [p["page"] for p in op_pages] == [1, 2]
+    assert pds_nums == {3, 4, 5, 6}
+
+    lonpac_covernote_pages = [
+        {
+            "page": 1,
+            "text": (
+                "COMMERCIAL VEHICLE POLICY\nPolicy Number : J/26/VC00/302097/JHR-22\n"
+                "PRODUCT DISCLOSURE SHEET\n"
+                "For general information on our products, you can refer to the Product Disclosure Sheet at https://www.lonpac.com/downloads#product-disclosure-sheets"
+            ),
+        },
+        {"page": 2, "text": "THE SCHEDULE\nJADUAL\nClass of Policy: COMMERCIAL VEHICLE (C PERMITS - VEHICLE ONLY)"},
+        {"page": 3, "text": "THE SCHEDULE\nEndorsements Attached: 57, 89"},
+    ]
+    cn_op, cn_pds = split_operative_pages(lonpac_covernote_pages)
+    assert [p["page"] for p in cn_op] == [1, 2, 3]
+    assert cn_pds == set()
+
+    tune_pages = [
+        {"page": 1, "text": "TUNE PROTECT MALAYSIA\nMotor Quotation\nTotal Payable Perlu Dibayar: RM 1,200.00"},
+        {"page": 3, "text": "Only The Extensions, Endorsement And / Or Warranties Indicated Below Apply To This Quote.\nSubject to terms and conditions."},
+        {"page": 5, "text": "PRODUCT DISCLOSURE SHEET\nKnow Your Coverage\nWhat is this product?\nImportant Information You Should Know"},
+    ]
+    tune_op, tune_pds = split_operative_pages(tune_pages)
+    assert [p["page"] for p in tune_op] == [1, 3]
+    assert tune_pds == {5}
+
+
+def test_lonpac_stacked_benefits_llp_negligent_acts_and_smart_driver():
+    """Verify Lonpac stacked Page 1 amounts pair 1-to-1 and 'LLP FOR NEGLIGENT ACTS' maps strictly to LLOP."""
+    mock_concepts = [
+        {"concept_id": "c-ws", "concept_key": "windscreen", "label": "Windscreen Coverage", "aliases": [{"phrase": "windscreen", "scope": "global"}]},
+        {"concept_id": "c-lltp", "concept_key": "legal-liability-to-passengers", "label": "Legal Liability to Passengers", "aliases": [{"phrase": "legal liability to passengers", "scope": "global"}]},
+        {"concept_id": "c-llop", "concept_key": "legal-liability-of-passengers", "label": "Legal Liability of Passengers", "aliases": [{"phrase": "legal liability of passengers", "scope": "global"}]},
+        {"concept_id": "c-sdpa", "concept_key": "smart-driver-pa", "label": "Smart Driver PA", "aliases": [{"phrase": "e-assist smart driver", "scope": "global"}]},
+    ]
+    pages = [
+        {
+            "page": 1,
+            "text": (
+                "MOTOR INSURANCE QUOTATION SLIP\n"
+                "Additional Benefits:\n"
+                " - LLP FOR NEGLIGENT ACTS\n"
+                " - WINDSCREEN(15.00%) RM15,000.00\n"
+                "7.50\n"
+                "2,250.00\n"
+                "Additional Policy:\n"
+                " - E-ASSIST SMART DRIVER - PLAN 2 (Unlimited Towing)\n"
+                "138.00\n"
+                "Gross Premium\n"
+                "9,552.03\n"
+            ),
+        }
+    ]
+    lines = extract_benefit_lines(pages, concepts=mock_concepts)
+    assert not any("7.50 2,250.00" in (l.get("raw_label") or "") for l in lines)
+
+    llop_lines = [l for l in lines if "negligent" in (l.get("raw_label") or "").lower()]
+    assert len(llop_lines) == 1
+    assert llop_lines[0]["premium_cost"] == "7.50"
+    assert [m["concept_key"] for m in llop_lines[0]["candidate_mappings"]] == ["legal-liability-of-passengers"]
+
+    ws_lines = [l for l in lines if "windscreen" in (l.get("raw_label") or "").lower()]
+    assert len(ws_lines) == 1
+    assert ws_lines[0]["coverage_limit"] == "15000.00"
+    assert ws_lines[0]["premium_cost"] == "2250.00"
+
+    pa_lines = [l for l in lines if "e-assist" in (l.get("raw_label") or "").lower()]
+    assert len(pa_lines) == 1
+    assert pa_lines[0]["premium_cost"] == "138.00"
+    assert pa_lines[0]["extracted_value"]["unlimited"] is True
+
+
+def test_lonpac_comparison_ignores_historical_pds_leakage():
+    """Verify comparison benefits extraction ignores Page 3-6 PDS text even on stored historical records."""
+    from types import SimpleNamespace
+    from app.services.marketing_comparison.benefits_extractor import _resolve_comparison_benefits
+
+    p1 = (
+        "MOTOR INSURANCE QUOTATION SLIP\n"
+        "Name : LIM HAU YANG\n"
+        "Make & Model : BMW M4\n"
+        "Sum Insured : RM442,000.00\n"
+        "Additional Benefits:\n"
+        " - LLP FOR NEGLIGENT ACTS\n"
+        "7.50\n"
+        "Gross Premium\n"
+        "9,552.03\n"
+    )
+    p3 = (
+        "26/PRN/PDS/VP02/Sep v-1.1.0\n"
+        "PRODUCT DISCLOSURE SHEET\n"
+        "Know Your Coverage\n"
+        "As an illustration, for RM1,659.00 annual premium\n"
+        "• Special Perils / Flood\n"
+    )
+    p5 = (
+        "26/PRN/PDS/VP02/Sep v-1.1.0\n"
+        "PRODUCT DISCLOSURE SHEET\n"
+        "What is E-Assist Smart Driver?\n"
+        "Know Your Coverage\n"
+        "Reimbursement of Towing Charges due to Electric Vehicle Battery depletion\n"
+    )
+    ext_rec = SimpleNamespace(
+        raw_text="\n".join([p1, p3, p5]),
+        ocr_text="",
+        page_text=[{"page": 1, "text": p1}, {"page": 3, "text": p3}, {"page": 5, "text": p5}],
+        benefit_lines=[],
+        words=[],
+        blocks=[],
+        candidates={},
+    )
+    session = SimpleNamespace(
+        draft_id=None,
+        uploaded_file_id="f-lonpac-1",
+        company_id=None,
+        detected_company="Lonpac Insurance",
+        uploaded_file=SimpleNamespace(extraction_record=ext_rec),
+    )
+
+    class _DummyDB:
+        def scalars(self, *args, **kwargs):
+            return SimpleNamespace(all=lambda: [])
+
+        def get(self, *args, **kwargs):
+            return None
+
+    res = _resolve_comparison_benefits(
+        _DummyDB(),
+        session,
+        None,
+        {"insurance_company": "Lonpac Insurance"},
+        prefetched={
+            "all_selections_by_draft": {},
+            "selections_by_draft": {},
+            "concepts_by_id": {},
+            "ext_lines_by_file": {},
+            "ext_records_by_file": {"f-lonpac-1": ext_rec},
+            "companies_by_id": {},
+            "conditions_by_company": {},
+            "towing_by_rev": {},
+            "bundles_by_company": {},
+            "catalog_rev_names": {},
+        },
+    )
+    assert res["special_perils"] is None
+    assert "ev_battery" not in (res.get("extra_addons") or {})
+    assert "LLOP" in res["canonical_perils"]
+    assert "LLP" not in res["canonical_perils"]
+

@@ -72,7 +72,9 @@ from app.services.marketing_comparison.ncd_evaluator import (
     calculate_vehicle_age,
     check_has_betterment_peril,
     evaluate_betterment_rules,
+    format_betterment_waiver_display,
     get_standard_betterment_rate,
+    normalize_betterment_display,
     normalize_towing_km,
     rank_comparison_entries,
 )
@@ -255,7 +257,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
 
     # Clean up any comparison entries erroneously created for Cover Note sessions or pointing to trashed/missing sessions
     valid_entries = []
-    seen_companies = {}
+    seen_companies: dict[str, TenureComparisonEntry] = {}
     for e in entries:
         if e.session_id:
             sess = session_map.get(e.session_id)
@@ -263,6 +265,16 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 db.delete(e)
                 needs_commit = True
                 continue
+            # Sync company_name & company_id when session insurer changes after re-detect/rescan
+            if sess.detected_company and not is_field_overridden(e, "company_name"):
+                det_c = sess.detected_company.strip()
+                if (e.company_name or "").strip().lower() != det_c.lower():
+                    e.company_name = det_c
+                    needs_commit = True
+                sess_cid = getattr(sess, "company_id", None) or (getattr(sess.draft, "company_id", None) if sess.draft else None)
+                if sess_cid and e.company_id != sess_cid:
+                    e.company_id = sess_cid
+                    needs_commit = True
         # Also clean up any entry whose company_name contains covernote / certificate indicators
         c_lower = (e.company_name or "").lower()
         if any(term in c_lower for term in ("covernote", "cover note", "sijil insurans", "certificate of insurance")):
@@ -273,15 +285,32 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         # Deduplicate multiple entries for the same underwriter under this tenure (Single Column per Insurer Invariant)
         comp_key = str(e.company_id or e.company_name or "").strip().lower()
         if comp_key in seen_companies:
-            db.delete(e)
+            prev_e = seen_companies[comp_key]
+            prev_sess = session_map.get(prev_e.session_id) if prev_e.session_id else None
+            curr_sess = session_map.get(e.session_id) if e.session_id else None
+            # Prefer the active / newer session if one of them is superseded
+            curr_active = bool(curr_sess and curr_sess.is_tenure_active is not False)
+            prev_active = bool(prev_sess and prev_sess.is_tenure_active is not False)
+            if curr_active and not prev_active:
+                db.delete(prev_e)
+                valid_entries = [item for item in valid_entries if item.id != prev_e.id]
+                seen_companies[comp_key] = e
+                valid_entries.append(e)
+            else:
+                db.delete(e)
             needs_commit = True
             continue
         seen_companies[comp_key] = e
         valid_entries.append(e)
     entries = valid_entries
 
-    # Separate quotation sessions from cover note sessions — only active, non-superseded quotation sessions form comparison columns
-    quote_sessions = [s for s in sessions if not is_covernote_document(s, db) and s.is_tenure_active is not False]
+    # Separate quotation sessions from cover note sessions — only active, extracted quotation sessions form comparison columns
+    quote_sessions = [
+        s for s in sessions
+        if not is_covernote_document(s, db)
+        and s.is_tenure_active is not False
+        and not (s.draft is not None and getattr(s.draft, "status", None) == "preparing" and not s.detected_company)
+    ]
 
     # Auto-link Cover Note to tenure if not already assigned (exclude unlinked_covernote)
     if not tenure.covernote_session_id:
@@ -707,7 +736,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                 is_comprehensive_private=is_comp_private,
                 coverage_type=e_cov_type,
             )
-            if e.betterment_rate is None or e.betterment_display is None:
+            if not is_field_overridden(e, "waiver_betterment") and e.betterment_display is None:
                 e.betterment_rate = fallback_bet_rate
                 e.betterment_display = fallback_bet_disp
                 needs_commit = True
@@ -905,7 +934,11 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
         prev_val_type = best_prev.valuation_type if best_prev else None
         prev_waiver = bool(best_prev.waiver_betterment) if best_prev else None
         prev_bet_rate = float(best_prev.betterment_rate) if (best_prev and best_prev.betterment_rate is not None) else None
-        prev_bet_disp = best_prev.betterment_display if best_prev else None
+        prev_bet_disp = (
+            normalize_betterment_display(best_prev.betterment_display, bool(prev_waiver), prev_bet_rate)
+            if (best_prev and (best_prev.betterment_display or prev_waiver is not None))
+            else None
+        )
         prev_excess = float(best_prev.excess) if (best_prev and best_prev.excess is not None) else None
         prev_rate_pct = float(best_prev.rate_percentage) if (best_prev and best_prev.rate_percentage is not None) else None
         prev_windscreen = float(best_prev.windscreen_sum_insured) if (best_prev and best_prev.windscreen_sum_insured) else None
@@ -1425,8 +1458,9 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             "towing_km": (e.towing_limit if is_field_overridden(e, "towing_limit") else (e.towing_km or e.towing_limit)),
             "agreed_value": e.agreed_value,
             "waiver_betterment": e.waiver_betterment,
-            "betterment_rate": float(e.betterment_rate) if e.betterment_rate is not None else 0.0,
-            "betterment_display": e.betterment_display or ("No (0%)" if e.waiver_betterment else "Yes"),
+            "betterment_rate": float(e.betterment_rate) if e.betterment_rate is not None else None,
+            "betterment_display": normalize_betterment_display(e.betterment_display, e.waiver_betterment, e.betterment_rate),
+            "betterment_is_auto": not any(k in entry_overrides for k in ("waiver_betterment", "betterment_rate")),
             "excess": float(e.excess),
             "basic_figure_name": basic_term_label,
             "basic_figure_amount": basic_prem,
@@ -1653,21 +1687,22 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
             try:
                 cn_bet_rate = round(float(str(cn_raw_rate).strip()), 2)
                 cn_waiver_bet = cn_bet_rate == 0.0
-                cn_bet_disp = (
-                    "No (0%)"
-                    if cn_waiver_bet
-                    else f"Yes ({int(cn_bet_rate) if float(cn_bet_rate).is_integer() else cn_bet_rate}%)"
-                )
+                cn_bet_disp = format_betterment_waiver_display(cn_waiver_bet, cn_bet_rate)
             except (TypeError, ValueError):
                 cn_rate_manual = False
         if not cn_rate_manual:
             if cn_w_manual:
-                cn_has_peril = str(cn_raw_w or "").strip().lower() == "included"
-                cn_waiver_bet = cn_has_peril
-                if cn_waiver_bet:
+                raw_w_l = str(cn_raw_w or "").strip().lower()
+                if raw_w_l == "included":
+                    cn_waiver_bet = True
                     cn_bet_rate = 0.0
-                    cn_bet_disp = "No (0%)"
+                    cn_bet_disp = "Yes (0%)"
+                elif raw_w_l == "no":
+                    cn_waiver_bet = False
+                    cn_bet_rate = None
+                    cn_bet_disp = "No"
                 else:
+                    cn_waiver_bet = False
                     _, cn_bet_rate, cn_bet_disp = evaluate_betterment_rules(
                         yom=cn_yom,
                         quote_year=cn_q_yr,
@@ -1697,6 +1732,7 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = F
                     coverage_type=cn_cov_type,
                     company_obj=cn_comp_obj,
                 )
+        cn_bet_disp = normalize_betterment_display(cn_bet_disp, cn_waiver_bet, cn_bet_rate)
 
         s_date = cn_session.coverage_start_date or tenure.coverage_start_date
         e_date = cn_session.coverage_end_date or tenure.coverage_end_date
@@ -2319,11 +2355,47 @@ def save_comparison_entry(
         entry.agreed_value = bool(payload["agreed_value"])
         if entry.agreed_value:
             entry.valuation_type = "agreed_value"
-    if "waiver_betterment" in payload:
-        entry.waiver_betterment = bool(payload["waiver_betterment"])
+    b_mode = str(payload.get("betterment_mode") or "").strip().lower()
+    if b_mode == "auto":
+        veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
+        quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
+        s_auto = db.get(SessionModel, entry.session_id) if entry.session_id else None
+        f_auto = (s_auto.draft.fields if s_auto and s_auto.draft and isinstance(s_auto.draft.fields, dict) else {})
+        has_p_auto = check_has_betterment_peril(f_auto)
+        comp_obj_auto = db.get(InsuranceCompany, entry.company_id) if entry.company_id else None
+        w_auto, r_auto, d_auto = evaluate_betterment_rules(
+            yom=veh_yom,
+            quote_year=quote_year,
+            company_name=entry.company_name,
+            has_betterment_peril=has_p_auto,
+            coverage_start_date=tenure.coverage_start_date,
+            company_obj=comp_obj_auto,
+        )
+        entry.waiver_betterment = w_auto
+        entry.betterment_rate = r_auto
+        entry.betterment_display = d_auto
+        record_manual_overrides(entry, clear_field="waiver_betterment")
+        record_manual_overrides(entry, clear_field="betterment_rate")
+    elif b_mode in ("no", "none", "na", "not_applicable"):
+        entry.waiver_betterment = False
+        entry.betterment_rate = None
+        entry.betterment_display = "No"
+        record_manual_overrides(entry, edited_fields=["waiver_betterment", "betterment_rate"])
+    elif b_mode == "waived":
+        entry.waiver_betterment = True
+        entry.betterment_rate = 0.0
+        entry.betterment_display = "Yes (0%)"
+        record_manual_overrides(entry, edited_fields=["waiver_betterment", "betterment_rate"])
+    elif "betterment_rate" in payload and payload["betterment_rate"] is not None:
+        b_rate_val = round(float(payload["betterment_rate"]), 2)
+        entry.waiver_betterment = b_rate_val == 0.0
+        entry.betterment_rate = b_rate_val
+        entry.betterment_display = format_betterment_waiver_display(entry.waiver_betterment, b_rate_val)
+    elif "waiver_betterment" in payload or b_mode == "copay":
+        entry.waiver_betterment = False if b_mode == "copay" else bool(payload["waiver_betterment"])
         if entry.waiver_betterment:
             entry.betterment_rate = 0.0
-            entry.betterment_display = "No (0%)"
+            entry.betterment_display = "Yes (0%)"
         else:
             veh_yom = getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None
             quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now().year
@@ -2343,15 +2415,6 @@ def save_comparison_entry(
         from app.services.marketing_comparison.dynamic_addons import sanitize_extra_addons_map
 
         entry.extra_addons = {**dict(getattr(entry, "extra_addons", None) or {}), **sanitize_extra_addons_map(payload["extra_addons"])}
-    if "betterment_rate" in payload and payload["betterment_rate"] is not None:
-        b_rate_val = round(float(payload["betterment_rate"]), 2)
-        entry.waiver_betterment = b_rate_val == 0.0
-        entry.betterment_rate = b_rate_val
-        entry.betterment_display = (
-            "No (0%)"
-            if b_rate_val == 0.0
-            else f"Yes ({int(b_rate_val) if float(b_rate_val).is_integer() else b_rate_val}%)"
-        )
     if "notes" in payload:
         entry.notes = _safe_str(payload["notes"]) or None
     if "discount" in payload:
@@ -2389,6 +2452,9 @@ def save_comparison_entry(
                 "motor_premium": entry.motor_premium,
                 "towing_limit": entry.towing_limit,
                 "waiver_betterment": entry.waiver_betterment,
+                "betterment_rate": float(entry.betterment_rate) if entry.betterment_rate is not None else None,
+                "betterment_mode": b_mode,
+                "betterment_display": entry.betterment_display,
                 "excess": entry.excess,
                 "windscreen_sum_insured": entry.windscreen_sum_insured,
                 "special_perils": entry.special_perils or "Not Included",
@@ -3040,6 +3106,11 @@ def rescan_comparison_tenure(
 
         entry = entry_by_session.get(s.id)
         if entry:
+            if s.detected_company and not is_field_overridden(entry, "company_name"):
+                entry.company_name = s.detected_company.strip()
+                s_cid = getattr(s, "company_id", None) or (getattr(s.draft, "company_id", None) if s.draft else None)
+                if s_cid:
+                    entry.company_id = s_cid
             sum_ins = _extract_vehicle_sum_insured(f, s_obj=s)
             motor_prem = _extract_vehicle_motor_premium(f)
             val_type, agreed = _extract_valuation_type(f, s_obj=s)

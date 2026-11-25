@@ -49,6 +49,9 @@ def _clear_draft_dependents(db: DbSession, draft_id: str, extraction_record_id: 
     db.execute(delete(DraftSourceLineDecision).where(DraftSourceLineDecision.draft_id == draft_id))
     if extraction_record_id:
         db.execute(delete(ExtractionBenefitLine).where(ExtractionBenefitLine.extraction_record_id == extraction_record_id))
+        rec_obj = db.get(ExtractionRecord, extraction_record_id)
+        if rec_obj is not None:
+            rec_obj.benefit_lines = []
     db.flush()
 
 
@@ -273,24 +276,38 @@ def apply_gemini_result(
         candidates["detected_packs"] = gemini_res["detected_packs"]
     extraction.candidates = candidates
 
+    from app.domain.benefits import is_auto_coverage_allowed_for_benefit
+    from app.extraction.benefit_lines import is_spurious_benefit_line
+    from app.services.bundle_plan_matcher import extract_plan_tier_token, is_base_auto365_policy_label
+    from sqlalchemy.orm.attributes import flag_modified
+
+    benefit_lines_json: list[dict[str, Any]] = []
     for b_item in gemini_benefits:
         if isinstance(b_item, dict):
             b_label = str(b_item.get("label") or "").strip()
             b_val = str(b_item.get("value") or "").strip()
             b_key = str(b_item.get("concept_key") or "").strip()
+            b_plan = str(b_item.get("plan_tier") or "").strip()
             cov_limit = str(b_item.get("coverage_limit") or "").strip()
             cost = str(b_item.get("premium_cost") or "").strip()
             is_optional = bool(b_item.get("is_optional_cover", False))
+            b_raw = str(b_item.get("raw_text") or f"{b_label}: {b_val}").strip()
         elif isinstance(b_item, str):
             b_label = b_item.strip()
             b_val = ""
             b_key = ""
+            b_plan = ""
             cov_limit = ""
             cost = ""
             is_optional = False
+            b_raw = b_label
         else:
             continue
 
+        if not b_label or is_base_auto365_policy_label(b_label) or is_spurious_benefit_line(b_label) or is_spurious_benefit_line(b_raw):
+            continue
+
+        inferred_plan = b_plan or extract_plan_tier_token(f"{b_label} {b_val} {b_raw}") or ""
         b_norm = b_label.lower().replace(" ", "-").replace("_", "-")
         matched_concept = None
         for c in (db_benefit_concepts or []):
@@ -308,9 +325,16 @@ def apply_gemini_result(
 
         concept_id = (matched_concept.get("concept_id") or matched_concept.get("id")) if matched_concept else None
         c_key = (matched_concept.get("concept_key") or matched_concept.get("key")) if matched_concept else (b_key or b_norm)
-        limit_val = cov_limit or (b_val if b_val.lower() not in {"included", "standard", "yes", "true", "optional"} else "")
+
+        # Strict Zero-Fake-Coverage Gate: never fall back to b_val (price) or allow auto coverage outside Windscreen/Towing/Betterment
+        limit_val = ""
+        if cov_limit and is_auto_coverage_allowed_for_benefit(c_key, b_label, cov_limit, cost):
+            limit_val = cov_limit
+        elif b_val and is_auto_coverage_allowed_for_benefit(c_key, b_label, b_val, cost):
+            limit_val = b_val
+
         typed_val = None
-        if limit_val and (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)):
+        if limit_val:
             clean_limit = limit_val.upper().replace("RM", "").replace(",", "").strip()
             is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", limit_val, re.IGNORECASE))
             if is_pure_money:
@@ -318,15 +342,86 @@ def apply_gemini_result(
                     "type": "money",
                     "value": clean_limit,
                     "currency": "MYR",
-                    "display_text": limit_val if limit_val.startswith("RM") else f"RM {limit_val}",
+                    "semantic_role": "limit",
+                    "display_text": limit_val if limit_val.upper().startswith("RM") else f"RM {limit_val}",
                 }
             else:
-                typed_val = {"type": "text", "value": limit_val, "display_text": limit_val}
+                typed_val = {
+                    "type": "text",
+                    "value": limit_val,
+                    "semantic_role": "limit",
+                    "display_text": limit_val,
+                }
+        elif cost:
+            clean_cost_val = cost.upper().replace("RM", "").replace(",", "").strip()
+            is_pure_money = bool(re.match(r"^\s*(?:RM\s*)?[\d]+(?:,\d{3})*(?:\.\d{1,2})?\s*$", cost, re.IGNORECASE))
+            if is_pure_money:
+                typed_val = {
+                    "type": "money",
+                    "value": clean_cost_val,
+                    "currency": "MYR",
+                    "semantic_role": "premium",
+                    "display_text": f"RM {clean_cost_val}",
+                }
+            else:
+                typed_val = {
+                    "type": "text",
+                    "value": cost,
+                    "semantic_role": "premium",
+                    "display_text": cost,
+                }
+        elif inferred_plan:
+            typed_val = {
+                "type": "custom",
+                "value": inferred_plan,
+                "plan_key": inferred_plan.lower().replace(" ", "_"),
+                "display_text": inferred_plan,
+            }
+
+        rescan_line_id = f"rescan_gemini_{new_id()[:8]}"
+        mappings_payload = [{
+            "concept_id": concept_id,
+            "concept_key": c_key,
+            "name": b_label,
+            "matched_alias": b_label,
+            "score": 100,
+            "match_type": "gemini_multimodal",
+            "evidence": limit_val or b_val,
+            "shaped_description": f"{b_label} ({limit_val})" if limit_val else b_label,
+            "coverage_limit": limit_val,
+            "premium_cost": cost,
+            "plan_tier": inferred_plan,
+            "is_detected": True,
+        }] if concept_id or c_key else []
+
+        benefit_lines_json.append({
+            "line_id": rescan_line_id,
+            "raw_label": b_label,
+            "raw_text": b_raw or b_label,
+            "normalized_label": b_label.lower(),
+            "normalized_text": b_label.lower(),
+            "page_number": 1,
+            "page": 1,
+            "section": "Optional Covers" if is_optional else "Selected Benefits",
+            "source_scope": "selected",
+            "line_kind": "benefit_candidate",
+            "heading_category": "selected",
+            "inclusion_state": "selected",
+            "confidence": 1.0,
+            "source_disposition": "auto_apply",
+            "is_detected": True,
+            "coverage_limit": limit_val,
+            "premium_cost": cost,
+            "plan_tier": inferred_plan,
+            "is_optional_cover": is_optional,
+            "extracted_value": typed_val,
+            "candidate_mappings": mappings_payload,
+        })
 
         line = ExtractionBenefitLine(
             id=new_id(),
             extraction_record_id=extraction.id,
-            line_id=f"rescan_gemini_{new_id()[:8]}",
+            line_id=rescan_line_id,
             raw_label=b_label,
             normalized_label=b_label.lower()[:500],
             page_number=1,
@@ -334,20 +429,8 @@ def apply_gemini_result(
             source_scope="selected",
             line_kind="benefit_candidate",
             inclusion_state="selected",
-            evidence={"value": b_val, "coverage_limit": cov_limit if (re.search(r"\d", cov_limit) or re.search(r"\bunlimited\b", cov_limit, re.I)) else "", "premium_cost": cost},
-            candidate_mappings=[{
-                "concept_id": concept_id,
-                "concept_key": c_key,
-                "name": b_label,
-                "matched_alias": b_label,
-                "score": 100,
-                "match_type": "gemini_multimodal",
-                "evidence": b_val,
-                "shaped_description": f"{b_label} ({limit_val})" if limit_val and (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)) else b_label,
-                "coverage_limit": limit_val if (re.search(r"\d", limit_val) or re.search(r"\bunlimited\b", limit_val, re.I)) else None,
-                "premium_cost": cost,
-                "is_detected": True,
-            }] if concept_id or c_key else [],
+            evidence={"value": b_val, "coverage_limit": limit_val, "premium_cost": cost},
+            candidate_mappings=mappings_payload,
             extracted_value=typed_val,
         )
         db.add(line)
@@ -358,6 +441,8 @@ def apply_gemini_result(
             source_line_id=line.id,
             disposition="unresolved",
         ))
+    extraction.benefit_lines = benefit_lines_json
+    flag_modified(extraction, "benefit_lines")
     db.flush()
 
     finalize_catalog_and_3eye_gate(
@@ -578,6 +663,19 @@ def rescan_session(
                     raise AppError("No GEMINI_API_KEY configured. Please check your environment.", 400)
                 err = keys_pool.get_last_error_message() or "AI extraction failed or returned an empty result."
                 raise AppError(f"Gemini AI extraction failed: {err}", 502)
+
+            if brand_verdict is None:
+                from app.extraction.brand_logo_scanner import (
+                    extract_liberty_group_spatial_brand,
+                    is_liberty_group_document,
+                )
+
+                if is_liberty_group_document(doc_text or "", doc_text or "", target_uploaded.original_filename or ""):
+                    brand_verdict = extract_liberty_group_spatial_brand(
+                        source_bytes,
+                        doc_text or "",
+                        db_companies=db_companies,
+                    )
 
     # Atomic mutation phase: ONLY executed after extraction passes succeeded
     if mode == "in_place":

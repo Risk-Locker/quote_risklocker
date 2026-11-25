@@ -79,6 +79,14 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [savingDiscount, setSavingDiscount] = useState(false);
 
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = window.setTimeout(() => {
+      setToastMessage(null);
+    }, 4500);
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
+
   // Sync highlight tracking
   const [syncHighlight, setSyncHighlight] = useState<{
     field: "vehicle_type" | "product_package";

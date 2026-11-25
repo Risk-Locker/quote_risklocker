@@ -6,7 +6,7 @@ import { Info } from "@phosphor-icons/react";
 const COPAY_RATES = [15, 20, 25, 30, 35, 40];
 
 export type BettermentModeSelection = {
-  mode: "auto" | "waived" | "copay";
+  mode: "auto" | "waived" | "no" | "copay";
   waiver_betterment?: boolean;
   betterment_rate?: number | null;
 };
@@ -23,10 +23,11 @@ export interface BettermentEditorControlsProps {
 }
 
 /**
- * Direct Waiver of Betterment selector with formula visibility:
- * - Auto (calculated from YOM + Insurer policy_rules + Peril)
- * - Waived — No (0%)
- * - Apply Co-pay (Auto by Age or explicit 15%–40% schedule)
+ * Direct Betterment Waiver selector with formula visibility:
+ * - Auto (calculated from YOM + Insurer policy_rules + Peril + Coverage Type)
+ * - Yes (0%) — Waived / Exempt (< 5 yrs or valid waiver)
+ * - No — Not applicable (TPO / TPFT / no percentage)
+ * - No (15%–40%) — Comprehensive co-payment applies
  */
 export function BettermentEditorControls({
   waiverBetterment,
@@ -38,21 +39,25 @@ export function BettermentEditorControls({
   disabled = false,
   compact = false,
 }: BettermentEditorControlsProps) {
-  const mode: "auto" | "waived" | "copay" = isAuto
+  const activeRate = bettermentRate != null ? Math.round(Number(bettermentRate)) : null;
+
+  const mode: "auto" | "waived" | "no" | "copay" = isAuto
     ? "auto"
     : waiverBetterment
       ? "waived"
-      : "copay";
+      : activeRate != null && activeRate > 0
+        ? "copay"
+        : "no";
 
-  const activeRate = bettermentRate != null ? Math.round(Number(bettermentRate)) : null;
-
-  const btnCls = (active: boolean, tone: "dark" | "emerald" | "amber" = "dark") => {
+  const btnCls = (active: boolean, tone: "dark" | "emerald" | "amber" | "neutral" = "dark") => {
     const activeStyles =
       tone === "emerald"
         ? "bg-emerald-700 text-white border-emerald-700"
         : tone === "amber"
           ? "bg-amber-700 text-white border-amber-700"
-          : "bg-[#1b1717] text-white border-[#1b1717]";
+          : tone === "neutral"
+            ? "bg-[#4b4f56] text-white border-[#4b4f56]"
+            : "bg-[#1b1717] text-white border-[#1b1717]";
     return `rounded-[var(--rl-radius-sm)] border px-2.5 ${
       compact ? "min-h-[28px] text-[11px]" : "min-h-[32px] text-[12px]"
     } font-semibold transition-colors cursor-pointer ${
@@ -67,10 +72,12 @@ export function BettermentEditorControls({
         <div className="flex items-start gap-1.5">
           <Info size={13} weight="bold" className="text-[#1b1717] shrink-0 mt-0.5" />
           <div>
-            <span className="font-bold text-[#1b1717]">Betterment Formula: </span>
+            <span className="font-bold text-[#1b1717]">Betterment Waiver Rules: </span>
             <span>
-              Age = Policy Year − YOM{manufactureYear ? ` (${manufactureYear})` : ""}. Under 5 yrs = 0%. Ages 5→10+ incur 15%→40% co-pay unless insurer waiver applies
-              {companyName ? ` (${companyName})` : ""}.
+              Age = Policy Year − YOM{manufactureYear ? ` (${manufactureYear})` : ""}.{" "}
+              <strong>Yes (0%)</strong> if &lt;5 yrs or waived
+              {companyName ? ` (${companyName})` : ""}; <strong>No (15%→40%)</strong> for Comprehensive co-pay;{" "}
+              <strong>No</strong> for TPO / TPFT / N/A.
             </span>
           </div>
         </div>
@@ -83,7 +90,7 @@ export function BettermentEditorControls({
           disabled={disabled}
           onClick={() => onSelect({ mode: "auto", betterment_rate: null })}
           className={`${btnCls(mode === "auto")} flex items-center justify-center gap-1`}
-          title="Recalculate automatically from YOM, Insurer waiver window, and Perils"
+          title="Recalculate automatically from YOM, Coverage Type, Insurer waiver window, and Perils"
         >
           <Calculator size={12} weight="bold" />
           Auto
@@ -95,31 +102,33 @@ export function BettermentEditorControls({
             onSelect({ mode: "waived", waiver_betterment: true, betterment_rate: 0 })
           }
           className={`${btnCls(mode === "waived", "emerald")} flex items-center justify-center gap-1`}
+          title="Betterment Waived / 0% Co-pay"
         >
           <ShieldCheck size={12} weight="bold" />
-          No (0%)
+          Yes (0%)
         </button>
         <button
           type="button"
           disabled={disabled}
           onClick={() =>
             onSelect({
-              mode: "copay",
+              mode: "no",
               waiver_betterment: false,
-              betterment_rate: activeRate && activeRate > 0 ? activeRate : 20,
+              betterment_rate: null,
             })
           }
-          className={`${btnCls(mode === "copay", "amber")} flex items-center justify-center gap-1`}
+          className={`${btnCls(mode === "no", "neutral")} flex items-center justify-center gap-1`}
+          title="No Betterment Waiver / Not Applicable (TPO, TPFT, or no percentage)"
         >
           <WarningCircle size={12} weight="bold" />
-          Co-pay
+          No
         </button>
       </div>
 
-      {/* Explicit Co-pay rate chips when Co-pay mode or overriding rate */}
+      {/* Explicit Co-pay rate chips when Comprehensive co-payment applies */}
       <div className="space-y-1">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-[#6e6e73] block">
-          Explicit Co-pay Schedule
+          Comprehensive Co-pay (No Waiver)
         </span>
         <div className="grid grid-cols-3 gap-1.5">
           {COPAY_RATES.map((pct) => {
@@ -138,7 +147,7 @@ export function BettermentEditorControls({
                 }
                 className={btnCls(isSelected, "amber")}
               >
-                Yes ({pct}%)
+                No ({pct}%)
               </button>
             );
           })}

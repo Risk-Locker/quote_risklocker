@@ -1101,6 +1101,30 @@ export function buildUnifiedMatrixCards(
       }
     }
 
+    // Strict Zero-Fake-Coverage Guard: never display premium cost or RM amounts on non-Windscreen/Towing/Betterment selected riders
+    const hasManualOverride = Boolean(item.has_manual_value_override);
+    const isBundleEffPre = Boolean(item?.is_bundle_effect || item?.cost_status === "bundle_included");
+    if (formattedVal && !hasManualOverride && !isBundleEffPre) {
+      const candPrice = item.price ?? item.optional_price;
+      const pRaw = typeof candPrice === "object" && candPrice !== null ? (candPrice.amount ?? candPrice.value) : candPrice;
+      if (pRaw !== undefined && pRaw !== null) {
+        const pN = parseFloat(String(pRaw).replace(/[^0-9.]/g, ""));
+        const vN = parseFloat(String(formattedVal).replace(/[^0-9.]/g, ""));
+        if (Number.isFinite(pN) && Number.isFinite(vN) && pN > 0 && Math.abs(pN - vN) < 0.01) {
+          formattedVal = "";
+        }
+      }
+      if (formattedVal && !isBetterment && catId !== "windscreen" && catId !== "towing") {
+        if (
+          ["llop", "llp", "special_perils", "srcc", "all_drivers", "ncd_protector"].includes(catId) ||
+          Boolean(item?.is_bundle) ||
+          (sel && /^\s*(?:rm|myr)\s*[\d,]+/i.test(formattedVal))
+        ) {
+          formattedVal = "";
+        }
+      }
+    }
+
     // Check if coverage limit is explicitly hidden (Windscreen is strictly mandatory on Malaysian motor quotes)
     const isHideCov = Boolean(
       item.hide_coverage ||

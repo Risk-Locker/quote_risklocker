@@ -68,7 +68,7 @@ export function EditCoverNoteModal({
   const [llpLlop, setLlpLlop] = useState<"Included" | "Not Included">("Not Included");
   const [waiverBetterment, setWaiverBetterment] = useState(false);
   const [bettermentRate, setBettermentRate] = useState<number | null>(null);
-  const [bettermentMode, setBettermentMode] = useState<"auto" | "waived" | "copay">("auto");
+  const [bettermentMode, setBettermentMode] = useState<"auto" | "waived" | "no" | "copay">("auto");
   const [includedPerils, setIncludedPerils] = useState<string[]>([]);
   const [extraAddons, setExtraAddons] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -113,10 +113,11 @@ export function EditCoverNoteModal({
         : "Not Included"
     );
     const wb = Boolean(covernotePolicy.waiver_betterment);
+    const bRateNum = covernotePolicy.betterment_rate != null ? Number(covernotePolicy.betterment_rate) : null;
     setWaiverBetterment(wb);
-    setBettermentRate(covernotePolicy.betterment_rate != null ? Number(covernotePolicy.betterment_rate) : null);
+    setBettermentRate(bRateNum);
     setBettermentMode(
-      covernotePolicy.betterment_is_auto ? "auto" : wb ? "waived" : "copay"
+      covernotePolicy.betterment_is_auto ? "auto" : wb ? "waived" : bRateNum != null && bRateNum > 0 ? "copay" : "no"
     );
     setIncludedPerils(Array.isArray(covernotePolicy.canonical_perils) ? [...covernotePolicy.canonical_perils] : []);
     setExtraAddons(
@@ -156,6 +157,9 @@ export function EditCoverNoteModal({
     if (sel.mode === "waived") {
       setWaiverBetterment(true);
       setBettermentRate(0);
+    } else if (sel.mode === "no") {
+      setWaiverBetterment(false);
+      setBettermentRate(null);
     } else if (sel.mode === "copay") {
       setWaiverBetterment(false);
       setBettermentRate(sel.betterment_rate ?? 20);
@@ -548,10 +552,10 @@ export function EditCoverNoteModal({
             <TowingLimitSelector value={towingLimit} onChange={setTowingLimit} />
           </div>
 
-          {/* Waiver of Betterment Mode & Schedule */}
+          {/* Betterment Waiver Mode & Schedule */}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)] mb-1">
-              Waiver of Betterment
+              Betterment Waiver
             </label>
             <BettermentEditorControls
               waiverBetterment={waiverBetterment}

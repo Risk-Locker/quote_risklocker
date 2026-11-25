@@ -18,7 +18,7 @@ DEFAULT_BETTERMENT_RULE: dict[str, Any] = {
 DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
     "mmip": {
         "allowed_coverage_types": ["third_party"],
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 0, "default_display": "N/A (Third Party)"},
+        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 0, "default_display": "No"},
         "towing": {"metric": "none", "base_limit": "No towing"},
     },
     "qbe": {
@@ -238,6 +238,8 @@ def resolve_company_betterment_rule(
     auto_waive = bool(bet.get("auto_waive_without_peril", False))
     max_years = int(bet.get("max_waiver_years", 15))
     default_disp = str(bet.get("default_display") or f"Up to {max_years} Years")
+    if default_disp.strip().lower() == "n/a (third party)":
+        default_disp = "No"
     return auto_waive, max_years, default_disp
 
 

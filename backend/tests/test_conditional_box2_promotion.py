@@ -205,3 +205,117 @@ def test_design2_renders_option_a_tick_and_larger_box2_fonts():
     assert "font-size: 11.8px; font-weight: 700;" in html
     assert "font-size: 11.0px; font-weight: 700;" in html
     assert "font-size: 10.0px; font-weight: 500;" in html
+
+
+def test_render_context_and_unified_engine_suppress_cost_leaked_as_coverage():
+    """Legacy selections with premium leaked into typed_value_override must suppress fake Coverage while keeping Windscreen/Towing/Betterment."""
+    c_llop = _make_concept("c-llop", "legal-liability-of-passengers", "Legal Liability of Passengers")
+    c_pc365 = _make_concept("c-pc365", "private-car-365", "Private Car 365 - Plan 2")
+    c_ws = _make_concept("c-ws", "windscreen", "Windscreen Coverage")
+    c_bet = _make_concept("c-bet", "betterment-protection", "Waiver of Betterment")
+
+    o_llop = _make_offering("o-llop", "c-llop", "llop-opt", "optional", "addon_option", "", "", 10)
+    o_llop.optional_price = {"amount": 15.0, "currency": "MYR"}  # Different from selection.price to test reversed-check regression!
+    o_pc365 = _make_offering("o-pc365", "c-pc365", "pc365-opt", "optional", "addon_option", "", "", 20)
+    o_ws = _make_offering("o-ws", "c-ws", "ws-opt", "optional", "addon_option", "", "", 30)
+    o_bet = _make_offering("o-bet", "c-bet", "bet-opt", "base", "included", "Up to 15 Years", "", 40)
+
+    sel_llop = _make_selection("s-llop", "c-llop", "o-llop", "current", "paid", display_text="RM 7.50", price={"amount": 7.50, "currency": "MYR"})
+    sel_pc365 = _make_selection("s-pc365", "c-pc365", "o-pc365", "current", "paid", display_text="RM 130.00", price={"amount": 130.00, "currency": "MYR"})
+    sel_ws = _make_selection("s-ws", "c-ws", "o-ws", "current", "paid", display_text="RM 15,000.00", price={"amount": 2250.00, "currency": "MYR"})
+    sel_bet = _make_selection("s-bet", "c-bet", "o-bet", "current", "included", display_text="Up to 15 Years")
+
+    resolved = resolve_benefit_cards(
+        selections=[sel_llop, sel_pc365, sel_ws, sel_bet],
+        offerings=[o_llop, o_pc365, o_ws, o_bet],
+        concepts=[c_llop, c_pc365, c_ws, c_bet],
+        relations=[],
+        facets=[],
+    )
+    by_key = {c["concept_key"]: c for c in resolved["current_benefits"]}
+    assert by_key["legal-liability-of-passengers"]["value"] == ""
+    assert by_key["private-car-365"]["value"] == ""
+    assert "15,000" in by_key["windscreen"]["value"]
+    assert by_key["betterment-protection"]["value"] == "Up to 15 Years"
+
+    matrix = build_unified_matrix_cards(resolved["current_benefits"], resolved["available_addons"], fill_to_slots=8, insurer_name="AmAssurance")
+    m_by_id = {c["id"]: c for c in matrix}
+    assert m_by_id["llop"]["value"] == ""
+    assert m_by_id["private_car_365"]["value"] == ""
+    assert "15,000" in m_by_id["windscreen"]["value"]
+    assert m_by_id["betterment"]["value"] == "Up to 15 Years"
+
+
+def test_comparison_syncs_updated_company_name_without_duplicates():
+    """Updating a session's detected_company from Kurnia -> Liberty must update the entry in place without creating 2 columns."""
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+    from app.models.tables import Base, Batch, InsuranceCompany, InsuranceTenure, QuotationDraft, Session as QuotationSession, TenureComparisonEntry, TrackedVehicle, UploadedFile, new_id
+    from app.services.marketing_comparison_service import get_marketing_comparison
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    u_id, b_id, kur_id, lib_id, tv_id, t_id = new_id(), new_id(), new_id(), new_id(), new_id(), new_id()
+    uf1_id, d1_id, s1_id, e1_id = new_id(), new_id(), new_id(), new_id()
+    uf2_id, d2_id, s2_id = new_id(), new_id(), new_id()
+    with Session(engine) as db:
+        batch = Batch(id=b_id, owner_id=u_id, name="Test Batch", status="ready")
+        comp_kur = InsuranceCompany(id=kur_id, name="Kurnia", slug="kurnia", status="active")
+        comp_lib = InsuranceCompany(id=lib_id, name="Liberty", slug="liberty", status="active")
+        tv = TrackedVehicle(id=tv_id, vehicle_no="V1234")
+        tenure = InsuranceTenure(
+            id=t_id,
+            tracked_vehicle_id=tv_id,
+            vehicle_no="V1234",
+            customer_name="TEST CLIENT",
+            coverage_start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            coverage_end_date=datetime(2026, 12, 31, tzinfo=timezone.utc),
+            expiry_month="2026-12",
+            road_tax=90.0,
+            runner_fee=20.0,
+        )
+        uf1 = UploadedFile(
+            id=uf1_id, batch_id=b_id, owner_id=u_id, original_filename="liberty_quote.pdf", content_type="application/pdf",
+            storage_path="p1", storage_provider="local", storage_status="available", storage_sha256="sha1", size_bytes=100, status="ready",
+        )
+        d1 = QuotationDraft(
+            id=d1_id, revision=1, uploaded_file_id=uf1_id, owner_id=u_id, status="ready",
+            company_id=lib_id,
+            fields={"coverage_amount": {"value": "100000.00"}, "premium": {"value": "1500.00"}},
+            scalar_decisions={}, warnings=[],
+        )
+        s1 = QuotationSession(
+            id=s1_id, owner_id=u_id, uploaded_file_id=uf1_id, draft_id=d1_id, quotation_ref="RL2600001",
+            status="active", tenure_id=t_id, is_tenure_active=True, detected_company="Liberty",
+        )
+        # Stale comparison entry created earlier as Kurnia before re-detect fixed s1 to Liberty
+        stale_entry = TenureComparisonEntry(
+            id=e1_id, tenure_id=t_id, session_id=s1_id, company_name="Kurnia", company_id=kur_id,
+            sum_insured=100000.0, motor_premium=1500.0, road_tax=90.0, runner_fee=20.0, total_payable=1610.0,
+            manual_overrides=[],
+        )
+        # In-flight preparing session must NOT create a premature column
+        uf2 = UploadedFile(
+            id=uf2_id, batch_id=b_id, owner_id=u_id, original_filename="pending_upload.pdf", content_type="application/pdf",
+            storage_path="p2", storage_provider="local", storage_status="available", storage_sha256="sha2", size_bytes=100, status="preparing",
+        )
+        d2 = QuotationDraft(
+            id=d2_id, revision=1, uploaded_file_id=uf2_id, owner_id=u_id, status="preparing",
+            fields={}, scalar_decisions={}, warnings=[],
+        )
+        s2 = QuotationSession(
+            id=s2_id, owner_id=u_id, uploaded_file_id=uf2_id, draft_id=d2_id, quotation_ref="RL2600002",
+            status="active", tenure_id=t_id, is_tenure_active=True, detected_company=None,
+        )
+        db.add_all([batch, comp_kur, comp_lib, tv, tenure, uf1, d1, s1, stale_entry, uf2, d2, s2])
+        db.commit()
+
+        result = get_marketing_comparison(db, t_id, allow_commit=True)
+        entries = list(db.scalars(select(TenureComparisonEntry).where(TenureComparisonEntry.tenure_id == t_id)).all())
+        assert len(entries) == 1
+        assert entries[0].company_name == "Liberty"
+        assert entries[0].company_id == lib_id
+        assert len(result["entries"]) == 1
+        assert result["entries"][0]["company_name"] == "Liberty"
+

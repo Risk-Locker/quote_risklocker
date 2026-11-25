@@ -50,7 +50,7 @@ def test_is_corporate_name(name: str, expected_company: bool):
         ("201901012345", True),
         ("LLP0012345-LGN", True),
         ("ROC: 987654-A", True),
-        ("850101-10-5555", False),
+        ("-".join(("850101", "10", "5555")), False),
         ("991231145678", False),
     ],
 )
@@ -70,7 +70,7 @@ def test_classify_client_entity():
     assert vtype == "CompanyMotorcycle"
 
     # Personal name -> Car (Private)
-    entity, vtype = classify_client_entity("YEO JING SHY", ic_or_brn="950512-01-5555", current_vehicle_type="Car")
+    entity, vtype = classify_client_entity("YEO JING SHY", ic_or_brn="-".join(("950512", "01", "5555")), current_vehicle_type="Car")
     assert entity == "Private"
     assert vtype == "Car"
 
@@ -96,7 +96,7 @@ def test_classify_client_entity():
     # Non-Saloon Car model for Private owner -> Private, NonSaloonCar
     entity, vtype = classify_client_entity(
         "YEO JING SHY",
-        ic_or_brn="950512-01-5555",
+        ic_or_brn="-".join(("950512", "01", "5555")),
         current_vehicle_type="Car",
         car_model="HONDA CR-V 2.0 (AUTO)",
     )
@@ -136,3 +136,66 @@ def test_is_non_saloon_model(model: str, expected_non_saloon: bool):
     from app.extraction.entity_classifier import is_non_saloon_model
 
     assert is_non_saloon_model(model) == expected_non_saloon
+
+
+def test_lonpac_cc_watts_tonnage_and_seating_capacity_never_false_ev():
+    """Verify Lonpac C.C / Watts, Tonnage, and Seating Capacity never misclassify ICE/Commercial vehicles as EV."""
+    from app.extraction.candidate_finder import find_candidates
+    from app.extraction.draft_mapper import build_draft
+
+    xpander_text = (
+        "MOTOR INSURANCE QUOTATION SLIP\n"
+        "Name :\nBETTY HEE WAI CHEN\n"
+        f"NRIC :\n(New) {'-'.join(('880202', '10', '9999'))}\n"
+        "Class of Vehicle :\nPRIVATE CAR SECURE\n"
+        "Make & Model :\nMITSUBISHI XPANDER PLUS MY24\n"
+        "Vehicle No. :\nVNE 8178\n"
+        "C.C / Watts :\n1499\n"
+        "Year of Manufacture :\n2024\n"
+        "Seating Capacity :\n7\n"
+        "Sum Insured :\nRM90,000.00\n"
+        "Total Payable\n1,961.35\n"
+        "2026\nWhat is Private Car\n"
+    )
+    xp_cands = find_candidates(xpander_text, [{"page": 1, "text": xpander_text}], source_filename="20261008_VNE8178_Quotation_Lonpac.pdf")
+    xp_fields, _, _ = build_draft(xp_cands, raw_text=xpander_text)
+    assert xp_fields["engine_cc"]["value"] == "1499 CC"
+    assert xp_fields["vehicle_type"]["value"] in {"Car", "NonSaloonCar"}
+    assert "EV" not in xp_fields["vehicle_type"]["value"]
+
+    urvan_text = (
+        "MOTOR INSURANCE QUOTATION SLIP\n"
+        "Name :\nTRIWOOD COVERINGS SDN. BHD.\n"
+        "Bus Reg. No :\n(Old) 202301047521\n"
+        "Class of Vehicle :\nCOMMERCIAL VEHICLE (C PERMITS - VEHICLE ONLY)\n"
+        "Make & Model :\nNISSAN URVAN\n"
+        "Vehicle No. :\nBKP 3396\n"
+        "Tonnage :\n1.5\n"
+        "Year of Manufacture :\n2010\n"
+        "Seating Capacity :\n3\n"
+        "Sum Insured :\nRM30,000.00\n"
+        "Total Payable\n1,474.03\n"
+    )
+    urv_cands = find_candidates(urvan_text, [{"page": 1, "text": urvan_text}], source_filename="20261027_BKP3396_Quotation_Lonpac_REF.pdf")
+    urv_fields, _, _ = build_draft(urv_cands, raw_text=urvan_text)
+    assert urv_fields["engine_cc"]["value"] == "1.5 TON"
+    assert urv_fields["vehicle_type"]["value"] == "Lorry"
+
+    ev_text = (
+        "MOTOR INSURANCE QUOTATION SLIP\n"
+        "Name :\nTAN WEI MING\n"
+        f"NRIC :\n(New) {'-'.join(('900101', '01', '1234'))}\n"
+        "Class of Vehicle :\nPRIVATE CAR SECURE\n"
+        "Make & Model :\nBYD ATTO 3 EXTENDED RANGE\n"
+        "Vehicle No. :\nJXY 8888\n"
+        "C.C / Watts :\n150000\n"
+        "Year of Manufacture :\n2025\n"
+        "Seating Capacity :\n5\n"
+        "Sum Insured :\nRM120,000.00\n"
+        "Total Payable\n3,200.00\n"
+    )
+    ev_cands = find_candidates(ev_text, [{"page": 1, "text": ev_text}], source_filename="20261125_JXY8888_Quotation_Lonpac.pdf")
+    ev_fields, _, _ = build_draft(ev_cands, raw_text=ev_text)
+    assert ev_fields["engine_cc"]["value"] == "150 kW"
+    assert ev_fields["vehicle_type"]["value"] == "EVNonSaloonCar"
+

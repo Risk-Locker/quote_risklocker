@@ -415,7 +415,7 @@ Extract accurate, grounded JSON data matching the provided schema from the quota
      - `Liberty`, `Kurnia`, and `AmAssurance` ALL operate under the shared parent legal name `"Liberty General Insurance Berhad"` and ALL sell `"auto365 Comprehensive Lite / Plus / Premier"` with identical quotation tables.
      - NEVER pick AmAssurance or Kurnia just because `"auto365"` or `"Kurnia One Touch"` promo text or a multi-brand PDPA page appears!
      - Distinguish them strictly by Page 1's top-left graphical logo and primary footer/header domain:
-       * **Liberty**: Dark blue or black Statue of Liberty torch/crown emblem + `"Liberty Insurance"` + `www.libertyinsurance.com.my` -> output `"Liberty"`.
+       * **Liberty**: Dark blue or black Statue of Liberty torch/crown emblem + `"Liberty Insurance"` + `www.libertyinsurance.com.my` or `www.libertyinsurance.com` -> output `"Liberty"`.
        * **Kurnia**: Sky-blue or blue `"Kurnia"` logo + `www.kurnia.com` -> output `"Kurnia"`.
        * **AmAssurance**: Red `"AmAssurance"` logo + `www.amassurance.com.my` -> output `"AmAssurance"`.
        * **MMIP**: Malaysian Motor Insurance Pool always overrides any servicing insurer -> output `"MMIP"`.

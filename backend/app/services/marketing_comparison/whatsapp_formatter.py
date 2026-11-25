@@ -32,7 +32,7 @@ def format_whatsapp_teaser_from_data(data: dict[str, Any]) -> str:
     for idx, e in enumerate(entries, 1):
         rec_tag = " ★ (RECOMMENDED)" if e.get("is_recommended") else ""
         val_tag = "Agreed Value" if e.get("agreed_value") else "Market Value"
-        betterment_tag = "Yes" if e.get("waiver_betterment") else "No"
+        betterment_tag = e.get("betterment_display") or ("Yes (0%)" if e.get("waiver_betterment") else "No")
         motor_p = float(e.get("rounded_motor_premium") if e.get("rounded_motor_premium") is not None else round(e.get("motor_premium", 0.0)))
         net_motor_p = float(e.get("rounded_net_motor_premium") if e.get("rounded_net_motor_premium") is not None else motor_p)
         tot_p = float(e.get("rounded_total_payable") if e.get("rounded_total_payable") is not None else round(e.get("total_payable", 0.0)))
@@ -64,7 +64,7 @@ def format_whatsapp_teaser_from_data(data: dict[str, Any]) -> str:
             motor_line,
             *payable_lines,
             f"   • Towing: {e['towing_limit']}",
-            f"   • Waiver of Betterment: {betterment_tag} | Excess: RM {e['excess']:.2f}",
+            f"   • Betterment Waiver: {betterment_tag} | Excess: RM {e['excess']:.2f}",
             "",
         ])
 

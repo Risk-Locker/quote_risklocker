@@ -43,6 +43,7 @@ interface InlineComparisonFieldEditorProps {
   disabled?: boolean;
   companyName?: string;
   manufactureYear?: number | null;
+  waiverBetterment?: boolean;
   bettermentRate?: number | null;
   isBettermentAuto?: boolean;
   coverageStartDate?: string | null;
@@ -84,6 +85,7 @@ export function InlineComparisonFieldEditor({
   disabled = false,
   companyName,
   manufactureYear,
+  waiverBetterment,
   bettermentRate,
   isBettermentAuto = false,
   coverageStartDate,
@@ -429,7 +431,7 @@ export function InlineComparisonFieldEditor({
 
           {isBettermentField && (
             <BettermentEditorControls
-              waiverBetterment={draftValue.toLowerCase().startsWith("no")}
+              waiverBetterment={waiverBetterment ?? draftValue.trim().toLowerCase().startsWith("yes")}
               bettermentRate={bettermentRate}
               isAuto={isBettermentAuto}
               companyName={companyName}

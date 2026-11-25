@@ -577,23 +577,41 @@ def _card(
                 pass
 
     # Disambiguate coverage amount (typed_value / card_val) from price / cost
-    opt_p = getattr(offering, "optional_price", None) or price
-    if opt_p and typed_value:
-        p_val = (opt_p.get("amount") if opt_p.get("amount") is not None else opt_p.get("value")) if isinstance(opt_p, dict) else opt_p
+    is_manual_selection_edit = bool(
+        isinstance(getattr(selection, "evidence_snapshot", None), dict)
+        and (
+            selection.evidence_snapshot.get("manually_edited")
+            or str(selection.evidence_snapshot.get("source") or "").lower() == "manual"
+        )
+    )
+    if typed_value and not is_manual_selection_edit:
         t_val = (typed_value.get("amount") if typed_value.get("amount") is not None else typed_value.get("value")) if isinstance(typed_value, dict) else typed_value
-        if p_val is not None and t_val is not None:
-            try:
-                if abs(float(str(p_val).replace(",", "")) - float(str(t_val).replace(",", ""))) < 0.01:
-                    ev_lim = (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit")
-                    disp = getattr(offering, "display_value", None)
-                    if ev_lim:
-                        typed_value = {"type": "string", "display_text": str(ev_lim)}
-                    elif disp and str(disp).strip() and str(disp).strip() != str(p_val).strip():
-                        typed_value = {"type": "string", "display_text": str(disp)}
-                    else:
-                        typed_value = None
-            except Exception:
-                pass
+        if not t_val and isinstance(typed_value, dict):
+            t_val = typed_value.get("display_text")
+        price_candidates = [price, getattr(selection, "price", None), getattr(offering, "optional_price", None)]
+        matched_price = False
+        for cand_p in price_candidates:
+            if not cand_p:
+                continue
+            p_val = (cand_p.get("amount") if cand_p.get("amount") is not None else cand_p.get("value")) if isinstance(cand_p, dict) else cand_p
+            if p_val is not None and t_val is not None:
+                try:
+                    p_num = float(re.sub(r"[^0-9.]", "", str(p_val)) or "nan")
+                    t_num = float(re.sub(r"[^0-9.]", "", str(t_val)) or "nan")
+                    if p_num > 0 and abs(p_num - t_num) < 0.01:
+                        matched_price = True
+                        break
+                except Exception:
+                    pass
+        if matched_price:
+            ev_lim = (getattr(selection, "evidence_snapshot", None) or {}).get("coverage_limit")
+            disp = getattr(offering, "display_value", None)
+            if ev_lim and str(ev_lim).strip() != str(t_val).strip():
+                typed_value = {"type": "string", "display_text": str(ev_lim)}
+            elif disp and str(disp).strip() and str(disp).strip() != str(t_val).strip():
+                typed_value = {"type": "string", "display_text": str(disp)}
+            else:
+                typed_value = None
 
     try:
         card_val = format_benefit_value(typed_value) if typed_value is not None else ""
@@ -689,6 +707,22 @@ def _card(
         ev_source == "manual"
         or (isinstance(ev_snap, dict) and ev_snap.get("manually_edited"))
     )
+
+    # Strict Zero-Fake-Coverage Guard: suppress monetary amounts on non-(Windscreen/Towing/Betterment)
+    # cards unless manually edited by the user or driven by an explicit bundle effect.
+    from app.domain.benefits import benefit_auto_coverage_domain
+
+    auto_cov_domain = benefit_auto_coverage_domain(getattr(concept, "concept_key", None), getattr(concept, "label", None))
+    if (
+        card_val
+        and not is_manual_target_edit
+        and auto_cov_domain == "none"
+        and re.match(r"^\s*(?:rm|myr)?\s*[\d,]+(?:\.\d{1,2})?\s*$", card_val, re.IGNORECASE)
+        and not re.fullmatch(r"\d{1,2}", card_val.strip())
+    ):
+        card_val = ""
+        if isinstance(typed_value, dict) and typed_value.get("type") == "money":
+            typed_value = None
 
     if bundle_meta and bundle_meta.get("force_box2") and getattr(selection, "state", None) == "current":
         cost_status = "paid"

@@ -427,7 +427,7 @@ def test_m1_comparison_inline_patch_syncs_new_fields_and_benefit_selections(db: 
     assert entry.agreed_value is True
     assert entry.valuation_type == "agreed_value"
     assert entry.waiver_betterment is True
-    assert entry.betterment_display == "No (0%)"
+    assert entry.betterment_display == "Yes (0%)"
     assert entry.special_perils == "Included"
     assert float(entry.motor_premium) == pytest.approx(1600.0)
     assert draft.revision > rev_before

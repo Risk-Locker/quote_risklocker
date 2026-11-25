@@ -459,7 +459,9 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
       if (!mounted.current || cancelRequested.current) return;
       setJob(response.job);
       if (response.job.state === "completed") {
-        const targetUrl = `/sessions/${result.session_id}`;
+        const targetUrl = isTestUpload
+          ? `/sessions/sandbox/${result.session_id}`
+          : `/sessions/${result.session_id}`;
         openTargetRoute(targetUrl, {
           openInNewTab,
           router,
@@ -1041,7 +1043,8 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     const completedItems = bulkFiles.filter((f) => f.status === "completed" && f.sessionId);
     for (const item of completedItems) {
       if (item.sessionId) {
-        window.open(`/sessions/${item.sessionId}`, "_blank");
+        const prefix = isTestUpload ? "/sessions/sandbox" : "/sessions";
+        window.open(`${prefix}/${item.sessionId}`, "_blank");
       }
     }
   }

@@ -27,11 +27,17 @@ def _strip_liberty_shared_boilerplate(raw: str) -> str:
     """
     if len(raw) <= 80:
         return raw
-    cleaned = re.sub(r"\bkurnia\s+one\s+touch(?:\s+mobile\s+app)?\b", " ", raw, flags=re.IGNORECASE)
+    # Rejoin line-wrapped domains (e.g. "libertyinsurance.\ncom.my") before stripping shared boilerplate
+    cleaned = re.sub(r"([a-z0-9-])\s*\.\s*([a-z]{2,})", r"\1.\2", raw, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bkurnia\s+one\s+touch(?:\s+mobile\s+app)?\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bdownload\s+kurnia\b", " ", cleaned, flags=re.IGNORECASE)
     # Agency / branch codes like "Issued By : AMGEN J1 RISK LOCKER..." are RiskLocker portal codes, not the underwriter.
     cleaned = re.sub(r"\bAMGEN\s+J\d+\b", " ", cleaned, flags=re.IGNORECASE)
+    # Shared across ALL 3 brands (AmAssurance, Liberty, Kurnia): Head Office address & Kurnia logo sub-line
+    cleaned = re.sub(r"\bliberty\s+insurance\s+tower\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bby\s+liberty\s+insurance\b", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(
-        r"https?://(?:www\.)?(?:kurnia\.com|amassurance\.com\.my|libertyinsurance\.com\.my)/(?:content/)?(?:privacy-policy|resources/pdpa)\S*",
+        r"https?://(?:www\.)?(?:kurnia\.com|amassurance\.com\.my|libertyinsurance\.com(?:\.my)?)/(?:content/)?(?:privacy-policy|resources/pdpa)\S*",
         " ",
         cleaned,
         flags=re.IGNORECASE,
@@ -61,11 +67,12 @@ def _strip_liberty_shared_boilerplate(raw: str) -> str:
 
 def _score_liberty_group_brands(padded: str) -> dict[str, int]:
     """Score Liberty vs Kurnia vs AmAssurance symmetrically without shared-product bias."""
-    # Remove shared legal underwriter phrase before checking standalone 'liberty insurance'
+    # Remove shared legal underwriter phrase & shared head-office address before checking standalone 'liberty insurance'
     liberty_masked = re.sub(r"\bliberty general insurance(?:\s+berhad)?\b", " ", padded)
+    liberty_masked = re.sub(r"\bliberty insurance tower\b|\bby liberty insurance\b", " ", liberty_masked)
     liberty_score = (
-        (12 if (" www libertyinsurance com my " in padded or " libertyinsurance com my " in padded) else 0)
-        + (8 if (" liberty insurance tower " in padded or " liberty insurance berhad " in padded) else 0)
+        (12 if any(d in padded for d in (" www libertyinsurance com my ", " libertyinsurance com my ", " www libertyinsurance com ", " libertyinsurance com ")) else 0)
+        + (8 if " liberty insurance berhad " in padded else 0)
         + (6 if " liberty insurance " in liberty_masked else 0)
     )
     am_score = (
@@ -74,7 +81,7 @@ def _score_liberty_group_brands(padded: str) -> dict[str, int]:
         + (4 if " amgeneral " in padded else 0)
     )
     kurnia_score = (
-        (12 if (" www kurnia com " in padded or " kurnia com " in padded) else 0)
+        (12 if (" www kurnia com " in padded or " kurnia com " in padded or " kurnia com my " in padded) else 0)
         + (6 if any(cue in padded for cue in (" kurnia insurans ", " kurnia insurance ", " kurnia auto assist ")) else 0)
         + (4 if " kurnia " in padded else 0)
     )
@@ -135,8 +142,8 @@ def _collect_company_alias_hits(company: dict, padded: str, compact_text: str, o
             continue
         if normalized == "liberty" and " liberty general insurance " in padded:
             if padded_without_liberty_parent is None:
-                padded_without_liberty_parent = re.sub(r"\bliberty general insurance(?:\s+berhad)?\b", " ", padded)
-            if " liberty insurance " not in padded_without_liberty_parent and " libertyinsurance com my " not in padded:
+                padded_without_liberty_parent = re.sub(r"\bliberty general insurance(?:\s+berhad)?\b|\bliberty insurance tower\b|\bby liberty insurance\b", " ", padded)
+            if " liberty insurance " not in padded_without_liberty_parent and " libertyinsurance com " not in padded:
                 continue
         if f" {normalized} " in padded:
             out.append({"company": company, "alias": raw_alias, "length": len(normalized), "compact": False})

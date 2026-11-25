@@ -31,64 +31,64 @@ def test_calculate_vehicle_age():
 
 
 def test_calculate_betterment_rate_standard():
-    # < 5 years: 0% ("No (0%)")
+    # < 5 years: 0% ("Yes (0%)")
     r0, d0 = calculate_betterment_rate(4, "Etiqa")
     assert r0 == 0.0
-    assert d0 == "No (0%)"
+    assert d0 == "Yes (0%)"
 
-    # 5 years: 15% ("Yes (15%)")
+    # 5 years: 15% ("No (15%)")
     r5, d5 = calculate_betterment_rate(5, "Allianz")
     assert r5 == 15.0
-    assert d5 == "Yes (15%)"
+    assert d5 == "No (15%)"
 
-    # 6 years: 20% ("Yes (20%)")
+    # 6 years: 20% ("No (20%)")
     r6, d6 = calculate_betterment_rate(6, "Zurich")
     assert r6 == 20.0
-    assert d6 == "Yes (20%)"
+    assert d6 == "No (20%)"
 
-    # 7 years: 25% ("Yes (25%)")
+    # 7 years: 25% ("No (25%)")
     r7, d7 = calculate_betterment_rate(7, "Etiqa")
     assert r7 == 25.0
-    assert d7 == "Yes (25%)"
+    assert d7 == "No (25%)"
 
-    # 8 years: 30% ("Yes (30%)")
+    # 8 years: 30% ("No (30%)")
     r8, d8 = calculate_betterment_rate(8, "Tune")
     assert r8 == 30.0
-    assert d8 == "Yes (30%)"
+    assert d8 == "No (30%)"
 
-    # 9 years: 35% ("Yes (35%)")
+    # 9 years: 35% ("No (35%)")
     r9, d9 = calculate_betterment_rate(9, "Berjaya Sompo")
     assert r9 == 35.0
-    assert d9 == "Yes (35%)"
+    assert d9 == "No (35%)"
 
-    # >= 10 years: 40% ("Yes (40%)")
+    # >= 10 years: 40% ("No (40%)")
     r10, d10 = calculate_betterment_rate(10, "MPI Generali")
     assert r10 == 40.0
-    assert d10 == "Yes (40%)"
+    assert d10 == "No (40%)"
 
     r15, d15 = calculate_betterment_rate(15, "MPI Generali")
     assert r15 == 40.0
-    assert d15 == "Yes (40%)"
+    assert d15 == "No (40%)"
 
 
 def test_calculate_betterment_rate_qbe():
-    # QBE rule: 0–10 years inclusive: 0% ("No (0%)")
+    # QBE rule: 0–10 years inclusive: 0% ("Yes (0%)")
     q0, dq0 = calculate_betterment_rate(4, "QBE Insurance (Malaysia) Berhad")
     assert q0 == 0.0
-    assert dq0 == "No (0%)"
+    assert dq0 == "Yes (0%)"
 
     q7, dq7 = calculate_betterment_rate(7, "QBE")
     assert q7 == 0.0
-    assert dq7 == "No (0%)"
+    assert dq7 == "Yes (0%)"
 
     q10, dq10 = calculate_betterment_rate(10, "QBE")
     assert q10 == 0.0
-    assert dq10 == "No (0%)"
+    assert dq10 == "Yes (0%)"
 
-    # QBE rule: > 10 years: 40% ("Yes (40%)")
+    # QBE rule: > 10 years: 40% ("No (40%)")
     q11, dq11 = calculate_betterment_rate(11, "QBE")
     assert q11 == 40.0
-    assert dq11 == "Yes (40%)"
+    assert dq11 == "No (40%)"
 
 
 def test_normalize_towing_km():

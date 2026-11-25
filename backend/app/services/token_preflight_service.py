@@ -46,12 +46,26 @@ def estimate_pdf_tokens(
 
     try:
         import fitz  # PyMuPDF
+        from app.extraction.page_filter import is_pds_page_text
 
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            page_count = doc.page_count
-            total_chars = 0
-            for page in doc:
-                total_chars += len(page.get_text())
+            raw_page_count = doc.page_count
+            raw_chars = 0
+            operative_pages = 0
+            operative_chars = 0
+            for idx, page in enumerate(doc, start=1):
+                txt = page.get_text() or ""
+                raw_chars += len(txt)
+                if not is_pds_page_text(txt, page_number=idx):
+                    operative_pages += 1
+                    operative_chars += len(txt)
+
+            if operative_pages > 0:
+                page_count = operative_pages
+                total_chars = operative_chars
+            else:
+                page_count = raw_page_count
+                total_chars = raw_chars
 
     except Exception as exc:
         logger.warning("Fast pre-flight PDF parse failed for %s: %s; using size heuristic", filename, exc)

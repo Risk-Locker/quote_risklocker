@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CheckCircle,
   DownloadSimple,
+  Flask,
   Image as ImageIcon,
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
@@ -306,6 +307,20 @@ export function PreviewPhase({ id, onBack }: { id: string; onBack: () => void })
 
   return (
     <section className="grid gap-5">
+      {workspace.is_test ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--rl-radius-sm)] border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-950"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <Flask size={14} weight="bold" className="text-amber-700 shrink-0" />
+            <span>SANDBOX TEST SESSION — Isolated from live Client Records, Tenures &amp; Hit/Miss Tracking</span>
+          </span>
+          <span className="rounded bg-amber-200/70 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-950">
+            /sessions/sandbox/{workspace.session_id}
+          </span>
+        </div>
+      ) : null}
       <SessionPhaseBar
         sessionId={id}
         current="preview"

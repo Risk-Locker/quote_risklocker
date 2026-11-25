@@ -474,7 +474,14 @@ def sync_session_draft_from_comparison(
         _set_manual_field("llp_llop", llp_out)
 
     if "waiver_betterment" in edited_set:
-        _set_manual_field("waiver_of_betterment", "Included" if field_values.get("waiver_betterment") else "Not Included")
+        b_mode_sync = str(field_values.get("betterment_mode") or "").strip().lower()
+        b_disp_sync = str(field_values.get("betterment_display") or "").strip()
+        if field_values.get("waiver_betterment"):
+            _set_manual_field("waiver_of_betterment", "Included")
+        elif b_mode_sync in ("no", "none", "na", "not_applicable") or (b_disp_sync == "No" and field_values.get("betterment_rate") is None):
+            _set_manual_field("waiver_of_betterment", "No")
+        else:
+            _set_manual_field("waiver_of_betterment", "Not Included")
 
     if "betterment_rate" in edited_set:
         if field_values.get("betterment_rate") is not None:

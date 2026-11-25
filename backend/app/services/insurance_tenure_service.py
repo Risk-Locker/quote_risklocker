@@ -392,6 +392,23 @@ def evaluate_tenure_ingestion(
         and s.detected_company and s.detected_company.strip().lower() == clean_comp
     ]
 
+    # Cross-brand deduplication for re-uploads of the exact same PDF whose insurer was previously misdetected
+    if not matching_sessions and current_session_id:
+        curr_sess = next((s for s in sessions if s.id == current_session_id), None)
+        curr_sha = getattr(getattr(curr_sess, "uploaded_file", None), "storage_sha256", None) if curr_sess else None
+        same_pdf_sessions = [
+            s for s in sessions
+            if s.id != current_session_id
+            and (
+                (curr_sha and getattr(getattr(s, "uploaded_file", None), "storage_sha256", None) == curr_sha)
+                or (content_hash and s.content_hash == content_hash)
+            )
+        ]
+        if same_pdf_sessions:
+            for prev_same in same_pdf_sessions:
+                prev_same.is_tenure_active = False
+            matching_sessions = same_pdf_sessions
+
     if not matching_sessions:
         return "CREATE_FIRST", None, 1
 

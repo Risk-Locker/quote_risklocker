@@ -26,6 +26,7 @@ from app.services.marketing_comparison.dynamic_addons import sanitize_extra_addo
 from app.services.marketing_comparison.ncd_evaluator import (
     check_has_betterment_peril,
     evaluate_betterment_rules,
+    format_betterment_waiver_display,
     get_standard_betterment_rate,
 )
 from app.services.marketing_comparison.workspace_sync import sync_session_draft_from_comparison
@@ -238,6 +239,11 @@ def sync_and_update_covernote(
             df_auto.pop("betterment_rate", None)
             cn_session.draft.fields = df_auto
             flag_modified(cn_session.draft, "fields")
+    elif b_mode in ("no", "none", "na", "not_applicable"):
+        sync_payload["waiver_betterment"] = False
+        sync_payload["betterment_rate"] = None
+        sync_payload["betterment_mode"] = "no"
+        sync_payload["betterment_display"] = "No"
     elif sync_payload.get("betterment_rate") is not None:
         br_val = float(sync_payload["betterment_rate"])
         sync_payload["waiver_betterment"] = br_val == 0.0
@@ -306,6 +312,8 @@ def sync_and_update_covernote(
             "excess",
             "waiver_betterment",
             "betterment_rate",
+            "betterment_mode",
+            "betterment_display",
             "extra_addons",
             "included_perils",
             "vehicle_model",
@@ -313,7 +321,7 @@ def sync_and_update_covernote(
         )
         if k in sync_payload and sync_payload[k] is not None
     ]
-    if b_mode == "auto" and "betterment_rate" not in sync_keys:
+    if b_mode in ("auto", "no", "none", "na", "not_applicable") and "betterment_rate" not in sync_keys:
         sync_keys.append("betterment_rate")
         sync_payload["betterment_rate"] = None
 
@@ -419,16 +427,20 @@ def sync_and_update_covernote(
                 ce.waiver_betterment = w_auto
                 ce.betterment_rate = r_auto
                 ce.betterment_display = d_auto
+            elif b_mode in ("no", "none", "na", "not_applicable"):
+                ce.waiver_betterment = False
+                ce.betterment_rate = None
+                ce.betterment_display = "No"
             elif sync_payload.get("betterment_rate") is not None:
                 b_r = float(sync_payload["betterment_rate"])
                 ce.waiver_betterment = b_r == 0.0
                 ce.betterment_rate = b_r
-                ce.betterment_display = "No (0%)" if b_r == 0.0 else f"Yes ({int(b_r) if b_r.is_integer() else b_r}%)"
+                ce.betterment_display = format_betterment_waiver_display(ce.waiver_betterment, b_r)
             elif sync_payload.get("waiver_betterment") is not None:
                 ce.waiver_betterment = bool(sync_payload["waiver_betterment"])
                 if ce.waiver_betterment:
                     ce.betterment_rate = _ZERO
-                    ce.betterment_display = "No (0%)"
+                    ce.betterment_display = "Yes (0%)"
                 else:
                     veh_yom = getattr(tv, "manufacture_year", None) if tv else None
                     q_year = (tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year)
