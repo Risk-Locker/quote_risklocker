@@ -64,12 +64,11 @@ module.exports = {
     },
     {
       name: "rl-quote-frontend",
-      cwd: FRONTEND,
-      script: "node_modules/next/dist/bin/next",
-      args: "start --hostname 127.0.0.1 --port 3000",
-      interpreter: "none",
+      cwd: path.join(FRONTEND, ".next", "standalone"),
+      script: "server.js",
       env: {
         NODE_ENV: "production",
+        HOSTNAME: "127.0.0.1",
         PORT: "3000",
         // Used by the Next.js /api proxy route when nginx routes /api to the
         // frontend instead of directly to the backend.

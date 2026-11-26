@@ -1,9 +1,10 @@
 # Active Sprint State
 
 ## Active Branch & Status
-- Branch `v33.1` (branched from `main` @ `dfd1eaa` after `v33` merge): **Motor Renewal Ledger Fixes** completed & verified.
+- Branch `v33.2` (branched from `main` @ `9fdd721` after `v33.1` merge): **Frontend Standalone PM2 Fix** staged & verified locally.
 
 ## Completed & Active History
+- 2026-11-26 · Antigravity Session · Fixed `v33.2` Next.js `output: "standalone"` PM2 startup mismatch (`frontend/package.json` `postbuild` static/public copy, `ecosystem.config.cjs` `standalone/server.js`, `.github/workflows/deploy.yml` bundle assertion + `/login` health gate).
 - 2026-11-26 · Antigravity Session · Completed `v33.1` Motor Renewal Ledger Fixes (`1A / 2A / 3A`):
   - **Unified Ledger Query SSOT (`backend/app/services/ledger_query_service.py`):** Unified `/tenures`, `/tenures/stage-summary`, `/tenures/months`, and `/tenures/stats/yoy` under `LedgerFilterSpec` + `All | Expiring | Starting` anchor lens (`anchor=all` default, zero duplicate chained renewals), extended SQL search & server `active_total`/`issued_count`/`pending_count`, authoritative `TenureComparisonEntry.total_payable` pricing, honest `is_covernote_issued` vs `has_selected_winner`, leap-safe `_calculate_policy_end_date`, atomic Miss + next-year renewal, and `require_role` on all `/tenures` mutations.
   - **30-Day Soft-Delete Trash & Restore (`backend/app/services/trash_service.py`, `system.py`, `frontend/src/app/trash/page.tsx`):** Replaced hard `db.delete` on `/tenures` with `soft_delete_tenure` + `restore_tenure` + `permanent_delete_tenure` and added the `Motor Deals` tab in `/trash`.
