@@ -259,12 +259,29 @@ def _persist_upload(
                 curr_opts["owner_change_alert"] = owner_alert
                 draft.display_options = curr_opts
 
-        # Insurance Tenure Foundation & Zero-Change Deduplication (Active for all uploads)
         from app.services.insurance_tenure_service import (
             compute_quotation_content_hash,
             evaluate_tenure_ingestion,
+            is_valid_chassis,
+            normalize_chassis,
             resolve_or_create_tenure,
         )
+        from app.services.vehicle_tracking_service import is_valid_malaysian_plate
+
+        clean_chassis = normalize_chassis(chassis)
+        if not is_valid_malaysian_plate(norm_plate) and is_valid_chassis(clean_chassis):
+            norm_plate = clean_chassis
+            if isinstance(draft.fields, dict):
+                updated_fields = dict(draft.fields)
+                prev_vno = updated_fields.get("vehicle_no")
+                if isinstance(prev_vno, dict):
+                    updated_fields["vehicle_no"] = {**prev_vno, "value": clean_chassis, "status": "ready"}
+                else:
+                    updated_fields["vehicle_no"] = {"value": clean_chassis, "status": "ready", "warnings": [], "message": ""}
+                draft.fields = updated_fields
+                fields_dict = updated_fields
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(draft, "fields")
 
         cover_start = fields_dict.get("cover_start_date", {}).get("value") or fields_dict.get("issue_date", {}).get("value")
         cover_end = fields_dict.get("cover_end_date", {}).get("value") or valid_until
@@ -275,12 +292,14 @@ def _persist_upload(
         if not tenure:
             tenure = resolve_or_create_tenure(
                 db=db,
-                vehicle_no=norm_plate or (veh.vehicle_no if veh else (chassis or "UNPLATED")),
+                vehicle_no=norm_plate or (veh.vehicle_no if veh else (clean_chassis or "UNPLATED")),
                 customer_name=customer,
                 start_date=cover_start,
                 end_date=cover_end,
                 tracked_vehicle_id=veh.id if veh else None,
                 customer_id=cust_account.id if cust_account else None,
+                chassis_no=clean_chassis or None,
+                engine_no=engine,
             )
         session.tenure_id = tenure.id
         session.coverage_start_date = tenure.coverage_start_date

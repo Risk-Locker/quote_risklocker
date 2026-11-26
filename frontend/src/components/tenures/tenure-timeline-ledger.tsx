@@ -130,10 +130,28 @@ export function TenureTimelineLedger() {
         connected={realtime.connected}
         syncMode={realtime.syncMode}
         otherEditors={realtime.otherEditors}
+        primaryEditor={realtime.primaryEditor}
+        isPrimaryEditor={realtime.isPrimaryEditor}
         pendingUpdate={realtime.pendingUpdate}
         onRefreshNow={() => void realtime.refreshNow()}
         onDismissPending={realtime.dismissPendingUpdate}
       />
+
+      {state.loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--rl-radius-sm)] border border-red-300 bg-red-50 px-3.5 py-2.5 text-xs font-semibold text-red-900"
+        >
+          <span>Could not load ledger data: {state.loadError}</span>
+          <button
+            type="button"
+            onClick={state.retryAll}
+            className="rounded border border-red-300 bg-white px-2.5 py-1 text-[11px] font-bold text-red-900 hover:bg-red-100 cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {/* 1. TOP STAGE KPI BANNER: 5 SUMMARY CARDS */}
       <LedgerKpiCards
         summary={state.summary}
@@ -236,6 +254,8 @@ export function TenureTimelineLedger() {
           onOpenMissModal={modals.handleOpenMissModal}
           onOpenDrawer={(id) => modals.setActiveDrawerTenureId(id)}
           onOpenEditModal={(tenure) => modals.setEditingTenure(tenure)}
+          hasActiveFilters={state.hasActiveFilters}
+          onResetFilters={state.resetFilters}
         />
       )}
 

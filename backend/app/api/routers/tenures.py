@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -177,6 +177,7 @@ class BulkConfirmHitRequest(BaseModel):
 @router.post("")
 def create_tenure(
     payload: CreateTenureRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -242,7 +243,13 @@ def create_tenure(
             tenure.tracked_vehicle.engine_no = payload.engine_no.strip()
 
     db.commit()
-    publish_realtime_update(scope="ledger", resource_id=tenure.id, actor=user, summary="Tenure created")
+    publish_realtime_update(
+        scope="ledger",
+        resource_id=tenure.id,
+        actor=user,
+        summary="Tenure created",
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {
         "id": tenure.id,
         "tenure": {
@@ -853,6 +860,7 @@ def list_tenures(
 def update_tenure_ledger_fields(
     tenure_id: str,
     payload: UpdateTenureLedgerRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1141,6 +1149,7 @@ def update_tenure_ledger_fields(
         actor=user,
         summary="Ledger fields updated",
         extra_scopes=("comparison",),
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
     )
     return {"success": True, "id": tenure.id, "stage": tenure.stage, "is_main": tenure.is_main}
 
@@ -1148,6 +1157,7 @@ def update_tenure_ledger_fields(
 @router.post("/bulk-confirm-hit")
 def bulk_confirm_hit(
     payload: BulkConfirmHitRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1170,13 +1180,20 @@ def bulk_confirm_hit(
             updated_ids.append(t.id)
 
     db.commit()
-    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="Bulk confirmed hit")
+    publish_realtime_update(
+        scope="ledger",
+        resource_id="all",
+        actor=user,
+        summary="Bulk confirmed hit",
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {"success": True, "updated_count": len(updated_ids), "updated_ids": updated_ids}
 
 
 @router.post("/{tenure_id}/set-main")
 def set_tenure_as_main(
     tenure_id: str,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1203,7 +1220,13 @@ def set_tenure_as_main(
 
     db.commit()
     db.refresh(tenure)
-    publish_realtime_update(scope="ledger", resource_id=tenure.id, actor=user, summary="Main policy updated")
+    publish_realtime_update(
+        scope="ledger",
+        resource_id=tenure.id,
+        actor=user,
+        summary="Main policy updated",
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {"status": "success", "tenure_id": tenure.id, "is_main": tenure.is_main}
 
 
@@ -1251,6 +1274,7 @@ class BulkDeleteTenuresRequest(BaseModel):
 @router.delete("/bulk")
 def bulk_delete_tenures(
     payload: BulkDeleteTenuresRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
@@ -1266,13 +1290,21 @@ def bulk_delete_tenures(
         deleted_ids.append(tid)
 
     db.commit()
-    publish_realtime_update(scope="ledger", resource_id="all", actor=user, summary="Tenures moved to Trash", extra_scopes=("comparison",))
+    publish_realtime_update(
+        scope="ledger",
+        resource_id="all",
+        actor=user,
+        summary="Tenures moved to Trash",
+        extra_scopes=("comparison",),
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {"success": True, "deleted_count": len(deleted_ids), "deleted_ids": deleted_ids}
 
 
 @router.delete("/{tenure_id}")
 def delete_tenure_endpoint(
     tenure_id: str,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
@@ -1284,7 +1316,14 @@ def delete_tenure_endpoint(
         raise HTTPException(status_code=404, detail="Tenure not found")
 
     soft_delete_tenure(db, settings, user, tenure, commit=True)
-    publish_realtime_update(scope="ledger", resource_id=tenure_id, actor=user, summary="Tenure moved to Trash", extra_scopes=("comparison",))
+    publish_realtime_update(
+        scope="ledger",
+        resource_id=tenure_id,
+        actor=user,
+        summary="Tenure moved to Trash",
+        extra_scopes=("comparison",),
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {"success": True, "deleted_tenure_id": tenure_id}
 
 
@@ -1371,6 +1410,7 @@ def generate_tenure_quote(
 def update_tenure_outcome(
     tenure_id: str,
     payload: TenureStatusUpdateRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1391,7 +1431,14 @@ def update_tenure_outcome(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    publish_realtime_update(scope="ledger", resource_id=tenure_id, actor=user, summary="Tenure outcome updated", extra_scopes=("comparison",))
+    publish_realtime_update(
+        scope="ledger",
+        resource_id=tenure_id,
+        actor=user,
+        summary="Tenure outcome updated",
+        extra_scopes=("comparison",),
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {
         "success": True,
         "tenure": get_tenure_timeline(db, tenure_id),
@@ -1417,6 +1464,7 @@ def project_tenure_renewal(
 def shift_tenure_coverage_dates(
     tenure_id: str,
     payload: ShiftTenureDatesRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1435,7 +1483,14 @@ def shift_tenure_coverage_dates(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    publish_realtime_update(scope="ledger", resource_id=updated.id, actor=user, summary="Coverage dates shifted", extra_scopes=("comparison",))
+    publish_realtime_update(
+        scope="ledger",
+        resource_id=updated.id,
+        actor=user,
+        summary="Coverage dates shifted",
+        extra_scopes=("comparison",),
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {
         "success": True,
         "tenure": get_tenure_timeline(db, updated.id),
@@ -1446,6 +1501,7 @@ def shift_tenure_coverage_dates(
 def lapse_tenure(
     tenure_id: str,
     payload: LapseTenureRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -1462,7 +1518,14 @@ def lapse_tenure(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    publish_realtime_update(scope="ledger", resource_id=lapsed.id, actor=user, summary="Tenure marked lapsed", extra_scopes=("comparison",))
+    publish_realtime_update(
+        scope="ledger",
+        resource_id=lapsed.id,
+        actor=user,
+        summary="Tenure marked lapsed",
+        extra_scopes=("comparison",),
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {
         "success": True,
         "tenure": get_tenure_timeline(db, lapsed.id),

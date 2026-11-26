@@ -28,9 +28,70 @@ from app.models.tables import (
     TenureComparisonEntry,
     TrackedVehicle,
     VehicleOwnership,
+    VehiclePlateHistory,
     new_id,
 )
 from app.services.vehicle_tracking_service import is_valid_malaysian_plate, normalize_plate, parse_date_safe
+
+
+def normalize_chassis(chassis: str | None) -> str:
+    """Normalize a vehicle chassis/VIN number to uppercase alphanumeric characters."""
+    if not chassis:
+        return ""
+    return re.sub(r"[^A-Z0-9]", "", str(chassis).upper())
+
+
+def is_valid_chassis(chassis: str | None) -> bool:
+    """Return True when normalized chassis number has at least 8 alphanumeric characters."""
+    return len(normalize_chassis(chassis)) >= 8
+
+
+def record_vehicle_plate_history(
+    db: Session,
+    *,
+    tracked_vehicle: TrackedVehicle,
+    new_plate: str,
+    source_tenure_id: str | None = None,
+    effective_at: datetime | None = None,
+) -> VehiclePlateHistory | None:
+    """Close any open plate history row when the plate changes and append a dated VehiclePlateHistory entry."""
+    if not is_valid_malaysian_plate(new_plate):
+        return None
+    norm_new = normalize_plate(new_plate)
+    if not norm_new:
+        return None
+    now = effective_at or datetime.now(timezone.utc)
+
+    open_rows = list(
+        db.scalars(
+            select(VehiclePlateHistory)
+            .where(
+                VehiclePlateHistory.tracked_vehicle_id == tracked_vehicle.id,
+                VehiclePlateHistory.effective_to.is_(None),
+            )
+            .order_by(VehiclePlateHistory.effective_from.desc())
+        ).all()
+    )
+    if open_rows and normalize_plate(open_rows[0].plate_no) == norm_new:
+        if source_tenure_id and not open_rows[0].source_tenure_id:
+            open_rows[0].source_tenure_id = source_tenure_id
+        return open_rows[0]
+
+    for row in open_rows:
+        row.effective_to = now
+
+    entry = VehiclePlateHistory(
+        id=new_id(),
+        tracked_vehicle_id=tracked_vehicle.id,
+        chassis_no=normalize_chassis(tracked_vehicle.chassis_no) or None,
+        plate_no=norm_new,
+        effective_from=now,
+        effective_to=None,
+        source_tenure_id=source_tenure_id,
+    )
+    db.add(entry)
+    db.flush()
+    return entry
 
 
 def compute_quotation_content_hash(
@@ -172,30 +233,77 @@ def resolve_or_create_tenure(
     created_by_id: str | None = None,
 ) -> InsuranceTenure:
     """Find existing InsuranceTenure matching the vehicle and coverage dates or create one."""
+    from app.extraction.candidate_finder import is_blocked_vehicle_field_value
+
     clean_v = (vehicle_no or "").strip()
-    clean_chassis = (chassis_no or "").strip()
-    clean_engine = (engine_no or "").strip()
+    clean_chassis = (
+        normalize_chassis(chassis_no)
+        if (chassis_no and not is_blocked_vehicle_field_value(chassis_no))
+        else ""
+    )
+    clean_engine = (
+        re.sub(r"[^A-Z0-9]", "", str(engine_no).upper())
+        if (engine_no and not is_blocked_vehicle_field_value(engine_no))
+        else ""
+    )
+    if len(clean_engine) < 3:
+        clean_engine = ""
     norm_plate = normalize_plate(clean_v) if clean_v else ""
 
-    # If vehicle_no is missing, unplated, or placeholder, anchor on chassis_no or engine_no
-    is_placeholder_plate = (not norm_plate) or norm_plate in ("UNPLATED", "UNKNOWN", "NEW", "NONE", "NA")
-    if is_placeholder_plate and clean_chassis:
-        norm_plate = clean_chassis.upper()
-    elif is_placeholder_plate and clean_engine:
-        norm_plate = clean_engine.upper()
+    has_valid_plate = is_valid_malaysian_plate(clean_v) and not is_blocked_vehicle_field_value(clean_v)
+    has_valid_chassis = len(clean_chassis) >= 8
+    is_placeholder_plate = (
+        (not norm_plate)
+        or is_blocked_vehicle_field_value(clean_v)
+        or norm_plate in ("UNPLATED", "UNKNOWN", "NEW", "NONE", "NA", "PENDING", "NOTSTATED", "CUBICCAPACITY")
+        or norm_plate.startswith("CHASSIS")
+        or norm_plate.startswith("ENGINE")
+        or norm_plate.startswith("UNPLATED")
+        or (not has_valid_plate and has_valid_chassis)
+    )
+
+    if has_valid_plate:
+        primary_veh_no = norm_plate
+    elif has_valid_chassis:
+        # Unregistered cars use bare uppercase chassis_no (e.g. LRWYHCEK6TC667999)
+        primary_veh_no = clean_chassis
+        norm_plate = clean_chassis
+    elif not is_placeholder_plate and norm_plate:
+        primary_veh_no = norm_plate
+    elif clean_engine:
+        primary_veh_no = clean_engine
+        norm_plate = clean_engine
+    else:
+        primary_veh_no = ""
 
     start_dt, end_dt, expiry_month = normalize_tenure_dates(start_date, end_date)
 
-    # 1. Resolve vehicle (Priority: ID -> Chassis -> Engine -> Registration Plate)
+    # 1. Resolve vehicle (Priority: ID -> Normalized Chassis -> Engine -> Registration Plate if chassis agrees)
     veh: TrackedVehicle | None = None
     if tracked_vehicle_id:
         veh = db.get(TrackedVehicle, tracked_vehicle_id)
     if not veh and clean_chassis:
-        veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.chassis_no == clean_chassis))
-    if not veh and clean_engine:
-        veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.engine_no == clean_engine))
-    if not veh and (norm_plate or clean_v) and not is_placeholder_plate:
         veh = db.scalar(
+            select(TrackedVehicle).where(
+                or_(
+                    TrackedVehicle.chassis_no == clean_chassis,
+                    func.upper(TrackedVehicle.chassis_no) == clean_chassis,
+                    func.replace(func.upper(TrackedVehicle.chassis_no), "-", "") == clean_chassis,
+                    TrackedVehicle.vehicle_no == clean_chassis,
+                )
+            )
+        )
+    if not veh and clean_engine:
+        veh = db.scalar(
+            select(TrackedVehicle).where(
+                or_(
+                    TrackedVehicle.engine_no == clean_engine,
+                    func.upper(TrackedVehicle.engine_no) == clean_engine,
+                )
+            )
+        )
+    if not veh and has_valid_plate:
+        candidate_veh = db.scalar(
             select(TrackedVehicle).where(
                 or_(
                     TrackedVehicle.vehicle_no == norm_plate,
@@ -203,12 +311,16 @@ def resolve_or_create_tenure(
                 )
             )
         )
+        # Prevent recycled plate on a different physical chassis from colliding with an old car
+        if candidate_veh is not None:
+            cand_chassis = normalize_chassis(candidate_veh.chassis_no)
+            if not clean_chassis or not cand_chassis or cand_chassis == clean_chassis:
+                veh = candidate_veh
 
-    if not veh and (norm_plate or clean_chassis or clean_engine):
-        if is_placeholder_plate and not clean_chassis and not clean_engine:
+    pending_plate_assignment = False
+    if not veh and (primary_veh_no or clean_chassis or clean_engine or is_placeholder_plate):
+        if not primary_veh_no:
             primary_veh_no = f"UNPLATED-{new_id()[:6].upper()}"
-        else:
-            primary_veh_no = norm_plate if is_valid_malaysian_plate(norm_plate) else (clean_v if clean_v and not is_placeholder_plate else (f"CHASSIS: {clean_chassis}" if clean_chassis else (f"ENGINE: {clean_engine}" if clean_engine else f"UNPLATED-{new_id()[:6].upper()}")))
         veh = TrackedVehicle(
             id=new_id(),
             vehicle_no=primary_veh_no,
@@ -218,10 +330,14 @@ def resolve_or_create_tenure(
         )
         db.add(veh)
         db.flush()
+        if has_valid_plate:
+            pending_plate_assignment = True
     elif veh:
-        # If newly uploaded document has a valid Malaysian plate and tracked vehicle had placeholder, upgrade vehicle plate!
-        if is_valid_malaysian_plate(clean_v) and not is_valid_malaysian_plate(veh.vehicle_no):
-            veh.vehicle_no = normalize_plate(clean_v)
+        if has_valid_plate and normalize_plate(veh.vehicle_no) != norm_plate:
+            veh.vehicle_no = norm_plate
+            pending_plate_assignment = True
+        elif not is_valid_malaysian_plate(veh.vehicle_no) and has_valid_chassis and veh.vehicle_no != clean_chassis:
+            veh.vehicle_no = clean_chassis
         if clean_chassis and not veh.chassis_no:
             veh.chassis_no = clean_chassis
         if clean_engine and not veh.engine_no:
@@ -238,8 +354,8 @@ def resolve_or_create_tenure(
     vehicle_match_clauses = [InsuranceTenure.tracked_vehicle_id == vehicle_id]
     if veh and is_valid_malaysian_plate(veh.vehicle_no):
         vehicle_match_clauses.append(InsuranceTenure.vehicle_no == veh.vehicle_no)
-    if norm_plate and not is_placeholder_plate:
-        vehicle_match_clauses.append(InsuranceTenure.vehicle_no == norm_plate)
+    if primary_veh_no:
+        vehicle_match_clauses.append(InsuranceTenure.vehicle_no == primary_veh_no)
 
     existing_tenure = db.scalar(
         select(InsuranceTenure)
@@ -254,12 +370,26 @@ def resolve_or_create_tenure(
     )
 
     if existing_tenure:
-        # Link vehicle id if missing
         if veh and not existing_tenure.tracked_vehicle_id:
             existing_tenure.tracked_vehicle_id = veh.id
-        # Upgrade tenure plate if valid plate is now available
-        if is_valid_malaysian_plate(clean_v) and not is_valid_malaysian_plate(existing_tenure.vehicle_no):
-            existing_tenure.vehicle_no = normalize_plate(clean_v)
+        is_closed_tenure = (
+            existing_tenure.stage == "Close - Win"
+            or bool(getattr(existing_tenure, "covernote_session_id", None))
+        )
+        # Never overwrite closed/past historical tenures when assigning/changing plates
+        if not is_closed_tenure:
+            if has_valid_plate and normalize_plate(existing_tenure.vehicle_no) != norm_plate:
+                existing_tenure.vehicle_no = norm_plate
+                pending_plate_assignment = True
+            elif not is_valid_malaysian_plate(existing_tenure.vehicle_no) and has_valid_chassis:
+                existing_tenure.vehicle_no = clean_chassis
+        if pending_plate_assignment and veh is not None and has_valid_plate:
+            record_vehicle_plate_history(
+                db,
+                tracked_vehicle=veh,
+                new_plate=norm_plate,
+                source_tenure_id=existing_tenure.id,
+            )
         # If customer name is more informative in the new quote, update it
         if customer_name and len(customer_name.strip()) > len(existing_tenure.customer_name.strip()):
             existing_tenure.customer_name = customer_name.strip()
@@ -299,7 +429,7 @@ def resolve_or_create_tenure(
         tracked_vehicle_id=vehicle_id,
         ownership_id=ownership_id,
         customer_id=customer_id,
-        vehicle_no=norm_plate or vehicle_no,
+        vehicle_no=primary_veh_no or (veh.vehicle_no if veh else vehicle_no),
         customer_name=customer_name.strip() or "Valued Client",
         coverage_start_date=start_dt,
         coverage_end_date=end_dt,
@@ -314,6 +444,14 @@ def resolve_or_create_tenure(
     )
     db.add(tenure)
     db.flush()
+
+    if veh is not None and has_valid_plate:
+        record_vehicle_plate_history(
+            db,
+            tracked_vehicle=veh,
+            new_plate=norm_plate,
+            source_tenure_id=tenure.id,
+        )
 
     # RL-DISABLED superseding_overlap — disabled 2026-10-09; each calendar year ledger remains independent; quotes uploaded for upcoming years do not hide active tenures.
     # overlapping = list(

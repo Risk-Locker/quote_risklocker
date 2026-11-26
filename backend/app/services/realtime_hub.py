@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-PRESENCE_TTL_SECONDS = 20.0
+PRESENCE_TTL_SECONDS = 45.0
 SUBSCRIBER_QUEUE_MAXSIZE = 256
 
 
@@ -29,6 +29,9 @@ class PresenceEntry:
     field: str | None
     updated_at_mono: float
     updated_at_iso: str
+    entered_at_mono: float = 0.0
+    entered_at_iso: str = ""
+    tab_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -38,6 +41,8 @@ class PresenceEntry:
             "user_email": self.user_email,
             "user_name": self.user_name,
             "field": self.field,
+            "tab_id": self.tab_id,
+            "entered_at": self.entered_at_iso or self.updated_at_iso,
             "updated_at": self.updated_at_iso,
         }
 
@@ -61,6 +66,8 @@ class RealtimeHub:
         self._presence_ttl = presence_ttl
         self._max_queue_size = max_queue_size
         self._presence: dict[tuple[str, str, str], PresenceEntry] = {}
+        self._resource_versions: dict[tuple[str, str], int] = {}
+        self._resource_meta: dict[tuple[str, str], dict[str, Any]] = {}
 
     def subscribe(self, user_id: str, loop: asyncio.AbstractEventLoop) -> tuple[int, asyncio.Queue[dict[str, Any]]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=self._max_queue_size)
@@ -110,19 +117,35 @@ class RealtimeHub:
         return affected_scopes
 
     def _snapshot_presence_locked(self, scope: str, resource_id: str) -> list[dict[str, Any]]:
-        entries = [
-            entry.to_dict()
+        matched = [
+            entry
             for (s, r, _uid), entry in self._presence.items()
             if s == scope and r == resource_id
         ]
-        entries.sort(key=lambda item: item["updated_at"], reverse=True)
-        return entries
+        # Earliest person in workspace is Priority #1 (Primary Editor)
+        matched.sort(key=lambda item: (item.entered_at_mono, item.entered_at_iso))
+        return [item.to_dict() for item in matched]
 
     def get_presence(self, scope: str, resource_id: str) -> list[dict[str, Any]]:
         now_mono = time.monotonic()
         with self._lock:
             self._prune_expired_locked(now_mono)
             return self._snapshot_presence_locked(scope, resource_id)
+
+    def get_resource_state(self, scope: str, resource_id: str) -> dict[str, Any]:
+        key = (str(scope or "").strip(), str(resource_id or "all").strip() or "all")
+        with self._lock:
+            meta = self._resource_meta.get(key)
+            if meta is not None:
+                return dict(meta)
+            return {
+                "version": self._resource_versions.get(key, 0),
+                "last_origin_tab_id": None,
+                "last_actor_id": None,
+                "last_actor_name": None,
+                "last_summary": None,
+                "updated_at": None,
+            }
 
     def set_presence(
         self,
@@ -133,21 +156,29 @@ class RealtimeHub:
         user_email: str,
         user_name: str,
         field: str | None = None,
+        tab_id: str | None = None,
     ) -> list[dict[str, Any]]:
         now_mono = time.monotonic()
+        now_iso = _utc_iso()
         key = (scope, resource_id, user_id)
-        entry = PresenceEntry(
-            scope=scope,
-            resource_id=resource_id,
-            user_id=user_id,
-            user_email=user_email,
-            user_name=user_name,
-            field=field,
-            updated_at_mono=now_mono,
-            updated_at_iso=_utc_iso(),
-        )
         with self._lock:
             self._prune_expired_locked(now_mono)
+            existing = self._presence.get(key)
+            entered_mono = existing.entered_at_mono if existing and existing.entered_at_mono > 0 else now_mono
+            entered_iso = existing.entered_at_iso if existing and existing.entered_at_iso else now_iso
+            entry = PresenceEntry(
+                scope=scope,
+                resource_id=resource_id,
+                user_id=user_id,
+                user_email=user_email,
+                user_name=user_name,
+                field=field,
+                updated_at_mono=now_mono,
+                updated_at_iso=now_iso,
+                entered_at_mono=entered_mono,
+                entered_at_iso=entered_iso,
+                tab_id=tab_id or (existing.tab_id if existing else None),
+            )
             self._presence[key] = entry
             editors = self._snapshot_presence_locked(scope, resource_id)
             self._broadcast_locked(
@@ -220,8 +251,20 @@ class RealtimeHub:
         envelopes: list[dict[str, Any]] = []
         with self._lock:
             self._version += 1
-            version = self._version
+            global_version = self._version
             for target_scope, target_rid in effective_targets:
+                res_key = (target_scope, target_rid)
+                res_version = self._resource_versions.get(res_key, 0) + 1
+                self._resource_versions[res_key] = res_version
+                resolved_actor_name = actor_name or actor_email or "Teammate"
+                self._resource_meta[res_key] = {
+                    "version": res_version,
+                    "last_origin_tab_id": origin_tab_id,
+                    "last_actor_id": actor_id,
+                    "last_actor_name": resolved_actor_name,
+                    "last_summary": summary or "Updated",
+                    "updated_at": ts,
+                }
                 envelope = {
                     "event": "updated",
                     "data": {
@@ -229,10 +272,11 @@ class RealtimeHub:
                         "resource_id": target_rid,
                         "actor_id": actor_id,
                         "actor_email": actor_email,
-                        "actor_name": actor_name or actor_email or "Teammate",
+                        "actor_name": resolved_actor_name,
                         "origin_tab_id": origin_tab_id,
                         "summary": summary or "Updated",
-                        "version": version,
+                        "version": res_version,
+                        "global_version": global_version,
                         "timestamp": ts,
                     },
                 }
@@ -243,7 +287,7 @@ class RealtimeHub:
 
         for env in envelopes:
             notify_pg_realtime(env)
-        return version
+        return global_version
 
     def deliver_external_event(self, envelope: dict[str, Any]) -> None:
         """Deliver an external cross-worker realtime envelope to local SSE subscribers."""
@@ -251,6 +295,22 @@ class RealtimeHub:
             return
         with self._lock:
             self._version += 1
+            if envelope.get("event") == "updated" and isinstance(envelope.get("data"), dict):
+                d = envelope["data"]
+                t_scope = str(d.get("scope") or "").strip()
+                t_rid = str(d.get("resource_id") or "all").strip() or "all"
+                if t_scope:
+                    res_key = (t_scope, t_rid)
+                    res_version = self._resource_versions.get(res_key, 0) + 1
+                    self._resource_versions[res_key] = res_version
+                    self._resource_meta[res_key] = {
+                        "version": res_version,
+                        "last_origin_tab_id": d.get("origin_tab_id"),
+                        "last_actor_id": d.get("actor_id"),
+                        "last_actor_name": d.get("actor_name"),
+                        "last_summary": d.get("summary"),
+                        "updated_at": d.get("timestamp"),
+                    }
             self._broadcast_locked(envelope)
 
     def current_version(self) -> int:
@@ -261,6 +321,8 @@ class RealtimeHub:
         with self._lock:
             self._subscribers.clear()
             self._presence.clear()
+            self._resource_versions.clear()
+            self._resource_meta.clear()
             self._version = 0
 
 

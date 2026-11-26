@@ -27,6 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useToast } from "@/components/ui/toast";
 import { GeminiQuotaInfoButton, type GeminiQuota } from "@/components/gemini-quota-meter";
 import { LiveFleetInspector } from "@/components/upload/LiveFleetInspector";
 import { QueueProgressBanner } from "@/components/upload/queue-progress-banner";
@@ -241,6 +242,10 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
   const [bulkNotice, setBulkNotice] = useState("");
   const [activeUploadRunId, setActiveUploadRunId] = useState<string | null>(null);
   const [redetectingItemId, setRedetectingItemId] = useState<string | null>(null);
+  const [bulkStatusFilter, setBulkStatusFilter] = useState<"all" | "failed" | "completed">("all");
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceTargetIdRef = useRef<string | null>(null);
+  const { toast } = useToast();
   const { openInNewTab, setOpenInNewTab } = useOpenInNewTabPreference();
 
   const handleRedetectBulkItem = async (item: BulkFileItem) => {
@@ -274,8 +279,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
         );
       }
     } catch (err: any) {
-      console.error("Bulk item redetection failed:", err);
-      alert("Re-detection failed: " + (err?.message || "Error"));
+      toast("Re-detection failed: " + (err?.message || "Error"), "error");
     } finally {
       setRedetectingItemId(null);
     }
@@ -337,7 +341,15 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     );
     if (!stillActive) {
       setBulkProcessing(false);
-      if (mode === "comparison" && !redirectedRef.current) {
+      const failedNow = bulkFiles.filter((f) => f.status === "failed").length;
+      const doneNow = bulkFiles.filter((f) => f.status === "completed").length;
+      if (failedNow > 0) {
+        setBulkNotice(
+          `${doneNow} of ${bulkFiles.length} uploaded · ${failedNow} failed — retry or replace failed files below without leaving this batch`
+        );
+        return;
+      }
+      if (mode === "comparison" && !redirectedRef.current && doneNow > 0) {
         const fallbackTenure = existingTenureId || bulkFiles.find((f) => f.tenureId)?.tenureId;
         if (fallbackTenure) {
           redirectedRef.current = true;
@@ -921,9 +933,146 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
     } finally {
       enqueuingRef.current = false;
       if (mounted.current && !cancelRequested.current) {
-        setBulkNotice("");
+        setBulkNotice((prev) => (prev.includes("failed") ? prev : ""));
       }
     }
+  }
+
+  async function uploadSingleReplacementOrRetry(item: BulkFileItem, fileToUpload: File) {
+    const targetTenureId =
+      existingTenureId ||
+      item.tenureId ||
+      bulkFiles.find((f) => f.tenureId)?.tenureId ||
+      undefined;
+
+    if (item.sessionId) {
+      await api(`/sessions/${item.sessionId}`, { method: "DELETE" }).catch(() => undefined);
+    }
+
+    setBulkFiles((prev) =>
+      prev.map((i) =>
+        i.id === item.id
+          ? {
+              ...i,
+              file: fileToUpload,
+              status: "uploading",
+              progress: 15,
+              sessionId: undefined,
+              jobId: undefined,
+              error: undefined,
+            }
+          : i
+      )
+    );
+    setBulkProcessing(true);
+
+    try {
+      const form = new FormData();
+      form.append("file", fileToUpload);
+      form.append("enhanced_reading", String(enhanced));
+      form.append("is_test", String(isTestUpload));
+      form.append("upload_mode", mode);
+      if (activeUploadRunId) {
+        form.append("upload_run_id", activeUploadRunId);
+      }
+      if (targetTenureId) {
+        form.append("tenure_id", targetTenureId);
+      }
+      const res = await api<UploadResult>("/uploads", {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: form,
+      });
+      setBulkFiles((prev) =>
+        prev.map((i) =>
+          i.id === item.id
+            ? {
+                ...i,
+                sessionId: res.session_id,
+                jobId: res.job_id,
+                status: "processing",
+                progress: 25,
+                error: undefined,
+              }
+            : i
+        )
+      );
+    } catch (err: any) {
+      const msg = apiErrorMessage(err);
+      setBulkFiles((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, status: "failed", error: msg } : i))
+      );
+      toast(`Retry failed for ${fileToUpload.name}: ${msg}`, "error");
+    }
+  }
+
+  async function handleRetrySingleBulkItem(item: BulkFileItem) {
+    if (bulkProcessing) return;
+    if (!gemini?.active) {
+      toast("Gemini AI is required. Please configure an active Gemini key in Settings.", "error");
+      return;
+    }
+    await uploadSingleReplacementOrRetry(item, item.file);
+  }
+
+  async function handleRetryFailedBulk() {
+    if (bulkProcessing) return;
+    if (!gemini?.active) {
+      toast("Gemini AI is required. Please configure an active Gemini key in Settings.", "error");
+      return;
+    }
+    const failedItems = bulkFiles.filter((f) => f.status === "failed");
+    if (failedItems.length === 0) return;
+
+    const serverFailedItems = failedItems.filter((f) => Boolean(f.jobId));
+    const preSessionFailedItems = failedItems.filter((f) => !f.jobId);
+
+    setBulkNotice("");
+    setBulkProcessing(true);
+
+    if (activeUploadRunId && serverFailedItems.length > 0) {
+      try {
+        await api(`/upload-runs/${activeUploadRunId}/retry-failed`, { method: "POST" });
+        setBulkFiles((prev) =>
+          prev.map((i) =>
+            i.status === "failed" && i.jobId
+              ? { ...i, status: "processing", progress: 15, error: undefined }
+              : i
+          )
+        );
+      } catch (err: any) {
+        toast("Could not re-queue failed server jobs: " + apiErrorMessage(err), "error");
+      }
+    } else {
+      for (const item of serverFailedItems) {
+        await uploadSingleReplacementOrRetry(item, item.file);
+      }
+    }
+
+    for (const item of preSessionFailedItems) {
+      await uploadSingleReplacementOrRetry(item, item.file);
+    }
+  }
+
+  async function handleReplacePdfPicked(event: React.ChangeEvent<HTMLInputElement>) {
+    const newFile = event.target.files?.[0];
+    event.target.value = "";
+    const targetId = replaceTargetIdRef.current;
+    replaceTargetIdRef.current = null;
+    if (!newFile || !targetId) return;
+
+    if (!newFile.name.toLowerCase().endsWith(".pdf") && newFile.type !== "application/pdf") {
+      toast("Please choose a valid PDF file.", "error");
+      return;
+    }
+    if (newFile.size > maximum) {
+      toast(`This PDF exceeds the ${formatBytes(maximum)} upload limit.`, "error");
+      return;
+    }
+
+    const item = bulkFiles.find((f) => f.id === targetId);
+    if (!item) return;
+    await uploadSingleReplacementOrRetry(item, newFile);
   }
 
   async function pollBulkJob(itemId: string, sessionId: string, jobId: string) {
@@ -1837,9 +1986,62 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                 </div>
               )}
 
+              {/* Checklist Filter Pills */}
+              {(bulkFiles.length > 5 || failedCount > 0) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setBulkStatusFilter("all")}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors cursor-pointer ${
+                      bulkStatusFilter === "all"
+                        ? "bg-[#1b1717] text-white border-[#1b1717]"
+                        : "bg-white text-[var(--rl-text-muted)] border-[var(--rl-border)] hover:text-[var(--rl-text-strong)]"
+                    }`}
+                  >
+                    All ({bulkFiles.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkStatusFilter("failed")}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors cursor-pointer ${
+                      bulkStatusFilter === "failed"
+                        ? "bg-[var(--rl-red)] text-white border-[var(--rl-red)]"
+                        : "bg-white text-[var(--rl-red)] border-red-200 hover:bg-red-50"
+                    }`}
+                  >
+                    Failed ({failedCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkStatusFilter("completed")}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors cursor-pointer ${
+                      bulkStatusFilter === "completed"
+                        ? "bg-emerald-600 text-white border-emerald-600"
+                        : "bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                    }`}
+                  >
+                    Completed ({completedCount})
+                  </button>
+                </div>
+              )}
+
+              <input
+                ref={replaceInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="sr-only"
+                onChange={handleReplacePdfPicked}
+              />
+
               {/* Checklist Rows */}
               <div className="grid gap-2.5">
-                {bulkFiles.map((item, idx) => {
+                {bulkFiles
+                  .filter((item) => {
+                    if (bulkStatusFilter === "failed") return item.status === "failed";
+                    if (bulkStatusFilter === "completed") return item.status === "completed";
+                    return true;
+                  })
+                  .map((item, idx) => {
                   const isDone = item.status === "completed";
                   const isFailed = item.status === "failed";
                   const isPausedQuota = item.status === "paused_quota" || item.status === "paused_user";
@@ -2023,10 +2225,37 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                         )}
 
                         {isFailed && (
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <Badge variant="danger" className="text-[10px]">
                               Failed
                             </Badge>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => void handleRetrySingleBulkItem(item)}
+                              disabled={bulkProcessing}
+                              className="min-h-[30px] px-2 text-xs font-semibold gap-1 cursor-pointer bg-white border-red-200 text-[var(--rl-red)] hover:bg-red-50"
+                              title="Retry uploading & extracting this PDF"
+                            >
+                              <ArrowsClockwise size={12} weight="bold" />
+                              Retry
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                replaceTargetIdRef.current = item.id;
+                                replaceInputRef.current?.click();
+                              }}
+                              disabled={bulkProcessing}
+                              className="min-h-[30px] px-2 text-xs font-semibold gap-1 cursor-pointer bg-white"
+                              title="Replace with a corrected PDF file in this batch"
+                            >
+                              <Upload size={12} weight="bold" />
+                              Replace PDF
+                            </Button>
                             {item.sessionId && (
                               <Button
                                 type="button"
@@ -2048,7 +2277,7 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                             <button
                               type="button"
                               onClick={() => cancelBulkItem(item)}
-                              className="flex size-7 items-center justify-center rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)]"
+                              className="flex size-7 items-center justify-center rounded text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] cursor-pointer"
                               title="Remove from list"
                             >
                               <X size={14} weight="bold" />
@@ -2063,8 +2292,20 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
 
               {/* Batch Action Bar */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--rl-border)] pt-4">
-                <div>
-                  {!bulkProcessing && !isAllBulkDone && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {!bulkProcessing && failedCount > 0 && (
+                    <Button
+                      type="button"
+                      onClick={() => void handleRetryFailedBulk()}
+                      disabled={!gemini?.active}
+                      className="bg-[var(--rl-red)] hover:bg-red-700 text-white font-semibold px-5 gap-2 cursor-pointer"
+                    >
+                      <ArrowsClockwise size={16} weight="bold" />
+                      <span>Retry Failed ({failedCount})</span>
+                    </Button>
+                  )}
+
+                  {!bulkProcessing && bulkFiles.some((f) => f.status === "staged") && (
                     <Button
                       type="button"
                       onClick={startBulkUpload}
@@ -2122,7 +2363,11 @@ export function UploadWorkspace({ defaultMode = "comparison" }: UploadWorkspaceP
                         className="bg-[#1b1717] hover:bg-black text-white font-bold gap-2 text-xs shadow-xs min-h-[36px] px-5 cursor-pointer"
                       >
                         <Columns size={16} weight="bold" />
-                        <span>Open Marketing Comparison Matrix →</span>
+                        <span>
+                          {failedCount > 0
+                            ? `Open Comparison (${completedCount} ready) →`
+                            : "Open Marketing Comparison Matrix →"}
+                        </span>
                       </Button>
                     ) : (
                       <Button

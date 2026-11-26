@@ -210,6 +210,7 @@ export interface PolicyFieldsCardProps {
     options?: { stageOnly?: boolean }
   ) => void;
   onConfirmField?: (fieldName: string, value: string) => void;
+  highlightedFieldKey?: string | null;
   savingDiscount?: boolean;
   onApplyMotorDiscountPct?: (pct: number) => Promise<void> | void;
 }
@@ -239,6 +240,7 @@ export function PolicyFieldsCard({
   categorizedProducts,
   pinCatalog,
   onConfirmField,
+  highlightedFieldKey = null,
   savingDiscount = false,
   onApplyMotorDiscountPct,
 }: PolicyFieldsCardProps) {
@@ -274,18 +276,24 @@ export function PolicyFieldsCard({
           : "Engine Capacity (CC)"
         : field.label;
     const fieldModified = isFieldModified(field.name);
+    const isHighlighted = highlightedFieldKey === field.name;
 
     return (
       <label
         key={field.name}
         id={`workspace-field-${field.name}`}
-        className="grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)]"
+        data-field-key={field.name}
+        className={`grid gap-1 text-xs font-semibold text-[var(--rl-text-strong)] transition-all duration-300 ${
+          isHighlighted
+            ? "rounded-[var(--rl-radius-sm)] ring-2 ring-amber-400 bg-amber-50/90 p-1.5 -m-1.5 shadow-sm"
+            : ""
+        }`}
       >
         <span className="flex items-center justify-between gap-1">
           <span className="truncate">{fieldLabel}</span>
           <div className="flex items-center gap-1.5 shrink-0">
             {needsCheck ? (
-              <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+              <span className="group/verify inline-flex items-center overflow-hidden rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
                 <span>⚠ Verify</span>
                 {onConfirmField ? (
                   <button
@@ -295,11 +303,11 @@ export function PolicyFieldsCard({
                       e.stopPropagation();
                       onConfirmField(field.name, formValues[field.name] ?? "");
                     }}
-                    className="inline-flex items-center gap-0.5 rounded bg-emerald-600 px-1 py-0.5 text-[9px] font-bold text-white hover:bg-emerald-700 cursor-pointer"
-                    title="Confirm extracted value"
+                    className="ml-0 group-hover/verify:ml-1 group-focus-within/verify:ml-1 inline-flex items-center justify-center overflow-hidden max-w-0 opacity-0 group-hover/verify:max-w-[28px] group-hover/verify:opacity-100 group-focus-within/verify:max-w-[28px] group-focus-within/verify:opacity-100 rounded bg-emerald-600 px-0 group-hover/verify:px-1 group-focus-within/verify:px-1 py-0.5 text-[9px] font-bold text-white hover:bg-emerald-700 transition-all duration-150 cursor-pointer"
+                    title="Approve extracted value"
+                    aria-label={`Approve ${fieldLabel}`}
                   >
-                    <Check size={9} weight="bold" />
-                    <span>OK</span>
+                    <Check size={10} weight="bold" />
                   </button>
                 ) : null}
               </span>

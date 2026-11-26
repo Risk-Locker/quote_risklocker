@@ -149,6 +149,75 @@ def test_realtime_router_presence_validation_and_roundtrip():
         assert bad_field.status_code == 422
 
 
+def test_realtime_per_resource_versioning_and_first_person_priority():
+    """Updates on resource A must not bump resource B's version, and earliest entrant retains priority across heartbeats."""
+    realtime_hub.reset_for_tests()
+    app = FastAPI()
+    app.include_router(realtime_router, prefix="/api")
+    user_a = _make_user(Role.STAFF.value, "first@risklocker.test")
+    user_a.name = "First Editor"
+    user_b = _make_user(Role.STAFF.value, "second@risklocker.test")
+    user_b.name = "Second Editor"
+
+    # Resource A update must leave Resource B at version 0
+    realtime_hub.publish_update(
+        scope="workspace",
+        resource_id="sess-A",
+        actor_id=user_a.id,
+        actor_email=user_a.email,
+        actor_name=user_a.name,
+        origin_tab_id="tab-1",
+        summary="Edited sess-A",
+    )
+    assert realtime_hub.get_resource_state("workspace", "sess-A")["version"] == 1
+    assert realtime_hub.get_resource_state("workspace", "sess-B")["version"] == 0
+
+    app.dependency_overrides[current_user] = lambda: user_b
+    with TestClient(app) as client:
+        res_b = client.get("/api/realtime/presence", params={"scope": "workspace", "resource_id": "sess-B"})
+        assert res_b.status_code == 200
+        assert res_b.json()["version"] == 0
+
+    # First-person priority ordering preserved across heartbeats
+    realtime_hub.set_presence(
+        scope="workspace",
+        resource_id="sess-B",
+        user_id=user_a.id,
+        user_email=user_a.email,
+        user_name=user_a.name,
+        tab_id="tab-a",
+    )
+    time.sleep(0.02)
+    realtime_hub.set_presence(
+        scope="workspace",
+        resource_id="sess-B",
+        user_id=user_b.id,
+        user_email=user_b.email,
+        user_name=user_b.name,
+        tab_id="tab-b",
+    )
+    # Heartbeat from first user must keep first user at index 0
+    time.sleep(0.02)
+    editors = realtime_hub.set_presence(
+        scope="workspace",
+        resource_id="sess-B",
+        user_id=user_a.id,
+        user_email=user_a.email,
+        user_name=user_a.name,
+        field="car_model",
+        tab_id="tab-a",
+    )
+    assert [e["user_id"] for e in editors] == [user_a.id, user_b.id]
+    assert editors[0]["entered_at"] < editors[1]["entered_at"]
+
+    # upload_runs scope must be accepted on /realtime/presence (never 422)
+    with TestClient(app) as client:
+        res_run = client.get("/api/realtime/presence", params={"scope": "upload_runs", "resource_id": "run-1"})
+        assert res_run.status_code == 200
+        assert res_run.json()["scope"] == "upload_runs"
+        assert res_run.json()["resource_id"] == "run-1"
+
+
 def test_box1_free_coverage_strips_365km_and_rm200_on_hide_or_override():
     # 1. Hidden or cleared coverage strips embedded (365 km) & (RM 200)
     hidden_items = extract_free_coverage_items(

@@ -668,13 +668,21 @@ def process_extraction_job(
     # -------------------------------------------------------------------------
     # Auto-Resolve Vehicle, Customer Account & Insurance Tenure for All Quotes
     # -------------------------------------------------------------------------
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.extraction.candidate_finder import is_blocked_vehicle_field_value
     from app.services.insurance_tenure_service import (
         compute_quotation_content_hash,
         evaluate_tenure_ingestion,
+        is_valid_chassis,
+        normalize_chassis,
         resolve_or_create_tenure,
     )
     from app.services.customer_account_service import resolve_or_create_customer
-    from app.services.vehicle_tracking_service import get_or_create_vehicle_tracking, normalize_plate
+    from app.services.vehicle_tracking_service import (
+        get_or_create_vehicle_tracking,
+        is_valid_malaysian_plate,
+        normalize_plate,
+    )
 
     def _fval(k: str) -> str:
         item = (draft.fields or {}).get(k)
@@ -682,6 +690,17 @@ def process_extraction_job(
             val = item.get("value")
             return str(val).strip() if val is not None else ""
         return str(item).strip() if item is not None else ""
+
+    fields_mutated = False
+    for blocked_key in ("vehicle_no", "car_brand", "car_model", "chassis_no", "engine_no"):
+        cur_val = _fval(blocked_key)
+        if cur_val and is_blocked_vehicle_field_value(cur_val):
+            if isinstance(draft.fields, dict) and blocked_key in draft.fields:
+                if isinstance(draft.fields[blocked_key], dict):
+                    draft.fields[blocked_key] = {**draft.fields[blocked_key], "value": ""}
+                else:
+                    draft.fields[blocked_key] = ""
+                fields_mutated = True
 
     raw_plate = _fval("vehicle_no")
     raw_chassis = _fval("chassis_no")
@@ -705,23 +724,38 @@ def process_extraction_job(
     cover_start = _fval("cover_start_date") or _fval("issue_date") or _fval("valid_until")
     cover_end = _fval("cover_end_date") or _fval("valid_until")
 
-    # Plate Fallback to Filename or Chassis
-    clean_plate = raw_plate.upper().strip() if raw_plate else ""
-    if clean_plate in ("", "N/A", "NA", "NONE", "UNREGISTERED", "NEW", "TBA", "-", "UNKNOWN") and uploaded.original_filename:
+    # Plate Fallback to Filename or bare normalized Chassis (never 'CHASSIS: ...')
+    clean_plate = normalize_plate(raw_plate) if raw_plate else ""
+    if not is_valid_malaysian_plate(clean_plate) and uploaded.original_filename:
         clean_fn = uploaded.original_filename.upper().replace("_", " ").replace("-", " ")
         for fn_candidate in re.findall(r"\b[A-Z]{1,3}\s*\d{1,4}\s*[A-Z]?\b", clean_fn):
             compact_cand = re.sub(r"\s+", "", fn_candidate)
-            if not re.fullmatch(r"20\d{2}|19\d{2}|PDF|REF|STMB|AMGEN|QBE|PDS|QUOTATION", compact_cand):
+            if (
+                not re.fullmatch(r"20\d{2}|19\d{2}|PDF|REF|STMB|AMGEN|QBE|PDS|QUOTATION", compact_cand)
+                and not is_blocked_vehicle_field_value(compact_cand)
+                and is_valid_malaysian_plate(compact_cand)
+            ):
                 clean_plate = compact_cand
                 if isinstance(draft.fields, dict):
                     draft.fields["vehicle_no"] = {"value": compact_cand, "status": "ready", "source": "filename"}
+                    fields_mutated = True
                 break
 
-    clean_chassis = raw_chassis.upper().strip() if raw_chassis else ""
-    if clean_plate in ("", "N/A", "NA", "NONE", "UNREGISTERED", "NEW", "TBA", "-", "UNKNOWN") and clean_chassis:
-        effective_veh_no = f"CHASSIS: {clean_chassis}"
+    clean_chassis = normalize_chassis(raw_chassis) if (raw_chassis and not is_blocked_vehicle_field_value(raw_chassis)) else ""
+    clean_engine = re.sub(r"[^A-Z0-9-]", "", raw_engine.upper().strip()) if (raw_engine and not is_blocked_vehicle_field_value(raw_engine)) else ""
+    if is_valid_malaysian_plate(clean_plate):
+        effective_veh_no = clean_plate
+    elif is_valid_chassis(clean_chassis):
+        effective_veh_no = clean_chassis
+        if isinstance(draft.fields, dict):
+            prev_vno = draft.fields.get("vehicle_no")
+            if isinstance(prev_vno, dict):
+                draft.fields["vehicle_no"] = {**prev_vno, "value": clean_chassis, "status": "ready"}
+            else:
+                draft.fields["vehicle_no"] = {"value": clean_chassis, "status": "ready", "message": ""}
+            fields_mutated = True
     else:
-        effective_veh_no = clean_plate or (f"CHASSIS: {clean_chassis}" if clean_chassis else "UNPLATED")
+        effective_veh_no = "UNPLATED"
 
     # AI Vehicle Brand & Model Simplification Job (uses Call 1 clean name or deterministic clean — zero extra HTTP call)
     from app.services.vehicle_simplifier_service import simplify_vehicle_name_with_ai
@@ -739,6 +773,10 @@ def process_extraction_job(
     )
     effective_brand = simp_brand or raw_brand or None
     effective_model = simp_model or raw_model or None
+    if effective_brand and is_blocked_vehicle_field_value(effective_brand):
+        effective_brand = None
+    if effective_model and is_blocked_vehicle_field_value(effective_model):
+        effective_model = None
 
     # Update draft fields with simplified human-readable vehicle name
     if isinstance(draft.fields, dict):
@@ -747,16 +785,21 @@ def process_extraction_job(
                 draft.fields["car_brand"]["value"] = effective_brand
             else:
                 draft.fields["car_brand"] = {"value": effective_brand, "status": "ready", "message": ""}
+            fields_mutated = True
         if effective_model:
             if "car_model" in draft.fields and isinstance(draft.fields["car_model"], dict):
                 draft.fields["car_model"]["value"] = effective_model
             else:
                 draft.fields["car_model"] = {"value": effective_model, "status": "ready", "message": ""}
+            fields_mutated = True
         if simp_combined and "vehicle_model" in draft.fields:
             if isinstance(draft.fields["vehicle_model"], dict):
                 draft.fields["vehicle_model"]["value"] = simp_combined
             else:
                 draft.fields.pop("vehicle_model", None)
+            fields_mutated = True
+        if fields_mutated:
+            flag_modified(draft, "fields")
 
     parsed_s_start = parse_date_safe(cover_start) if cover_start else None
     parsed_s_end = parse_date_safe(cover_end) if cover_end else None
@@ -831,8 +874,8 @@ def process_extraction_job(
             session_id=session.id,
             brand=effective_brand,
             model=effective_model,
-            chassis_no=raw_chassis or None,
-            engine_no=raw_engine or None,
+            chassis_no=clean_chassis or None,
+            engine_no=clean_engine or None,
             customer_id=cust_account.id if cust_account else None,
         )
         if veh:
@@ -841,14 +884,15 @@ def process_extraction_job(
                 effective_veh_no = veh.vehicle_no
                 if isinstance(draft.fields, dict):
                     draft.fields["vehicle_no"] = {"value": veh.vehicle_no, "status": "ready", "source": "chassis_match"}
+                    flag_modified(draft, "fields")
             if veh_yom_val and not veh.manufacture_year:
                 veh.manufacture_year = veh_yom_val
             if raw_cc and not veh.engine_cc:
                 veh.engine_cc = raw_cc
-            if raw_chassis and not veh.chassis_no:
-                veh.chassis_no = raw_chassis
-            if raw_engine and not veh.engine_no:
-                veh.engine_no = raw_engine
+            if clean_chassis and not veh.chassis_no:
+                veh.chassis_no = clean_chassis
+            if clean_engine and not veh.engine_no:
+                veh.engine_no = clean_engine
             if effective_brand:
                 veh.car_brand = effective_brand
             if effective_model:
@@ -877,8 +921,8 @@ def process_extraction_job(
                 end_date=cover_end or None,
                 tracked_vehicle_id=veh.id if veh else None,
                 customer_id=cust_account.id if cust_account else None,
-                chassis_no=raw_chassis or None,
-                engine_no=raw_engine or None,
+                chassis_no=clean_chassis or None,
+                engine_no=clean_engine or None,
                 created_by_id=getattr(session, "created_by_id", None) or getattr(session, "owner_id", None),
             )
 

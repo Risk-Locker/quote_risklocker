@@ -128,7 +128,7 @@ export function UnderwriterQuoteCard({
     <div
       id={`comparison-entry-${entry.id}`}
       key={entry.id}
-      className={`w-[275px] shrink-0 rounded-[var(--rl-radius)] bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${isViewingPdf
+      className={`w-[286px] shrink-0 rounded-2xl bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${isViewingPdf
           ? "border-2 border-[#1b1717] ring-4 ring-[#1b1717]/15 shadow-xl scale-[1.01]"
           : isWinner
             ? "border-2 border-[#1b1717] shadow-lg ring-1 ring-black/5"
@@ -353,7 +353,7 @@ export function UnderwriterQuoteCard({
         </div>
 
         {/* Numeric Figures Card with Exact Locked Heights */}
-        <div className="p-4 space-y-3.5 border-b border-[#e5e5ea]">
+        <div className="px-4 py-3.5 space-y-3 border-b border-[#e5e5ea] bg-[#fafafa]/60">
           <div className="h-[48px] flex flex-col justify-center">
             <span className="text-[11px] uppercase font-bold text-[#6e6e73] flex items-center gap-1 mb-0.5">
               <span>Sum Insured</span>

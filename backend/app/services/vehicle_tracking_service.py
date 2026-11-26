@@ -133,8 +133,20 @@ def get_or_create_vehicle_tracking(
     customer_id: str | None = None,
 ) -> tuple[TrackedVehicle | None, dict[str, Any] | None]:
     """Retrieve or register a tracked vehicle, sequencing owner transfers based on validity date."""
-    norm_chassis = chassis_no.strip().upper() if chassis_no and chassis_no.strip() else None
-    norm_engine = engine_no.strip().upper() if engine_no and engine_no.strip() else None
+    from app.extraction.candidate_finder import is_blocked_vehicle_field_value
+
+    raw_chassis_clean = chassis_no.strip() if (chassis_no and not is_blocked_vehicle_field_value(chassis_no)) else ""
+    raw_engine_clean = engine_no.strip() if (engine_no and not is_blocked_vehicle_field_value(engine_no)) else ""
+    norm_chassis = re.sub(r"[^A-Z0-9]", "", raw_chassis_clean.upper()) if raw_chassis_clean else None
+    norm_engine = re.sub(r"[^A-Z0-9]", "", raw_engine_clean.upper()) if raw_engine_clean else None
+    if norm_chassis and len(norm_chassis) < 5:
+        norm_chassis = None
+    if norm_engine and len(norm_engine) < 3:
+        norm_engine = None
+    if brand and is_blocked_vehicle_field_value(brand):
+        brand = None
+    if model and is_blocked_vehicle_field_value(model):
+        model = None
 
     veh: TrackedVehicle | None = None
     clean_customer = (customer_name or "").strip()
@@ -144,25 +156,41 @@ def get_or_create_vehicle_tracking(
         if sess and getattr(sess, "is_test", False):
             return None, None
 
+    # Chassis-first resolution so physical vehicles stay linked across plate assignments/transfers
+    if norm_chassis and len(norm_chassis) >= 8:
+        veh = db.scalar(
+            select(TrackedVehicle).where(
+                or_(
+                    TrackedVehicle.chassis_no == norm_chassis,
+                    func.upper(TrackedVehicle.chassis_no) == norm_chassis,
+                    func.replace(func.upper(TrackedVehicle.chassis_no), "-", "") == norm_chassis,
+                    TrackedVehicle.vehicle_no == norm_chassis,
+                )
+            )
+        )
+
     if is_valid_malaysian_plate(vehicle_no):
         norm_plate = normalize_plate(vehicle_no)
         if norm_plate:
-            clean_input = norm_plate.replace(" ", "")
-            veh = db.scalar(
-                select(TrackedVehicle).where(
-                    or_(
-                        TrackedVehicle.vehicle_no == norm_plate,
-                        func.replace(TrackedVehicle.vehicle_no, " ", "") == clean_input,
+            if veh is not None:
+                if veh.vehicle_no != norm_plate:
+                    veh.vehicle_no = norm_plate
+            else:
+                clean_input = norm_plate.replace(" ", "")
+                cand_veh = db.scalar(
+                    select(TrackedVehicle).where(
+                        or_(
+                            TrackedVehicle.vehicle_no == norm_plate,
+                            func.replace(TrackedVehicle.vehicle_no, " ", "") == clean_input,
+                        )
                     )
                 )
-            )
-            if veh and veh.vehicle_no != norm_plate:
-                veh.vehicle_no = norm_plate
-            if not veh and norm_chassis:
-                veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.chassis_no == norm_chassis))
-                if veh:
-                    veh.vehicle_no = norm_plate  # Newly assigned plate to unplated vehicle!
-
+                if cand_veh is not None:
+                    cand_chassis = re.sub(r"[^A-Z0-9]", "", (cand_veh.chassis_no or "").upper())
+                    if not norm_chassis or not cand_chassis or cand_chassis == norm_chassis:
+                        veh = cand_veh
+                        if veh.vehicle_no != norm_plate:
+                            veh.vehicle_no = norm_plate
             if not veh:
                 veh = TrackedVehicle(
                     id=new_id(),
@@ -176,13 +204,12 @@ def get_or_create_vehicle_tracking(
                 )
                 db.add(veh)
                 db.flush()
-    elif norm_chassis:
-        # Fallback tracking by chassis number for new/unregistered/unplated vehicles
-        veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.chassis_no == norm_chassis))
+    elif norm_chassis and len(norm_chassis) >= 8:
+        # Unregistered vehicle fallback: bare uppercase chassis_no
         if not veh:
             veh = TrackedVehicle(
                 id=new_id(),
-                vehicle_no=f"CHASSIS: {norm_chassis}",
+                vehicle_no=norm_chassis,
                 car_brand=brand,
                 car_model=model,
                 engine_cc=engine_cc,
@@ -192,17 +219,17 @@ def get_or_create_vehicle_tracking(
             )
             db.add(veh)
             db.flush()
-    elif norm_engine:
+    elif norm_engine and len(norm_engine) >= 5:
         # Fallback tracking by engine number for new/unregistered/unplated vehicles
         veh = db.scalar(select(TrackedVehicle).where(TrackedVehicle.engine_no == norm_engine))
         if not veh:
             veh = TrackedVehicle(
                 id=new_id(),
-                vehicle_no=f"ENGINE: {norm_engine}",
+                vehicle_no=norm_engine,
                 car_brand=brand,
                 car_model=model,
                 engine_cc=engine_cc,
-                chassis_no=None,
+                chassis_no=norm_chassis,
                 engine_no=norm_engine,
                 customer_id=customer_id,
             )
@@ -211,7 +238,7 @@ def get_or_create_vehicle_tracking(
     else:
         veh = TrackedVehicle(
             id=new_id(),
-            vehicle_no="UNPLATED",
+            vehicle_no=f"UNPLATED-{new_id()[:6].upper()}",
             car_brand=brand,
             car_model=model,
             engine_cc=engine_cc,

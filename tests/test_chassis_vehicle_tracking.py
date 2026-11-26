@@ -35,7 +35,7 @@ def test_unplated_new_car_tracked_by_chassis(db_session: Session):
     assert veh1 is not None
     assert veh1.chassis_no == "LC0CE4BC9P0123456"
     assert veh1.engine_no == "TZ200XSK"
-    assert veh1.vehicle_no == "CHASSIS: LC0CE4BC9P0123456"
+    assert veh1.vehicle_no == "LC0CE4BC9P0123456"
     db_session.commit()
 
     # Second quotation uploaded for same new car while still unplated
@@ -65,7 +65,7 @@ def test_plate_assigned_to_previously_unplated_car(db_session: Session):
     )
     db_session.commit()
     assert veh1 is not None
-    assert veh1.vehicle_no == "CHASSIS: PL1S70XXXX12345"
+    assert veh1.vehicle_no == "PL1S70XXXX12345"
 
     # Registration plate is officially assigned later: WXY 8888
     veh2, _ = get_or_create_vehicle_tracking(

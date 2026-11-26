@@ -9,6 +9,7 @@ export interface AttentionItem {
   kind: "field" | "bundle";
   fieldKey?: string;
   selectionId?: string;
+  card?: BenefitCardSummary;
   label: string;
   valueText: string;
   reason: string;
@@ -37,6 +38,21 @@ const FIELD_DISPLAY_LABELS: Record<string, string> = {
   service_fee: "Runner Fee",
   total_amount: "Total Payable",
 };
+
+function formatBenefitAttentionValue(card: BenefitCardSummary): string {
+  const rawPrice = card.price?.amount ?? card.optional_price?.amount ?? card.detected_cost;
+  const numPrice = rawPrice !== null && rawPrice !== undefined ? Number(rawPrice) : NaN;
+  if (Number.isFinite(numPrice) && numPrice > 0) {
+    return `RM ${numPrice.toFixed(2)}`;
+  }
+  if (card.selected_bundle_tier_label) {
+    return card.selected_bundle_tier_label;
+  }
+  if (card.value) {
+    return card.value;
+  }
+  return card.cost_status === "unknown" ? "Review Cost" : "Plan 1";
+}
 
 export function collectWorkspaceAttentionItems(
   workspace: WorkspaceSnapshot | null,
@@ -72,7 +88,6 @@ export function collectWorkspaceAttentionItems(
   for (const [key, rawField] of Object.entries(fields)) {
     const field = rawField as WorkspaceField | undefined;
     if (!field || field.status !== "check_needed") continue;
-    // Skip hidden internal mirror keys when primary canonical key represents the field
     if (HIDDEN_MIRROR_FIELDS.has(key)) continue;
     if (seenFields.has(key)) continue;
     seenFields.add(key);
@@ -88,15 +103,27 @@ export function collectWorkspaceAttentionItems(
     });
   }
 
+  const seenCards = new Set<string>();
   for (const card of [...currentCards, ...addonCards]) {
-    if (!card.plan_tier_uncertain) continue;
+    const isFlagged = Boolean(
+      card.plan_tier_uncertain || card.needs_review_reason || card.cost_status === "unknown"
+    );
+    if (!isFlagged) continue;
+    const selKey = card.selection_id || card.card_key;
+    if (seenCards.has(selKey)) continue;
+    seenCards.add(selKey);
     items.push({
-      id: `bundle:${card.selection_id || card.card_key}`,
+      id: `bundle:${selKey}`,
       kind: "bundle",
-      selectionId: card.selection_id || card.card_key,
+      selectionId: selKey,
+      card,
       label: card.label,
-      valueText: card.selected_bundle_tier_label || "Plan 1",
-      reason: card.needs_review_reason || "Plan tier uncertain — verify extracted plan level",
+      valueText: formatBenefitAttentionValue(card),
+      reason:
+        card.needs_review_reason ||
+        (card.cost_status === "unknown"
+          ? "Cost status unclassified — confirm Free/Included or Paid add-on"
+          : "Plan tier uncertain — verify extracted plan level"),
     });
   }
 
@@ -110,6 +137,7 @@ export function ReviewAttentionBar({
   formValues,
   onConfirmField,
   onConfirmBundleTier,
+  onApproveBenefit,
   onJumpToItem,
 }: {
   workspace: WorkspaceSnapshot | null;
@@ -118,6 +146,7 @@ export function ReviewAttentionBar({
   formValues: Record<string, string>;
   onConfirmField: (fieldKey: string, value: string) => void;
   onConfirmBundleTier: (selectionId: string) => void;
+  onApproveBenefit?: (card: BenefitCardSummary) => void;
   onJumpToItem?: (item: AttentionItem) => void;
 }) {
   const items = React.useMemo(
@@ -142,31 +171,34 @@ export function ReviewAttentionBar({
           {items.map((item) => (
             <div
               key={item.id}
-              className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-950 shadow-2xs"
+              className="group relative inline-flex items-center overflow-hidden rounded border border-amber-300 bg-white pl-2 pr-1 py-0.5 text-[11px] font-medium text-amber-950 shadow-2xs transition-colors hover:border-amber-400"
               title={item.reason}
             >
               <button
                 type="button"
                 onClick={() => onJumpToItem?.(item)}
-                className="inline-flex items-center gap-1 hover:underline text-left cursor-pointer"
+                className="inline-flex items-center gap-1 pr-1 hover:underline text-left cursor-pointer"
               >
                 <span className="font-semibold">{item.label}:</span>
-                <span className="font-mono text-amber-800 max-w-[140px] truncate">{item.valueText}</span>
+                <span className="font-mono text-amber-800 max-w-[150px] truncate">{item.valueText}</span>
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   if (item.kind === "field" && item.fieldKey) {
                     onConfirmField(item.fieldKey, formValues[item.fieldKey] ?? "");
+                  } else if (item.card && onApproveBenefit) {
+                    onApproveBenefit(item.card);
                   } else if (item.kind === "bundle" && item.selectionId) {
                     onConfirmBundleTier(item.selectionId);
                   }
                 }}
-                className="ml-0.5 inline-flex items-center gap-0.5 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 cursor-pointer"
-                title={`Confirm ${item.label}`}
+                className="inline-flex items-center justify-center overflow-hidden max-w-0 opacity-0 group-hover:max-w-[28px] group-hover:opacity-100 group-focus-within:max-w-[28px] group-focus-within:opacity-100 rounded bg-emerald-600 px-0 group-hover:px-1.5 group-focus-within:px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 transition-all duration-150 cursor-pointer shrink-0"
+                title={`Approve ${item.label}`}
+                aria-label={`Approve ${item.label}`}
               >
-                <Check size={10} weight="bold" />
-                <span>Confirm</span>
+                <Check size={11} weight="bold" />
               </button>
             </div>
           ))}

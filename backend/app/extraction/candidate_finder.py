@@ -122,6 +122,107 @@ DEFAULT_ALIASES = {
 
 DEFAULT_VEHICLE_BRANDS = ("PROTON", "PERODUA", "HONDA", "TOYOTA", "NISSAN", "BMW", "MERCEDES", "MERCEDES-BENZ", "MAZDA", "MITSUBISHI", "KIA", "HYUNDAI")
 DEFAULT_VEHICLE_MODELS = ("SAGA BLM", "SAGA", "BLM", "WAJA", "MYVI", "AXIA", "ATIVA", "BEZZA", "ALZA", "VIVA", "VIOS", "CITY", "CIVIC", "ACCORD", "CAMRY", "HILUX")
+
+BLOCKED_VEHICLE_FIELD_VALUES = {
+    "VEHICLEMAKE",
+    "VEHICLEMODEL",
+    "VEHICLE MAKE",
+    "VEHICLE MODEL",
+    "CHASSISNUMBER",
+    "CHASSIS NO",
+    "REGISTRATION NO",
+    "REGISTRATION NUMBER",
+    "VEHICLE REGISTRATION NO",
+    "VEHICLE REGISTRATION NUMBER",
+    "REG NO",
+    "ENGINENO",
+    "ENGINE NO",
+    "ENGINE NUMBER",
+    "MAKE",
+    "MODEL",
+    "N/A",
+    "NA",
+    "NONE",
+    "NIL",
+    "UNKNOWN",
+    "UNREGISTERED",
+    "NEW",
+    "NVIC",
+    "OCCUPATION",
+    "CUBIC CAPACITY",
+    "SUM COVERED",
+    "SUM INSURED",
+    "PERIOD OF COVER",
+    "YEAR OF MANUFACTURE",
+    "YEAR OF MANUFACTURED",
+    "YEAR OF MAKE",
+    "SEATING CAPACITY",
+    "NOT STATED",
+    "NOTSTATED",
+    "NOT APPLICABLE",
+    "TBA",
+    "TBD",
+    "PENDING",
+    "TO BE ADVISED",
+    "CHASSIS",
+    "ENGINE",
+    "ENGINE/MOTOR NO",
+    "ENGINE MOTOR NO",
+    "MOTOR NO",
+    "OTHER COMMERCIAL",
+    "OTHER COMMERCIAL MAKE",
+    "ALL MODELS",
+    "CUBICCAPACITY",
+}
+
+_BLOCKED_VEHICLE_ALNUM = {
+    re.sub(r"[^A-Z0-9]", "", item)
+    for item in BLOCKED_VEHICLE_FIELD_VALUES
+    if re.sub(r"[^A-Z0-9]", "", item)
+}
+
+
+def is_blocked_vehicle_field_value(value: str | None) -> bool:
+    """Return True when an extracted token is a PDF field label or blank placeholder rather than a real value."""
+    if not value:
+        return True
+    upper = re.sub(r"\s+", " ", str(value)).strip(" :;.-_/\\").upper()
+    if not upper or upper in BLOCKED_VEHICLE_FIELD_VALUES:
+        return True
+    alnum = re.sub(r"[^A-Z0-9]", "", upper)
+    return not alnum or alnum in _BLOCKED_VEHICLE_ALNUM
+
+
+def _is_field_label_line(text: str) -> bool:
+    """Detect whether a line is an adjacent PDF field label rather than a field value."""
+    norm = re.sub(r"[^\w\s/&]+", "", text.lower()).strip()
+    if not norm:
+        return True
+    if _is_subtitle_label(text) or is_blocked_vehicle_field_value(text):
+        return True
+    label_prefixes = (
+        "vehicle make",
+        "vehicle model",
+        "vehicle no",
+        "vehicle registration",
+        "registration no",
+        "reg no",
+        "chassis no",
+        "chassis number",
+        "engine no",
+        "engine number",
+        "nvic",
+        "occupation",
+        "cubic capacity",
+        "sum covered",
+        "sum insured",
+        "period of cover",
+        "period of insurance",
+        "year of manufacture",
+        "year of make",
+        "seating capacity",
+    )
+    return any(norm == p or norm.startswith(p + " ") for p in label_prefixes)
 CANONICAL_COVERAGE_TYPES = [
     "THIRD PARTY FIRE AND THEFT",
     "THIRD PARTY FIRE & THEFT",
@@ -275,11 +376,27 @@ def _add(results: dict[str, list[CandidateValue]], field: str, value: str | None
         if any(bad in upper_c for bad in ["NAMA EJEN", "AGENT", "NO. AKAUN", "ACCOUNT NO", "RISKLOCKER", "BROKER", "AGENCY", "INSURANCE", "TAKAFUL", "SUM INSURED"]):
             return
     if field == "vehicle_no":
+        from app.services.vehicle_tracking_service import is_valid_malaysian_plate
+
         cleaned = re.sub(r"\s+", "", cleaned).strip(" .:;-")
-        if not cleaned or len(cleaned) < 2 or cleaned.startswith("RM") or "UNREGISTERED" in cleaned.upper():
+        if (
+            not cleaned
+            or len(cleaned) < 2
+            or cleaned.startswith("RM")
+            or is_blocked_vehicle_field_value(cleaned)
+            or not is_valid_malaysian_plate(cleaned)
+        ):
             return
-    if field == "car_brand":
-        if len(cleaned) <= 1 or cleaned in {"&", "AND", "-"}:
+    if field in {"car_brand", "car_model"}:
+        if len(cleaned) <= 1 or cleaned in {"&", "AND", "-"} or is_blocked_vehicle_field_value(cleaned):
+            return
+    if field in {"engine_no", "chassis_no"}:
+        alnum_id = re.sub(r"[^A-Za-z0-9]", "", cleaned)
+        if not alnum_id or is_blocked_vehicle_field_value(cleaned):
+            return
+        if field == "chassis_no" and len(alnum_id) < 5:
+            return
+        if field == "engine_no" and len(alnum_id) < 3:
             return
     if field in MONEY_FIELDS:
         normalized_money = normalize_money(cleaned)
@@ -498,25 +615,34 @@ def _clean_code_value(value: str) -> str:
     return cleaned
 
 
-def _next_value(lines: list[str], index: int) -> str:
+def _next_value(lines: list[str], index: int, *, stop_on_field_label: bool = False) -> str:
     for candidate in lines[index + 1 : index + 8]:
         stripped = candidate.strip()
         if not stripped or stripped in {":", "-", "RM", "-/-"}:
             continue
         if _is_subtitle_label(stripped):
             continue
+        if stop_on_field_label:
+            if _is_field_label_line(stripped):
+                return ""
+            return _clean_code_value(stripped)
         return _clean_code_value(stripped)
     return ""
 
 
-def _line_value(line: str, lines: list[str], index: int) -> str:
+def _line_value(line: str, lines: list[str], index: int, *, field: str | None = None) -> str:
+    strict_single_line = field in {"vehicle_no", "car_brand", "car_model", "chassis_no", "engine_no"}
     if ":" in line:
         tail = line.split(":", 1)[1].strip()
-        if tail and not _is_subtitle_label(tail):
-            parts = re.split(r"\s{2,}|(?i:\b(?:car|model|vehicle|chassis|engine|year|reg(?:ist|istration)?|premium|ncd)\b[\s\-:])", tail)
+        if tail and not _is_subtitle_label(tail) and not (strict_single_line and _is_field_label_line(tail)):
+            parts = re.split(r"\s{2,}|(?i:\b(?:car|model|vehicle|chassis|engine|year|reg(?:ist|istration)?|premium|ncd|nvic|occupation|cubic|sum|period)\b[\s\-:])", tail)
             raw = parts[0].strip() if parts else tail
+            if strict_single_line and _is_field_label_line(raw):
+                return ""
             return _clean_code_value(raw)
-    return _next_value(lines, index)
+        if strict_single_line:
+            return _next_value(lines, index, stop_on_field_label=True)
+    return _next_value(lines, index, stop_on_field_label=strict_single_line)
 
 
 def _offset(text: str, needle: str) -> int:
@@ -700,7 +826,7 @@ def _add_semantic_label_values(text: str, page_text: list[dict], results: dict[s
             else:
                 matched = normalized == label or normalized.startswith(f"{label} ") or normalized.endswith(f" {label}") or normalized.endswith(label) or f" {label} " in normalized or f" {label}:" in normalized
             if matched:
-                value = _line_value(line, lines, index)
+                value = _line_value(line, lines, index, field=field)
                 if field == "engine_cc" and value:
                     val_stripped = value.strip()
                     if label == "tonnage" and not re.search(r"(?i)\b(?:ton(?:s|nes?)?|mt|kg|cc|kw)\b", val_stripped):
@@ -1043,8 +1169,8 @@ def _add_amgen_profile(text: str, page_text: list[dict], results: dict[str, list
 
     for field, pattern, score in [
         ("market_value", r"ISM-ABI Market Value\s+(?P<money>RM\s*[\d,]+\.\d{2})", 0.92),
-        ("engine_no", r"Engine/Motor No\s*:?\s*(?P<value>[A-Z0-9-]+)", 0.92),
-        ("chassis_no", r"Chassis No\.?\s*:?\s*(?P<value>[A-Z0-9-]+)", 0.94),
+        ("engine_no", r"Engine/Motor No[ \t]*:?[ \t]*(?P<value>[A-Z0-9-]+)", 0.92),
+        ("chassis_no", r"Chassis No\.?[ \t]*:?[ \t]*(?P<value>[A-Z0-9-]+)", 0.94),
         ("excess_amount", r"(?:(?<!Compulsory\s)(?<!Ekses\s)\*?Excess(?:\s+Amount)?|Lebihan|Ekses(?:\s+Polisi)?|Policy\s+Excess)\s*:?\s*(?:RM\s*)?(?P<money>[\d,]+\.\d{2})", 0.92),
         ("compulsory_excess", r"(?:Compulsory\s+Excess|Ekses\s+Wajib|Ekses\s+Mandatori)\s*:?\s*(?:RM\s*)?(?P<money>[\d,]+\.\d{2})", 0.94),
     ]:
@@ -1213,7 +1339,7 @@ def find_candidates(
 
     for field, field_aliases in active_aliases.items():
         for alias in field_aliases:
-            pattern = re.compile(rf"(?i)\b{re.escape(alias)}\b\s*[:\-]?\s*(?P<value>[^\n\r]{{1,90}})")
+            pattern = re.compile(rf"(?i)\b{re.escape(alias)}\b[ \t]*[:\-]?[ \t]*(?P<value>[^\n\r]{{1,90}})")
             for match in pattern.finditer(text):
                 value = match.group("value")
                 value = re.split(r"\s{2,}|(?i:\b(vehicle|model|premium|total|road\s*tax|ncd|sum insured|cover)\b)", value)[0]

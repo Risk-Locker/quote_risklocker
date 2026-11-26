@@ -457,6 +457,9 @@ class TrackedVehicle(Base, TimestampMixin):
     ownerships: Mapped[list["VehicleOwnership"]] = relationship(
         back_populates="vehicle", cascade="all, delete-orphan", order_by="VehicleOwnership.sequence_order.asc()"
     )
+    plate_history: Mapped[list["VehiclePlateHistory"]] = relationship(
+        back_populates="vehicle", cascade="all, delete-orphan", order_by="VehiclePlateHistory.effective_from.desc()"
+    )
     tenures: Mapped[list["InsuranceTenure"]] = relationship(
         back_populates="tracked_vehicle", cascade="all, delete-orphan", order_by="InsuranceTenure.coverage_start_date.desc()"
     )
@@ -476,6 +479,21 @@ class TrackedVehicle(Base, TimestampMixin):
         owner = self.current_owner
         return owner.customer_name if owner else None
 
+
+
+class VehiclePlateHistory(Base):
+    __tablename__ = "vehicle_plate_history"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    tracked_vehicle_id: Mapped[str] = mapped_column(ForeignKey("tracked_vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    chassis_no: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    plate_no: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_tenure_id: Mapped[str | None] = mapped_column(ForeignKey("insurance_tenures.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    vehicle: Mapped["TrackedVehicle"] = relationship(back_populates="plate_history")
 
 
 class VehicleOwnership(Base, TimestampMixin):
