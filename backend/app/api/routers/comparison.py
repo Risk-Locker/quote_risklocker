@@ -645,6 +645,7 @@ def rescan_comparison(
 async def upload_previous_policy(
     tenure_id: str,
     file: UploadFile = File(...),
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(settings_dep),
     user: User = Depends(current_user),
@@ -792,6 +793,7 @@ async def upload_previous_policy(
             actor=user,
             summary="Previous policy extracted and linked to ledger",
             extra_scopes=("ledger",),
+            origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
         )
         return {
             "status": "success",

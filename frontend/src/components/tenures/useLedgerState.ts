@@ -23,8 +23,23 @@ export function useLedgerState() {
   const { toast } = useToast();
   const currentYear = useMemo(() => new Date().getFullYear().toString(), []);
 
-  const [selectedYear, setSelectedYear] = useState<string>(currentYear);
+  const [selectedYear, setSelectedYearState] = useState<string>(currentYear);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
+  const setSelectedYear = useCallback((nextYear: string) => {
+    setSelectedYearState(nextYear);
+    setSelectedMonth("all");
+  }, []);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const yoySeqRef = useRef(0);
+  const monthsSeqRef = useRef(0);
+  const summarySeqRef = useRef(0);
+  const tenuresSeqRef = useRef(0);
+  const calendarSeqRef = useRef(0);
+  const yoyAbortRef = useRef<AbortController | null>(null);
+  const monthsAbortRef = useRef<AbortController | null>(null);
+  const summaryAbortRef = useRef<AbortController | null>(null);
+  const tenuresAbortRef = useRef<AbortController | null>(null);
+  const calendarAbortRef = useRef<AbortController | null>(null);
   const [anchor, setAnchor] = useState<LedgerAnchor>("all");
   const [months, setMonths] = useState<MonthItem[]>([]);
   const [summaryByMonth, setSummaryByMonth] = useState<MonthSummaryByNum[]>([]);
@@ -176,6 +191,10 @@ export function useLedgerState() {
 
   // Load YoY stats
   const loadYoyStats = useCallback(async () => {
+    const seq = ++yoySeqRef.current;
+    yoyAbortRef.current?.abort();
+    const controller = new AbortController();
+    yoyAbortRef.current = controller;
     setLoadingYoy(true);
     try {
       const params = new URLSearchParams();
@@ -186,13 +205,16 @@ export function useLedgerState() {
         years: YoYStatItem[];
         all_years?: { total: number; cars: number; active: number; lost: number };
         all_years_summary?: { total: number; cars: number; active: number; lost: number };
-      }>(`/tenures/yoy-stats?${params.toString()}`);
+      }>(`/tenures/yoy-stats?${params.toString()}`, { signal: controller.signal });
+      if (seq !== yoySeqRef.current) return;
       setYoyStats(res.years || []);
       setAllYearsSummary(res.all_years ?? res.all_years_summary ?? null);
-    } catch (err) {
-      console.error("Failed to load YoY stats:", err);
+      setLoadError(null);
+    } catch (err: any) {
+      if (err?.name === "AbortError" || seq !== yoySeqRef.current) return;
+      setLoadError(err instanceof Error ? err.message : "Failed to load year statistics.");
     } finally {
-      setLoadingYoy(false);
+      if (seq === yoySeqRef.current) setLoadingYoy(false);
     }
   }, [anchor, category, showHidden]);
 
@@ -201,13 +223,17 @@ export function useLedgerState() {
     try {
       const res = await api<{ pics: PicItem[] }>("/tenures/pics");
       setPics(res.pics || []);
-    } catch (err) {
-      console.error("Failed to load PICs:", err);
+    } catch {
+      // Non-critical directory lookup
     }
   }, []);
 
   // Load Months timeline
   const loadMonths = useCallback(async () => {
+    const seq = ++monthsSeqRef.current;
+    monthsAbortRef.current?.abort();
+    const controller = new AbortController();
+    monthsAbortRef.current = controller;
     setLoadingMonths(true);
     try {
       const params = new URLSearchParams();
@@ -218,18 +244,25 @@ export function useLedgerState() {
       const res = await api<{
         months: MonthItem[];
         summary_by_month?: MonthSummaryByNum[];
-      }>(`/tenures/months?${params.toString()}`);
+      }>(`/tenures/months?${params.toString()}`, { signal: controller.signal });
+      if (seq !== monthsSeqRef.current) return;
       setMonths(res.months || []);
       setSummaryByMonth(res.summary_by_month || []);
-    } catch (err) {
-      console.error("Failed to load months:", err);
+      setLoadError(null);
+    } catch (err: any) {
+      if (err?.name === "AbortError" || seq !== monthsSeqRef.current) return;
+      setLoadError(err instanceof Error ? err.message : "Failed to load month timeline.");
     } finally {
-      setLoadingMonths(false);
+      if (seq === monthsSeqRef.current) setLoadingMonths(false);
     }
   }, [anchor, category, debouncedSearch, showHidden]);
 
   // Load 5-Stage KPI Summary
   const loadStageSummary = useCallback(async () => {
+    const seq = ++summarySeqRef.current;
+    summaryAbortRef.current?.abort();
+    const controller = new AbortController();
+    summaryAbortRef.current = controller;
     setLoadingSummary(true);
     try {
       const params = new URLSearchParams();
@@ -249,17 +282,26 @@ export function useLedgerState() {
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (policyFilter !== "all") params.set("policy_status", policyFilter);
       if (showHidden) params.set("show_hidden", "true");
-      const data = await api<StageSummary>(`/tenures/stage-summary?${params.toString()}`);
+      const data = await api<StageSummary>(`/tenures/stage-summary?${params.toString()}`, {
+        signal: controller.signal,
+      });
+      if (seq !== summarySeqRef.current) return;
       setSummary(data);
-    } catch (err) {
-      console.error("Failed to load stage summary:", err);
+      setLoadError(null);
+    } catch (err: any) {
+      if (err?.name === "AbortError" || seq !== summarySeqRef.current) return;
+      setLoadError(err instanceof Error ? err.message : "Failed to load stage summary.");
     } finally {
-      setLoadingSummary(false);
+      if (seq === summarySeqRef.current) setLoadingSummary(false);
     }
   }, [selectedYear, selectedMonth, anchor, category, debouncedSearch, policyFilter, showHidden]);
 
   // Load Tenures
   const loadTenures = useCallback(async () => {
+    const seq = ++tenuresSeqRef.current;
+    tenuresAbortRef.current?.abort();
+    const controller = new AbortController();
+    tenuresAbortRef.current = controller;
     setLoadingTenures(true);
     try {
       const params = new URLSearchParams();
@@ -303,7 +345,8 @@ export function useLedgerState() {
         active_total?: number;
         issued_count?: number;
         pending_count?: number;
-      }>(`/tenures?${params.toString()}`);
+      }>(`/tenures?${params.toString()}`, { signal: controller.signal });
+      if (seq !== tenuresSeqRef.current) return;
       setTenures(res.items || []);
       setTotalTenures(res.total ?? (res.items || []).length);
       setTabCounts({
@@ -311,10 +354,12 @@ export function useLedgerState() {
         issued: res.issued_count ?? 0,
         pending: res.pending_count ?? 0,
       });
-    } catch (err) {
-      console.error("Failed to load tenures:", err);
+      setLoadError(null);
+    } catch (err: any) {
+      if (err?.name === "AbortError" || seq !== tenuresSeqRef.current) return;
+      setLoadError(err instanceof Error ? err.message : "Failed to load renewal ledger.");
     } finally {
-      setLoadingTenures(false);
+      if (seq === tenuresSeqRef.current) setLoadingTenures(false);
     }
   }, [
     selectedYear,
@@ -335,6 +380,10 @@ export function useLedgerState() {
   // Load Calendar Quotation Sessions
   const loadCalendarSessions = useCallback(async () => {
     if (viewMode !== "calendar") return;
+    const seq = ++calendarSeqRef.current;
+    calendarAbortRef.current?.abort();
+    const controller = new AbortController();
+    calendarAbortRef.current = controller;
     setLoadingCalendar(true);
     try {
       const params = new URLSearchParams();
@@ -349,13 +398,17 @@ export function useLedgerState() {
         params.set("vehicle_no", calendarVehicleFilter);
       }
       const res = await api<{ sessions: CalendarSession[]; total: number }>(
-        `/tenures/calendar-sessions?${params.toString()}`
+        `/tenures/calendar-sessions?${params.toString()}`,
+        { signal: controller.signal }
       );
+      if (seq !== calendarSeqRef.current) return;
       setCalendarSessions(res.sessions || []);
-    } catch (err) {
-      console.error("Failed to load calendar sessions:", err);
+      setLoadError(null);
+    } catch (err: any) {
+      if (err?.name === "AbortError" || seq !== calendarSeqRef.current) return;
+      setLoadError(err instanceof Error ? err.message : "Failed to load calendar sessions.");
     } finally {
-      setLoadingCalendar(false);
+      if (seq === calendarSeqRef.current) setLoadingCalendar(false);
     }
   }, [viewMode, selectedYear, selectedMonth, calendarVehicleFilter]);
 
@@ -496,9 +549,45 @@ export function useLedgerState() {
   const handleJumpToCurrentMonth = () => {
     const now = new Date();
     const currMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    setSelectedYear(now.getFullYear().toString());
+    setSelectedYearState(now.getFullYear().toString());
     setSelectedMonth(currMonthStr);
   };
+
+  const hasActiveFilters = useMemo(
+    () =>
+      selectedMonth !== "all" ||
+      anchor !== "all" ||
+      category !== "active" ||
+      stageFilter !== "all" ||
+      statusFilter !== "all" ||
+      policyFilter !== "all" ||
+      searchInput.trim() !== "" ||
+      showHidden,
+    [selectedMonth, anchor, category, stageFilter, statusFilter, policyFilter, searchInput, showHidden]
+  );
+
+  const resetFilters = useCallback(() => {
+    setSelectedYearState(currentYear);
+    setSelectedMonth("all");
+    setAnchor("all");
+    setCategory("active");
+    setStageFilter("all");
+    setStatusFilter("all");
+    setPolicyFilter("all");
+    setSearchInput("");
+    setDebouncedSearch("");
+    setShowHidden(false);
+    setPage(1);
+  }, [currentYear]);
+
+  const retryAll = useCallback(() => {
+    setLoadError(null);
+    void loadMonths();
+    void loadStageSummary();
+    void loadTenures();
+    void loadYoyStats();
+    if (viewMode === "calendar") void loadCalendarSessions();
+  }, [loadMonths, loadStageSummary, loadTenures, loadYoyStats, loadCalendarSessions, viewMode]);
 
   // Available years dynamically computed
   const availableYears = useMemo(() => {
@@ -843,5 +932,9 @@ export function useLedgerState() {
     setDensity,
     hiddenColumns,
     toggleColumnVisibility,
+    loadError,
+    retryAll,
+    hasActiveFilters,
+    resetFilters,
   };
 }

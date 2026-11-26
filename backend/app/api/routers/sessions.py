@@ -741,7 +741,13 @@ def draft_detail(draft_id: str, db: Session = Depends(get_db), user: User = Depe
 
 
 @router.patch("/drafts/{draft_id}")
-def draft_update(draft_id: str, payload: DraftUpdateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+def draft_update(
+    draft_id: str,
+    payload: DraftUpdateRequest,
+    x_client_tab_id: str | None = Header(default=None, alias="X-Client-Tab-Id"),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
     draft = update_draft_fields(
         db,
         user,
@@ -750,7 +756,14 @@ def draft_update(draft_id: str, payload: DraftUpdateRequest, db: Session = Depen
         template_id=payload.template_id,
         layout_override=payload.layout_override,
     )
-    publish_realtime_update(scope="workspace", resource_id=draft_id, actor=user, summary="Draft updated", extra_scopes=("sessions", "comparison"))
+    publish_realtime_update(
+        scope="workspace",
+        resource_id=draft_id,
+        actor=user,
+        summary="Draft updated",
+        extra_scopes=("sessions", "comparison"),
+        origin_tab_id=x_client_tab_id if isinstance(x_client_tab_id, str) else None,
+    )
     return {"draft": serialize_draft(draft, db)}
 
 

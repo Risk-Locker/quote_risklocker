@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageLoading } from "@/components/ui/page-loading";
@@ -35,10 +35,11 @@ import { ReviewAttentionBar } from "./review-components/review-attention-bar";
 import { ReviewModals } from "./review-components/review-modals";
 import { UnsavedChangesBar } from "./review-components/UnsavedChangesBar";
 import { DeepRedetectProgressBanner } from "@/components/redetect/DeepRedetectProgressBanner";
+import type { BenefitCardSummary } from "./types";
 import { useDeepRedetect } from "@/components/redetect/useDeepRedetect";
 
 export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () => void; onBack?: () => void }) {
-  const { workspace, loading, loadError } = useWorkspaceData();
+  const { workspace, loading, loadError, remoteSyncNotice, dismissRemoteSyncNotice } = useWorkspaceData();
   const { queueOperation, reload, save, discard, decideField } = useWorkspaceActions();
   const mutation = useWorkspaceMutation();
   const realtime = useWorkspaceRealtime();
@@ -49,6 +50,9 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
   const [extractedBenefitsCollapsed, setExtractedBenefitsCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [highlightedFieldKey, setHighlightedFieldKey] = useState<string | null>(null);
+  const [highlightedSelectionId, setHighlightedSelectionId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resizer = useWorkspaceResizer();
 
@@ -132,6 +136,50 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
       .then((res) => { if (!cancelled) setGlobalConcepts(res.benefit_concepts?.items || []); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!remoteSyncNotice) return;
+    state.setToastMessage(remoteSyncNotice);
+    dismissRemoteSyncNotice();
+  }, [remoteSyncNotice, dismissRemoteSyncNotice, state]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
+
+  const approveFieldAndPersist = (fieldName: string, val: string) => {
+    decideField(fieldName, "confirm", val);
+    void save().catch((err) => {
+      state.setActionError(err instanceof Error ? err.message : "Could not approve field");
+    });
+  };
+
+  const approveBenefitAndPersist = (card: BenefitCardSummary) => {
+    const selId = card.selection_id || card.card_key;
+    if (!selId) return;
+    if (card.cost_status === "unknown") {
+      const hasPrice = Boolean(card.price?.amount && Number(card.price.amount) > 0);
+      queueOperation(
+        {
+          op: "benefit_update",
+          selection_id: selId,
+          cost_status: hasPrice ? "paid" : "included",
+          confirm_plan_tier: true,
+        },
+        `benefits.${selId}.approve`
+      );
+    } else {
+      queueOperation(
+        { op: "benefit_update", selection_id: selId, confirm_plan_tier: true },
+        `benefits.${selId}.plan_tier`
+      );
+    }
+    void save().catch((err) => {
+      state.setActionError(err instanceof Error ? err.message : "Could not approve benefit");
+    });
+  };
 
   if (loading) return <PageLoading />;
   if (loadError || !workspace) {
@@ -286,10 +334,8 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
               companyWorkspace={catalog.companyWorkspace}
               categorizedProducts={catalog.categorizedProducts}
               pinCatalog={catalog.pinCatalog}
-              onConfirmField={(fieldName, val) => {
-                decideField(fieldName, "confirm", val);
-                state.scheduleSave();
-              }}
+              highlightedFieldKey={highlightedFieldKey}
+              onConfirmField={approveFieldAndPersist}
             />
 
             <ExtractedBenefitsCard
@@ -393,6 +439,8 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
             customPrice={benefits.customPrice}
             setCustomPrice={benefits.setCustomPrice}
             addCustomBenefit={benefits.addCustomBenefit}
+            highlightedSelectionId={highlightedSelectionId}
+            onApproveBenefit={approveBenefitAndPersist}
           />
         </div>
       </div>
@@ -458,6 +506,8 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
             <RealtimePresenceBanner
               connected={realtime.connected}
               otherEditors={realtime.otherEditors}
+              primaryEditor={realtime.primaryEditor}
+              isPrimaryEditor={realtime.isPrimaryEditor}
               pendingUpdate={realtime.pendingUpdate}
               onRefreshNow={() => void realtime.refreshNow()}
               onDismissPending={realtime.dismissPendingUpdate}
@@ -484,36 +534,63 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
             currentCards={benefits.currentCards}
             addonCards={benefits.addonCards}
             formValues={formValues}
-            onConfirmField={(fieldKey, val) => {
-              decideField(fieldKey, "confirm", val);
-              state.scheduleSave();
-            }}
+            onConfirmField={approveFieldAndPersist}
             onConfirmBundleTier={(selectionId) => {
               queueOperation(
                 { op: "benefit_update", selection_id: selectionId, confirm_plan_tier: true },
                 `benefits.${selectionId}.plan_tier`
               );
-              state.scheduleSave();
-            }}
-            onJumpToItem={(item) => {
-              if (item.kind === "field" && resizer.formCollapsed) {
-                resizer.setFormCollapsed(false);
-              }
-              if (item.kind === "bundle" && resizer.benefitsColCollapsed) {
-                resizer.setBenefitsColCollapsed(false);
-              }
-              const targetId = item.kind === "field" && item.fieldKey
-                ? `workspace-field-${item.fieldKey}`
-                : item.selectionId
-                  ? `workspace-benefit-${item.selectionId}`
-                  : "";
-              if (!targetId) return;
-              requestAnimationFrame(() => {
-                const el = document.getElementById(targetId);
-                if (el) {
-                  el.scrollIntoView({ behavior: "smooth", block: "center" });
-                }
+              void save().catch((err) => {
+                state.setActionError(err instanceof Error ? err.message : "Could not approve benefit");
               });
+            }}
+            onApproveBenefit={approveBenefitAndPersist}
+            onJumpToItem={(item) => {
+              // Auto-open Source PDF on the left so staff can verify immediately
+              resizer.setPdfOpen(true);
+              if (item.kind === "field" && item.fieldKey) {
+                resizer.setFormCollapsed(false);
+                setExtractedValuesCollapsed(false);
+                setHighlightedFieldKey(item.fieldKey);
+                setHighlightedSelectionId(null);
+                if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+                highlightTimerRef.current = setTimeout(() => setHighlightedFieldKey(null), 2500);
+                const fieldKey = item.fieldKey;
+                requestAnimationFrame(() => {
+                  setTimeout(() => {
+                    const el =
+                      document.querySelector(`[data-field-key="${fieldKey}"]`) ||
+                      document.getElementById(`workspace-field-${fieldKey}`);
+                    if (el instanceof HTMLElement) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" });
+                      const input = el.querySelector("input, select, textarea");
+                      if (input instanceof HTMLElement) {
+                        input.focus({ preventScroll: true });
+                      }
+                    }
+                  }, 60);
+                });
+                return;
+              }
+              if (item.kind === "bundle" && item.selectionId) {
+                resizer.setBenefitsColCollapsed(false);
+                benefits.setBenefitsCollapsed(false);
+                setHighlightedSelectionId(item.selectionId);
+                setHighlightedFieldKey(null);
+                if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+                highlightTimerRef.current = setTimeout(() => setHighlightedSelectionId(null), 2500);
+                const selId = item.selectionId;
+                requestAnimationFrame(() => {
+                  setTimeout(() => {
+                    const el =
+                      document.querySelector(`[data-selection-id="${selId}"]`) ||
+                      document.getElementById(`workspace-benefit-${selId}`);
+                    if (el instanceof HTMLElement) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }, 60);
+                });
+              }
             }}
           />
         </div>

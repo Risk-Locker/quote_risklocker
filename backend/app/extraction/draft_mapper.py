@@ -6,7 +6,7 @@ import re
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-from app.extraction.candidate_finder import DRAFT_FIELDS, MONEY_FIELDS
+from app.extraction.candidate_finder import DRAFT_FIELDS, MONEY_FIELDS, is_blocked_vehicle_field_value
 from app.extraction.conflict_detector import select_all
 from app.extraction.types import CandidateValue
 from app.extraction.validators import validate_date_range, validate_engine_cc, validate_money, validate_ncd, validate_vehicle_number
@@ -34,17 +34,34 @@ def normalize_vehicle_model_text(car_model: str | None, car_brand: str | None = 
     Normalizes vehicle model text:
     - CAR MODEL = CAR BRAND + CAR MODEL (e.g. 'TESLA' + 'MODEL 3 ...' -> 'TESLA MODEL 3 ...')
     - If model already starts with the brand (e.g. 'BMW M3' or 'HONDA CIVIC'), do NOT duplicate brand.
+    - Strips accidental leading field-label prefixes ('Vehicle Model', 'Vehicle Make', 'Model:', 'Make:').
+    - Never prepends car_brand when car_brand is blank or a blocked field label.
     - Repairs common table cell truncations ('AUTOPILO' -> 'AUTOPILOT', 'AUTOMATI' -> 'AUTOMATIC').
     - Balances unclosed parentheses.
     - Deduplicates adjacent identical tokens (e.g. 'BMW BMW M3' -> 'BMW M3').
     """
+    raw_brand = (car_brand or "").strip()
+    safe_brand = "" if is_blocked_vehicle_field_value(raw_brand) else raw_brand
+
     if not car_model or not car_model.strip():
-        return (car_brand or "").strip()
+        return safe_brand
 
     text = car_model.strip()
 
     # Clean leading/trailing punctuation like colons, hyphens
     text = re.sub(r"^[\s:\-]+", "", text).strip()
+
+    # Strip accidental leading field-label prefixes (e.g. 'Vehicle Model EEKR 7X ...', 'Model: Civic')
+    # Require ':' or '-' after bare 'Model'/'Make' so real names like 'TESLA MODEL 3' are preserved.
+    text = re.sub(
+        r"^(?:(?:vehicle\s+(?:model|make))\s*[:\-]?\s+|(?:model|make)\s*[:\-]\s*)",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    if is_blocked_vehicle_field_value(text):
+        return safe_brand
 
     # Strip PDF schedule placeholder filler without damaging model trims (e.g. 'S 400', 'G 350')
     text = re.sub(
@@ -76,8 +93,8 @@ def normalize_vehicle_model_text(car_model: str | None, car_brand: str | None = 
         deduped = deduped[:-1]
     text = " ".join(deduped)
 
-    # Prepend brand if not already present
-    brand = (car_brand or "").strip()
+    # Prepend brand if not already present (only when brand is non-empty and not blocked)
+    brand = safe_brand
     if brand:
         brand_tokens = [b for b in re.split(r"[\s\-]+", brand) if b]
         first_brand_token = brand_tokens[0].upper() if brand_tokens else ""

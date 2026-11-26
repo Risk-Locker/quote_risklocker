@@ -11,7 +11,7 @@ import {
   getCompanyLogoPath,
 } from "@/lib/company-logos";
 import { formatLlpLlop, formatMoneyWithRounding, isLlpLlopIncluded } from "../types";
-import type { ComparisonEntry, RoundingMode, TenureSpec } from "../types";
+import type { ComparisonEntry, DynamicAddonDefinition, RoundingMode, TenureSpec } from "../types";
 
 interface SnapshotPreviewModalProps {
   isOpen: boolean;
@@ -30,6 +30,7 @@ interface SnapshotPreviewModalProps {
     next?: number | null;
   };
   roundingMode?: RoundingMode;
+  activeDynamicAddons?: DynamicAddonDefinition[];
 }
 
 const MONTHS_SHORT = [
@@ -164,6 +165,7 @@ export function SnapshotPreviewModal({
   visibleRanksMap,
   ncdData,
   roundingMode = "exact",
+  activeDynamicAddons = [],
 }: SnapshotPreviewModalProps) {
   const [failedLogos, setFailedLogos] = useState<Record<string, boolean>>({});
   const [generatedAt, setGeneratedAt] = useState<Date>(() => new Date());
@@ -204,6 +206,14 @@ export function SnapshotPreviewModal({
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+  const payableSublabel =
+    tenure.include_road_tax === false && tenure.include_runner_fee === false
+      ? "(Motor Insurance only)"
+      : tenure.include_road_tax === false
+        ? "(including Runner Fee)"
+        : tenure.include_runner_fee === false
+          ? "(including Road tax)"
+          : "(including Road tax & Runner Fee)";
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto no-print">
@@ -356,44 +366,25 @@ export function SnapshotPreviewModal({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-10 shrink-0">
-                  {/* Dark Contact QR */}
+                <div className="flex items-center justify-end shrink-0">
+                  {/* Dark Contact QR flush to right margin */}
                   <div className="flex items-center gap-3">
+                    <div className="text-[11px] font-semibold leading-[1.3] text-right" style={{ color: "#374151" }}>
+                      <div>Contact Us For</div>
+                      <div>More Information</div>
+                    </div>
                     <img
                       src="/assets/whatsapp_qr_dark.png"
                       alt="Contact Us QR"
                       loading="eager"
                       style={{
-                        width: "62px",
-                        height: "62px",
+                        width: "64px",
+                        height: "64px",
                         objectFit: "contain",
                         display: "block",
                         flexShrink: 0,
                       }}
                     />
-                    <div className="text-[11px] font-semibold leading-[1.3]" style={{ color: "#374151" }}>
-                      <div>Contact Us For</div>
-                      <div>More Information</div>
-                    </div>
-                  </div>
-
-                  {/* Generated Timestamp */}
-                  <div className="min-w-[155px] text-[12px] leading-[1.45]">
-                    <div className="italic text-right mb-1" style={{ color: "#8A8E96" }}>
-                      Generated on
-                    </div>
-                    <div className="flex items-baseline justify-between gap-4">
-                      <span style={{ color: "#6B7280" }}>Date :</span>
-                      <span className="font-bold tabular-nums" style={{ color: "#111827" }}>
-                        {formatDateDDMMMYYYY(generatedAt)}
-                      </span>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-4">
-                      <span style={{ color: "#6B7280" }}>Time :</span>
-                      <span className="font-bold tabular-nums" style={{ color: "#111827" }}>
-                        {formatTime12h(generatedAt)}
-                      </span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -463,9 +454,12 @@ export function SnapshotPreviewModal({
                                 : "px-7 pt-6 pb-7"
                           }
                         >
-                          {/* Card Header: Logo Left, Rank + Ref + Name Right */}
-                          <div className="flex items-start justify-between gap-3 mb-4">
-                            <div className="shrink-0 flex items-center">
+                          {/* Fixed-Height Card Header: Logo Left, Rank + Ref + Name Right */}
+                          <div
+                            className="flex items-start justify-between gap-3 mb-4"
+                            style={{ minHeight: isFourCol ? "78px" : "84px" }}
+                          >
+                            <div className="shrink-0 flex items-center pt-0.5">
                               {showLogo ? (
                                 <img
                                   src={logoPath!}
@@ -475,11 +469,10 @@ export function SnapshotPreviewModal({
                                     setFailedLogos((prev) => ({ ...prev, [logoKey]: true }))
                                   }
                                   style={{
-                                    height: isFourCol ? "38px" : isCompact ? "44px" : "56px",
-                                    maxWidth: isFourCol ? "86px" : isCompact ? "104px" : "136px",
+                                    height: isFourCol ? "36px" : isCompact ? "42px" : "48px",
+                                    maxWidth: isFourCol ? "84px" : isCompact ? "100px" : "126px",
                                     objectFit: "contain",
                                     objectPosition: "left center",
-                                    mixBlendMode: "multiply",
                                     display: "block",
                                   }}
                                 />
@@ -487,9 +480,9 @@ export function SnapshotPreviewModal({
                                 <div
                                   className="rounded-xl bg-white border border-[#E5E7EB] flex items-center justify-center font-extrabold tracking-tight text-[#374151]"
                                   style={{
-                                    width: isFourCol ? "42px" : isCompact ? "48px" : "56px",
-                                    height: isFourCol ? "42px" : isCompact ? "48px" : "56px",
-                                    fontSize: isFourCol ? "14px" : "17px",
+                                    width: isFourCol ? "40px" : isCompact ? "44px" : "48px",
+                                    height: isFourCol ? "40px" : isCompact ? "44px" : "48px",
+                                    fontSize: isFourCol ? "13px" : "16px",
                                   }}
                                 >
                                   {getCompanyInitials(card.company_name)}
@@ -502,13 +495,13 @@ export function SnapshotPreviewModal({
                                 className={`rounded-[7px] font-bold leading-none whitespace-nowrap ${isTopRank
                                   ? "bg-[#73B83F] text-white"
                                   : "bg-[#E4E6EA] text-[#1F2937]"
-                                  } ${isCompact ? "px-2.5 py-1 text-[13px]" : "px-3.5 py-1.5 text-[15px]"}`}
+                                  } ${isCompact ? "px-2.5 py-1 text-[12px]" : "px-3 py-1 text-[13.5px]"}`}
                               >
                                 {`Rank#${rankNum}`}
                               </span>
 
                               <span
-                                className={`mt-2 leading-tight truncate max-w-full ${isCompact ? "text-[10px]" : "text-[11.5px]"
+                                className={`mt-1.5 leading-tight truncate max-w-full ${isCompact ? "text-[10px]" : "text-[11px]"
                                   }`}
                                 style={{ color: "#6B7280" }}
                               >
@@ -516,11 +509,11 @@ export function SnapshotPreviewModal({
                               </span>
 
                               <h4
-                                className={`mt-1 font-bold leading-tight truncate max-w-full ${isFourCol
-                                  ? "text-[14.5px]"
+                                className={`mt-1 font-bold leading-snug line-clamp-2 max-w-full ${isFourCol
+                                  ? "text-[13px]"
                                   : isCompact
-                                    ? "text-[16px]"
-                                    : "text-[19px]"
+                                    ? "text-[14.5px]"
+                                    : "text-[16px]"
                                   }`}
                                 style={{ color: "#111827" }}
                                 title={card.company_name}
@@ -532,13 +525,13 @@ export function SnapshotPreviewModal({
 
                           {/* White Price Highlight Box */}
                           <div
-                            className={`bg-white rounded-[16px] ${isCompact ? "px-3 py-2.5 mb-5" : "px-4 py-3 mb-6"
+                            className={`bg-white rounded-[16px] ${isCompact ? "px-3.5 py-2.5 mb-5" : "px-4 py-3 mb-6"
                               }`}
                             style={{
                               border: isTopRank ? "1.5px solid #B81D2B" : "1px solid #C6CAD1",
                             }}
                           >
-                            <div className="flex items-baseline justify-between gap-2 pb-2.5 border-b border-[#E5E7EB]">
+                            <div className="flex items-baseline justify-between gap-2 pb-2 border-b border-[#E5E7EB]">
                               <span
                                 className={`font-bold ${isCompact ? "text-[12px]" : "text-[13px]"}`}
                                 style={{ color: "#111827" }}
@@ -559,7 +552,7 @@ export function SnapshotPreviewModal({
                             </div>
 
                             {effectiveDiscount > 0 ? (
-                              <div className="pt-2.5 space-y-1">
+                              <div className="pt-2 space-y-1">
                                 <div
                                   className={`flex items-baseline justify-between gap-2 ${isCompact ? "text-[11px]" : "text-[12px]"
                                     }`}
@@ -593,12 +586,17 @@ export function SnapshotPreviewModal({
                                 </div>
 
                                 <div className="pt-1 border-t border-[#E5E7EB] flex items-baseline justify-between gap-2">
-                                  <span
-                                    className={`font-bold ${isCompact ? "text-[13.5px]" : "text-[16px]"}`}
-                                    style={{ color: "#111827" }}
-                                  >
-                                    Net Payable:
-                                  </span>
+                                  <div>
+                                    <span
+                                      className={`font-bold block ${isCompact ? "text-[13.5px]" : "text-[16px]"}`}
+                                      style={{ color: "#111827" }}
+                                    >
+                                      Net Payable:
+                                    </span>
+                                    <span className="text-[10px] font-medium block" style={{ color: "#6B7280" }}>
+                                      {payableSublabel}
+                                    </span>
+                                  </div>
                                   <span
                                     className={`font-extrabold tabular-nums whitespace-nowrap ${isFourCol
                                       ? "text-[16px]"
@@ -613,24 +611,29 @@ export function SnapshotPreviewModal({
                                 </div>
                               </div>
                             ) : (
-                              <div className="pt-2.5 flex items-baseline justify-between gap-2">
-                                <span
-                                  className={`font-bold ${isFourCol
-                                    ? "text-[13.5px]"
-                                    : isCompact
-                                      ? "text-[15px]"
-                                      : "text-[18px]"
-                                    }`}
-                                  style={{ color: "#111827" }}
-                                >
-                                  Total Payable:
-                                </span>
+                              <div className="pt-2 flex items-baseline justify-between gap-2">
+                                <div>
+                                  <span
+                                    className={`font-bold block ${isFourCol
+                                      ? "text-[13.5px]"
+                                      : isCompact
+                                        ? "text-[15px]"
+                                        : "text-[17px]"
+                                      }`}
+                                    style={{ color: "#111827" }}
+                                  >
+                                    Total Payable:
+                                  </span>
+                                  <span className="text-[10px] font-medium block" style={{ color: "#6B7280" }}>
+                                    {payableSublabel}
+                                  </span>
+                                </div>
                                 <span
                                   className={`font-extrabold tabular-nums whitespace-nowrap ${isFourCol
                                     ? "text-[16px]"
                                     : isCompact
                                       ? "text-[18px]"
-                                      : "text-[22px]"
+                                      : "text-[21px]"
                                     }`}
                                   style={{ color: isTopRank ? "#6EB337" : "#111827" }}
                                 >
@@ -735,6 +738,22 @@ export function SnapshotPreviewModal({
                                 {towingLabel}
                               </span>
                             </div>
+
+                            {activeDynamicAddons.map((addon) => {
+                              const addonVal = card.extra_addons?.[addon.key];
+                              const hasVal = Boolean(addonVal && !["not included", "none", "no", "-", "—"].includes(String(addonVal).trim().toLowerCase()));
+                              return (
+                                <div key={addon.key} className="flex items-center justify-between gap-2">
+                                  <span style={{ color: "#6B7280" }}>{addon.label}:</span>
+                                  <span
+                                    className={`text-right ${hasVal ? "font-bold" : "font-semibold"}`}
+                                    style={{ color: hasVal ? "#4B4F56" : "#9CA3AF" }}
+                                  >
+                                    {hasVal ? String(addonVal) : "Not Included"}
+                                  </span>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -752,8 +771,13 @@ export function SnapshotPreviewModal({
                 </div>
               </div>
 
-              {/* Tagline */}
-              <div className="py-5 text-center">
+              {/* Subtle Timestamp Row + Tagline */}
+              <div className="px-10 pt-3 flex items-center justify-end">
+                <span className="text-[10.5px] italic tabular-nums" style={{ color: "#8A8E96" }}>
+                  Generated on {formatDateDDMMMYYYY(generatedAt)} · {formatTime12h(generatedAt)}
+                </span>
+              </div>
+              <div className="pt-2 pb-5 text-center">
                 <p
                   style={{
                     fontFamily: 'Georgia, "Times New Roman", Times, serif',

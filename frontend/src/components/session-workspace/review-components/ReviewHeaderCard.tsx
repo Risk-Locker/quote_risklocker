@@ -201,6 +201,21 @@ export function ReviewHeaderCard({
             </button>
           ) : null}
 
+          {workspace.tenure_id && !workspace.is_test && (
+            <Link
+              href={`/comparison?tenure_id=${workspace.tenure_id}` as Route}
+              target={openInNewTab ? "_blank" : undefined}
+              rel={openInNewTab ? "noopener noreferrer" : undefined}
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--rl-border)] bg-white px-2 py-0.5 text-[11px] font-semibold text-[var(--rl-text-strong)] hover:border-[var(--rl-black)] hover:bg-gray-50 transition-colors shadow-2xs"
+              title="Return to Comparison Workspace for this vehicle"
+            >
+              <CaretLeft size={11} weight="bold" />
+              <Columns size={12} weight="bold" />
+              <span>Comparison Workspace</span>
+              {openInNewTab && <ArrowSquareOut size={10} weight="bold" className="text-[var(--rl-text-muted)]" />}
+            </Link>
+          )}
+
           <h1 className="text-xs font-bold tracking-tight text-[var(--rl-text-strong)] whitespace-nowrap">
             Quotation Workspace
           </h1>
@@ -350,20 +365,6 @@ export function ReviewHeaderCard({
           >
             {redetecting ? "Re-detecting..." : "Re-detect"}
           </Button>
-
-          {workspace.tenure_id && !workspace.is_test && (
-            <Link
-              href={`/comparison?tenure_id=${workspace.tenure_id}` as Route}
-              target={openInNewTab ? "_blank" : undefined}
-              rel={openInNewTab ? "noopener noreferrer" : undefined}
-              className="inline-flex items-center gap-1 min-h-[26px] h-7 px-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white hover:border-[var(--rl-black)] text-[var(--rl-text-strong)] text-[11px] font-semibold transition-colors shadow-2xs"
-              title="Open Marketing Comparison Matrix for this quotation"
-            >
-              <Columns size={12} weight="bold" />
-              <span>Compare</span>
-              {openInNewTab && <ArrowSquareOut size={11} weight="bold" className="text-[var(--rl-text-muted)]" />}
-            </Link>
-          )}
 
           <Button
             size="sm"

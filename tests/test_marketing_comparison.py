@@ -1046,8 +1046,8 @@ def test_refresh_tenure_ledger_and_plate_undetected_chassis_tracking(db_session:
     refreshed = refresh_tenure_ledger(db_session, tenure.id)
     t = refreshed["tenure"]
 
-    # Plate undetected handled with N/A and tracked by chassis
-    assert t["vehicle_no"] == "N/A"
+    # Plate undetected handled with bare chassis_no fallback and tracked by chassis
+    assert t["vehicle_no"] == "LRW3F7ET6SC548056"
     assert t["is_plate_undetected"] is True
     assert t["tracking_by_chassis"] is True
     assert t["chassis_no"] == "LRW3F7ET6SC548056"

@@ -13,6 +13,8 @@ export interface RealtimeEditor {
   user_email: string;
   user_name: string;
   field?: string | null;
+  tab_id?: string | null;
+  entered_at?: string;
   updated_at: string;
 }
 
@@ -199,6 +201,15 @@ export interface UseRealtimeSyncOptions {
   hasUnsavedChanges?: boolean;
   onRemoteUpdate?: (event: RealtimeUpdateEvent) => void | Promise<void>;
   enabled?: boolean;
+  registerPresenceOnMount?: boolean;
+}
+
+function isUserTypingInInput(): boolean {
+  if (typeof document === "undefined") return false;
+  const el = document.activeElement as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
 }
 
 export function useRealtimeSync({
@@ -207,6 +218,7 @@ export function useRealtimeSync({
   hasUnsavedChanges = false,
   onRemoteUpdate,
   enabled = true,
+  registerPresenceOnMount,
 }: UseRealtimeSyncOptions) {
   const { user } = useAuth();
   const [connected, setConnected] = useState(false);
@@ -215,8 +227,14 @@ export function useRealtimeSync({
   const [activeEditors, setActiveEditors] = useState<RealtimeEditor[]>([]);
   const [pendingUpdate, setPendingUpdate] = useState<RealtimeUpdateEvent | null>(null);
 
+  const shouldRegisterPresence =
+    registerPresenceOnMount ?? (scope === "workspace" || scope === "comparison");
+
   const hasUnsavedRef = useRef(hasUnsavedChanges);
   hasUnsavedRef.current = hasUnsavedChanges;
+
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
 
   const onRemoteUpdateRef = useRef(onRemoteUpdate);
   onRemoteUpdateRef.current = onRemoteUpdate;
@@ -225,9 +243,16 @@ export function useRealtimeSync({
   currentUserIdRef.current = user?.id;
 
   const lastVersionRef = useRef<number>(0);
+  const versionInitializedRef = useRef<boolean>(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPresenceSentAtRef = useRef<number>(0);
   const lastPresenceFieldRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    lastVersionRef.current = 0;
+    versionInitializedRef.current = false;
+    setPendingUpdate(null);
+  }, [scope, resourceId]);
 
   const matchesTarget = useCallback(
     (eventScope: string, eventResourceId: string) => {
@@ -238,36 +263,65 @@ export function useRealtimeSync({
     [scope, resourceId],
   );
 
+  const handleIncomingUpdate = useCallback((payload: RealtimeUpdateEvent) => {
+    if (payload.origin_tab_id && payload.origin_tab_id === CLIENT_TAB_ID) {
+      return;
+    }
+    const myId = currentUserIdRef.current;
+    const isSameAccountOtherTab = Boolean(
+      payload.actor_id &&
+        myId &&
+        payload.actor_id === myId &&
+        payload.origin_tab_id &&
+        payload.origin_tab_id !== CLIENT_TAB_ID,
+    );
+
+    if (isSameAccountOtherTab && !hasUnsavedRef.current && !isUserTypingInInput()) {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null;
+        setPendingUpdate(null);
+        void onRemoteUpdateRef.current?.(payload);
+      }, 60);
+      return;
+    }
+
+    // Never auto-wipe edits when another user changed it, unsaved changes exist, or user is typing
+    setPendingUpdate(payload);
+  }, []);
+
   // Fetch initial presence snapshot & fallback poll when SSE is disconnected.
   const fetchPresenceSnapshot = useCallback(async () => {
     if (!enabled) return;
     try {
       const res = await api<{
         version: number;
+        last_origin_tab_id?: string | null;
+        last_actor_id?: string | null;
+        last_actor_name?: string | null;
+        last_summary?: string | null;
         active_editors: RealtimeEditor[];
       }>(`/realtime/presence?scope=${encodeURIComponent(scope)}&resource_id=${encodeURIComponent(resourceId)}`);
       if (Array.isArray(res?.active_editors)) {
         setActiveEditors(res.active_editors);
       }
       setPresenceHealthy(true);
-      if (typeof res?.version === "number" && res.version > lastVersionRef.current) {
-        const prev = lastVersionRef.current;
-        lastVersionRef.current = res.version;
-        // If we missed updates while disconnected, trigger safe refresh.
-        if (prev > 0 && !connected) {
-          if (hasUnsavedRef.current) {
-            setPendingUpdate({
+      if (typeof res?.version === "number") {
+        if (!versionInitializedRef.current) {
+          versionInitializedRef.current = true;
+          lastVersionRef.current = res.version;
+          return;
+        }
+        if (res.version > lastVersionRef.current) {
+          lastVersionRef.current = res.version;
+          if (!connectedRef.current) {
+            handleIncomingUpdate({
               scope,
               resource_id: resourceId,
-              summary: "Remote changes detected",
-              version: res.version,
-              timestamp: new Date().toISOString(),
-            });
-          } else {
-            void onRemoteUpdateRef.current?.({
-              scope,
-              resource_id: resourceId,
-              summary: "Synced missed update",
+              actor_id: res.last_actor_id,
+              actor_name: res.last_actor_name,
+              origin_tab_id: res.last_origin_tab_id,
+              summary: res.last_summary || "Remote changes detected",
               version: res.version,
               timestamp: new Date().toISOString(),
             });
@@ -277,7 +331,7 @@ export function useRealtimeSync({
     } catch {
       // Non-blocking background sync
     }
-  }, [enabled, scope, resourceId, connected]);
+  }, [enabled, scope, resourceId, handleIncomingUpdate]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -290,9 +344,6 @@ export function useRealtimeSync({
         if (payload?.user_id && !currentUserIdRef.current) {
           currentUserIdRef.current = payload.user_id;
         }
-        if (typeof payload?.version === "number") {
-          lastVersionRef.current = Math.max(lastVersionRef.current, payload.version);
-        }
         void fetchPresenceSnapshot();
       },
       onPresence: (payload) => {
@@ -300,23 +351,12 @@ export function useRealtimeSync({
         setActiveEditors(Array.isArray(payload.active_editors) ? payload.active_editors : []);
       },
       onUpdated: (payload) => {
+        if (!matchesTarget(payload.scope, payload.resource_id)) return;
         if (typeof payload.version === "number") {
           lastVersionRef.current = Math.max(lastVersionRef.current, payload.version);
+          versionInitializedRef.current = true;
         }
-        if (!matchesTarget(payload.scope, payload.resource_id)) return;
-        if (payload.origin_tab_id && payload.origin_tab_id === CLIENT_TAB_ID) {
-          return;
-        }
-        if (hasUnsavedRef.current) {
-          setPendingUpdate(payload);
-          return;
-        }
-        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = setTimeout(() => {
-          refreshTimerRef.current = null;
-          setPendingUpdate(null);
-          void onRemoteUpdateRef.current?.(payload);
-        }, 60);
+        handleIncomingUpdate(payload);
       },
     });
 
@@ -334,7 +374,7 @@ export function useRealtimeSync({
         refreshTimerRef.current = null;
       }
     };
-  }, [enabled, matchesTarget, fetchPresenceSnapshot]);
+  }, [enabled, matchesTarget, fetchPresenceSnapshot, handleIncomingUpdate]);
 
   const reportEditing = useCallback(
     async (field?: string | null) => {
@@ -354,6 +394,7 @@ export function useRealtimeSync({
             scope,
             resource_id: resourceId,
             field: cleanField,
+            tab_id: CLIENT_TAB_ID,
           }),
         });
       } catch {
@@ -377,15 +418,53 @@ export function useRealtimeSync({
   }, [enabled, scope, resourceId]);
 
   useEffect(() => {
+    if (!enabled || !shouldRegisterPresence) return;
+    const sendHeartbeat = () => {
+      void api("/realtime/presence", {
+        method: "POST",
+        body: JSON.stringify({
+          scope,
+          resource_id: resourceId,
+          field: lastPresenceFieldRef.current,
+          tab_id: CLIENT_TAB_ID,
+        }),
+      }).catch(() => undefined);
+    };
+    sendHeartbeat();
+    const timer = setInterval(sendHeartbeat, 20000);
+    return () => {
+      clearInterval(timer);
+      void clearEditing();
+    };
+  }, [enabled, shouldRegisterPresence, scope, resourceId, clearEditing]);
+
+  useEffect(() => {
+    if (shouldRegisterPresence) return;
     return () => {
       void clearEditing();
     };
-  }, [clearEditing]);
+  }, [shouldRegisterPresence, clearEditing]);
+
+  const sortedActiveEditors = useMemo(() => {
+    return [...activeEditors].sort((a, b) =>
+      (a.entered_at || a.updated_at || "").localeCompare(b.entered_at || b.updated_at || ""),
+    );
+  }, [activeEditors]);
+
+  const primaryEditor = useMemo(() => {
+    return sortedActiveEditors[0] ?? null;
+  }, [sortedActiveEditors]);
+
+  const myId = user?.id || currentUserIdRef.current;
+
+  const isPrimaryEditor = useMemo(() => {
+    if (!primaryEditor || !myId) return true;
+    return primaryEditor.user_id === myId;
+  }, [primaryEditor, myId]);
 
   const otherEditors = useMemo(() => {
-    const myId = user?.id || currentUserIdRef.current;
-    return activeEditors.filter((ed) => !myId || ed.user_id !== myId);
-  }, [activeEditors, user?.id]);
+    return sortedActiveEditors.filter((ed) => !myId || ed.user_id !== myId);
+  }, [sortedActiveEditors, myId]);
 
   const refreshNow = useCallback(async () => {
     const ev = pendingUpdate ?? {
@@ -412,6 +491,9 @@ export function useRealtimeSync({
   return {
     connected,
     syncMode,
+    activeEditors: sortedActiveEditors,
+    primaryEditor,
+    isPrimaryEditor,
     otherEditors,
     pendingUpdate,
     reportEditing,

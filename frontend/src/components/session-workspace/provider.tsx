@@ -29,10 +29,12 @@ type DataContextValue = {
   workspace: WorkspaceSnapshot | null;
   loading: boolean;
   loadError: string | null;
+  remoteSyncNotice: string | null;
+  dismissRemoteSyncNotice: () => void;
 };
 
 type ActionsContextValue = {
-  reload: () => Promise<void>;
+  reload: (options?: { silent?: boolean }) => Promise<void>;
   queueOperation: (operation: WorkspaceOperation, dirtyPath: string) => void;
   decideField: (field: string, decision: ScalarDecision, value?: string | null) => void;
   revertOperation: (dirtyPath: string) => void;
@@ -733,6 +735,7 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                 const [workingSnapshot, setWorkingSnapshot] = useState<WorkspaceSnapshot | null>(null);
                 const [loading, setLoading] = useState(true);
                 const [loadError, setLoadError] = useState<string | null>(null);
+                const [remoteSyncNotice, setRemoteSyncNotice] = useState<string | null>(null);
                 const [saveError, setSaveError] = useState<string | null>(null);
                 const [saving, setSaving] = useState(false);
                 const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -751,8 +754,11 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                   setWorkingSnapshot(snapshot);
                 }, []);
 
-                const reload = useCallback(async () => {
-                  setLoading(true);
+                const reload = useCallback(async (options?: { silent?: boolean }) => {
+                  const isSilent = Boolean(options?.silent && serverSnapshotRef.current);
+                  if (!isSilent) {
+                    setLoading(true);
+                  }
                   setLoadError(null);
                   try {
                     const result = await api<{ workspace: WorkspaceSnapshot }>(`/sessions/${sessionId}/workspace`);
@@ -763,10 +769,14 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                     operationVersionsRef.current.clear();
                     setDirtyPaths([]);
                   } catch (error) {
-                    setLoadError(apiErrorMessage(error));
+                    if (!isSilent) {
+                      setLoadError(apiErrorMessage(error));
+                    }
                     throw error;
                   } finally {
-                    setLoading(false);
+                    if (!isSilent) {
+                      setLoading(false);
+                    }
                   }
                 }, [sessionId, updateWorkingSnapshot]);
 
@@ -1003,7 +1013,14 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                   return () => window.removeEventListener("beforeunload", beforeUnload);
                 }, []);
 
-                const data = useMemo<DataContextValue>(() => ({ workspace: workingSnapshot, loading, loadError }), [workingSnapshot, loading, loadError]);
+                const dismissRemoteSyncNotice = useCallback(() => {
+                  setRemoteSyncNotice(null);
+                }, []);
+
+                const data = useMemo<DataContextValue>(
+                  () => ({ workspace: workingSnapshot, loading, loadError, remoteSyncNotice, dismissRemoteSyncNotice }),
+                  [workingSnapshot, loading, loadError, remoteSyncNotice, dismissRemoteSyncNotice]
+                );
                 const actions = useMemo<ActionsContextValue>(() => ({ reload, queueOperation, decideField, revertOperation, save, discard, navigate }), [reload, queueOperation, decideField, revertOperation, save, discard, navigate]);
                 const mutation = useMemo<MutationState>(() => ({
                   dirty: dirtyPaths.length > 0,
@@ -1013,21 +1030,36 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                   lastSavedAt,
                 }), [dirtyPaths, saving, saveError, lastSavedAt]);
 
-                // Google-Sheet style 1200ms debounced auto-save for buffered workspace edits
+                // Calm manual save via Ctrl+S / Cmd+S (no surprise background auto-save wipes)
                 useEffect(() => {
-                  if (!dirtyPaths.length || saving || saveError) return;
-                  const timer = setTimeout(() => {
-                    void save().catch(() => undefined);
-                  }, 1200);
-                  return () => clearTimeout(timer);
-                }, [dirtyPaths, saving, saveError, save]);
+                  function onKeyDown(event: KeyboardEvent) {
+                    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+                      event.preventDefault();
+                      if (operationsRef.current.size > 0 && !saving) {
+                        void save().catch(() => undefined);
+                      }
+                    }
+                  }
+                  window.addEventListener("keydown", onKeyDown);
+                  return () => window.removeEventListener("keydown", onKeyDown);
+                }, [save, saving]);
 
                 const realtime = useRealtimeSync({
                   scope: "workspace",
-                  resourceId: serverSnapshot?.draft_id || sessionId,
+                  resourceId: sessionId,
                   hasUnsavedChanges: dirtyPaths.length > 0,
-                  onRemoteUpdate: async () => {
-                    await reload();
+                  registerPresenceOnMount: true,
+                  onRemoteUpdate: async (event) => {
+                    await reload({ silent: true });
+                    const rawSummary = (event?.summary || "Workspace updated").trim();
+                    const pricedBenefitHint =
+                      /\b(llp|llop|special\s*perils|motor\s*pa|windscreen|all\s*drivers?|towing)\b/i.test(rawSummary) &&
+                      !/motor_premium|total_amount|premium/i.test(rawSummary);
+                    setRemoteSyncNotice(
+                      pricedBenefitHint
+                        ? `Synced from Comparison: ${rawSummary}. Benefit synced from Comparison — verify Total Premium if insurer quote changed.`
+                        : `Synced from Comparison: ${rawSummary}`
+                    );
                   },
                 });
 
@@ -1035,9 +1067,9 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                   if (dirtyPaths.length > 0) {
                     void realtime.reportEditing(dirtyPaths[0]);
                   } else {
-                    void realtime.clearEditing();
+                    void realtime.reportEditing(null);
                   }
-                }, [dirtyPaths, realtime.reportEditing, realtime.clearEditing]);
+                }, [dirtyPaths, realtime.reportEditing]);
 
                 return (
                   <DataContext.Provider value={data}>

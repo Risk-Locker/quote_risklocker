@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -202,30 +202,61 @@ def _sync_tenure_vehicle(
     engine_no: str | None,
     powertrain: str | None,
 ) -> TrackedVehicle | None:
-    """Resolve or update TrackedVehicle specifications for this tenure."""
+    """Resolve or update TrackedVehicle specifications for this tenure (chassis-first + plate history)."""
+    from app.services.insurance_tenure_service import (
+        is_valid_chassis,
+        normalize_chassis,
+        record_vehicle_plate_history,
+    )
+    from app.services.vehicle_tracking_service import is_valid_malaysian_plate
+
+    clean_chassis = normalize_chassis(chassis_no)
     norm_plate = normalize_plate(vehicle_no.strip()) if (vehicle_no and vehicle_no.strip()) else None
+    has_valid_plate = bool(norm_plate and is_valid_malaysian_plate(norm_plate))
+    if not has_valid_plate and is_valid_chassis(clean_chassis):
+        norm_plate = clean_chassis
+
     if norm_plate:
         tenure.vehicle_no = norm_plate
 
     tv = tenure.tracked_vehicle or (
         db.get(TrackedVehicle, tenure.tracked_vehicle_id) if tenure.tracked_vehicle_id else None
     )
+
+    # Prefer matching by normalized chassis_no first
+    if clean_chassis and (not tv or normalize_chassis(tv.chassis_no) != clean_chassis):
+        chassis_tv = db.scalar(
+            select(TrackedVehicle).where(
+                or_(
+                    TrackedVehicle.chassis_no == clean_chassis,
+                    func.replace(func.upper(TrackedVehicle.chassis_no), "-", "") == clean_chassis,
+                    TrackedVehicle.vehicle_no == clean_chassis,
+                )
+            )
+        )
+        if chassis_tv:
+            tv = chassis_tv
+
     target_plate = norm_plate or tenure.vehicle_no
-    if target_plate:
+    if target_plate and not tv:
         existing_tv = db.scalar(select(TrackedVehicle).where(TrackedVehicle.vehicle_no == target_plate))
         if existing_tv:
-            tv = existing_tv
-        elif tv and norm_plate:
-            tv.vehicle_no = norm_plate
-        elif not tv:
-            tv = TrackedVehicle(vehicle_no=target_plate)
+            ex_chassis = normalize_chassis(existing_tv.chassis_no)
+            if not clean_chassis or not ex_chassis or ex_chassis == clean_chassis:
+                tv = existing_tv
+        if not tv:
+            tv = TrackedVehicle(
+                vehicle_no=target_plate,
+                chassis_no=chassis_no.strip() if (chassis_no and chassis_no.strip()) else None,
+            )
             db.add(tv)
             db.flush()
-        tenure.tracked_vehicle = tv
-        tenure.tracked_vehicle_id = tv.id
 
     if not tv:
         return None
+
+    tenure.tracked_vehicle = tv
+    tenure.tracked_vehicle_id = tv.id
 
     if car_brand and car_brand.strip():
         tv.car_brand = car_brand.strip()
@@ -243,6 +274,20 @@ def _sync_tenure_vehicle(
         tv.chassis_no = chassis_no.strip()
     if hasattr(tv, "powertrain") and powertrain and powertrain.strip():
         setattr(tv, "powertrain", powertrain.strip().upper())
+
+    if has_valid_plate and norm_plate:
+        if normalize_plate(tv.vehicle_no) != norm_plate:
+            tv.vehicle_no = norm_plate
+        record_vehicle_plate_history(
+            db,
+            tracked_vehicle=tv,
+            new_plate=norm_plate,
+            source_tenure_id=tenure.id,
+        )
+    elif is_valid_chassis(clean_chassis) and not is_valid_malaysian_plate(tv.vehicle_no):
+        tv.vehicle_no = clean_chassis
+        tenure.vehicle_no = clean_chassis
+
     return tv
 
 
@@ -366,11 +411,12 @@ def _sync_vehicle_spec_draft_fields(
     *,
     vehicle_type: str | None,
     powertrain: str | None,
+    sync_plate: bool = True,
 ) -> dict[str, Any]:
     """Update only physical vehicle specifications on a draft (never dates/fees)."""
     f = dict(fields)
     if tv:
-        if tv.vehicle_no:
+        if sync_plate and tv.vehicle_no:
             _set_draft_field(f, "vehicle_no", tv.vehicle_no)
         if tv.car_brand:
             _set_draft_field(f, "car_brand", tv.car_brand)
@@ -457,9 +503,25 @@ def _propagate_to_session_drafts(
             continue
 
         if same_vehicle:
+            sib_tenure = db.get(InsuranceTenure, s.tenure_id) if s.tenure_id else None
+            is_historical_or_closed = False
+            if sib_tenure is not None:
+                is_historical_or_closed = (
+                    sib_tenure.stage == "Close - Win"
+                    or bool(getattr(sib_tenure, "covernote_session_id", None))
+                    or (
+                        sib_tenure.coverage_start_date is not None
+                        and tenure.coverage_start_date is not None
+                        and sib_tenure.coverage_start_date.year < tenure.coverage_start_date.year
+                    )
+                )
             updated = _sync_customer_identity_draft_fields(s.draft.fields, cust)
             updated = _sync_vehicle_spec_draft_fields(
-                updated, tv, vehicle_type=vehicle_type, powertrain=powertrain
+                updated,
+                tv,
+                vehicle_type=vehicle_type,
+                powertrain=powertrain,
+                sync_plate=not is_historical_or_closed,
             )
             s.draft.fields = updated
             flag_modified(s.draft, "fields")

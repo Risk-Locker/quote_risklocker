@@ -30,6 +30,7 @@ import {
   UploadSimple,
   CircleNotch,
   CaretDown,
+  CaretLeft,
   CaretUp,
   Columns,
   ArrowsClockwise,
@@ -50,7 +51,6 @@ import {
   Lightning,
   CurrencyDollar,
 } from "@phosphor-icons/react";
-import { toBlob, toPng } from "html-to-image";
 import { api, fileUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { DeepRedetectProgressBanner } from "@/components/redetect/DeepRedetectProgressBanner";
@@ -71,7 +71,7 @@ import { NcdEntitlementModal } from "./components/NcdEntitlementModal";
 import { AdjustFeesModal } from "./components/AdjustFeesModal";
 import { EditCoverNoteModal } from "./components/EditCoverNoteModal";
 import { SnapshotPreviewModal } from "./components/SnapshotPreviewModal";
-import { waitForSnapshotAssets } from "./hooks/useSnapshotExport";
+import { useSnapshotExport } from "./hooks/useSnapshotExport";
 import { SourcePdfViewerPane } from "./components/SourcePdfViewerPane";
 import { UnderwriterQuoteCard } from "./components/UnderwriterQuoteCard";
 import { CustomerVehicleLedgerPane } from "./components/CustomerVehicleLedgerPane";
@@ -599,8 +599,12 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
   const [resolvingDuplicateId, setResolvingDuplicateId] = useState<string | null>(null);
   const snapshotGridRef = useRef<HTMLDivElement>(null);
-  const [copyingSnapshot, setCopyingSnapshot] = useState(false);
-  const [downloadingSnapshot, setDownloadingSnapshot] = useState(false);
+  const {
+    copyingSnapshot,
+    downloadingSnapshot,
+    handleCopySnapshot,
+    handleDownloadSnapshot,
+  } = useSnapshotExport(snapshotGridRef, data?.tenure?.vehicle_no, triggerStatus);
 
   // Edit state for Fixed Costs & Customer/Vehicle Specs
   const [editingFixedCosts, setEditingFixedCosts] = useState(false);
@@ -724,6 +728,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   };
 
   const inFlightComparisonRef = useRef<Promise<void> | null>(null);
+  const hasActiveEditFormRef = useRef(false);
 
   const fetchComparison = async (silent = false) => {
     if (inFlightComparisonRef.current) {
@@ -747,7 +752,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           }
         }
         setData(json);
-        populateEditInputs(json.tenure);
+        if (!silent || !hasActiveEditFormRef.current) {
+          populateEditInputs(json.tenure);
+        }
       } catch (err: any) {
         if (!silent) {
           setError(err.message || "Failed to load comparison");
@@ -810,11 +817,22 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const isFromUpload = searchParams.get("from_upload") === "true";
   const [isCompilingBatch, setIsCompilingBatch] = useState(isFromUpload);
 
+  const hasActiveEditForm =
+    editingFixedCosts ||
+    isManualModalOpen ||
+    isFastQuoteModalOpen ||
+    showEditCovernoteModal ||
+    showAdjustFeesModal ||
+    showNcdModal ||
+    Boolean(editingBasicFigureEntryId) ||
+    Boolean(editingRankEntryId);
+  hasActiveEditFormRef.current = hasActiveEditForm;
+
   const realtime = useRealtimeSync({
     scope: "comparison",
     resourceId: tenureId || "all",
     enabled: Boolean(tenureId),
-    hasUnsavedChanges: false,
+    hasUnsavedChanges: hasActiveEditForm,
     onRemoteUpdate: async () => {
       await fetchComparison(true);
     },
@@ -1156,48 +1174,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       triggerStatus("error", "Duplicate Resolution Failed", err.message || String(err));
     } finally {
       setResolvingDuplicateId(null);
-    }
-  };
-
-  const handleCopySnapshot = async () => {
-    if (!snapshotGridRef.current) return;
-    try {
-      setCopyingSnapshot(true);
-      await waitForSnapshotAssets(snapshotGridRef.current);
-      const blob = await toBlob(snapshotGridRef.current, {
-        pixelRatio: 3,
-        backgroundColor: "#ffffff",
-        cacheBust: true,
-      });
-      if (blob) {
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-        triggerStatus("success", "Snapshot Copied", "Comparison snapshot copied to clipboard.");
-      }
-    } catch (err: any) {
-      triggerStatus("error", "Copy Snapshot Failed", err.message || String(err));
-    } finally {
-      setCopyingSnapshot(false);
-    }
-  };
-
-  const handleDownloadSnapshot = async () => {
-    if (!snapshotGridRef.current) return;
-    try {
-      setDownloadingSnapshot(true);
-      await waitForSnapshotAssets(snapshotGridRef.current);
-      const dataUrl = await toPng(snapshotGridRef.current, {
-        pixelRatio: 3,
-        backgroundColor: "#ffffff",
-        cacheBust: true,
-      });
-      const link = document.createElement("a");
-      link.download = `quotation-comparison-${data?.tenure?.vehicle_no || "matrix"}.png`;
-      link.href = dataUrl;
-      link.click();
-    } catch (err: any) {
-      triggerStatus("error", "Download Snapshot Failed", err.message || String(err));
-    } finally {
-      setDownloadingSnapshot(false);
     }
   };
 
@@ -1554,6 +1530,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         <RealtimePresenceBanner
           connected={realtime.connected}
           otherEditors={realtime.otherEditors}
+          primaryEditor={realtime.primaryEditor}
+          isPrimaryEditor={realtime.isPrimaryEditor}
           pendingUpdate={realtime.pendingUpdate}
           onRefreshNow={() => void realtime.refreshNow()}
           onDismissPending={realtime.dismissPendingUpdate}
@@ -1921,6 +1899,57 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             </button>
           </div>
         )}
+
+        {/* Compact Top Navigation Bar */}
+        {(() => {
+          const sessionEntries = visibleDisplayEntries.filter((e) => Boolean(e.session_id));
+          const primaryTarget = winnerEntries.find((w) => Boolean(w.session_id)) || (sessionEntries.length === 1 ? sessionEntries[0] : null);
+          return (
+            <div className="flex flex-wrap items-center justify-between gap-2 no-print print:hidden">
+              <Link
+                href={"/ledger" as Route}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5ea] bg-white px-2.5 py-1 text-xs font-semibold text-[#1b1717] hover:border-neutral-400 hover:bg-neutral-50 transition-colors shadow-2xs"
+              >
+                <CaretLeft size={13} weight="bold" />
+                <span>Renewal Ledger</span>
+              </Link>
+
+              {sessionEntries.length === 1 && primaryTarget?.session_id ? (
+                <Link
+                  href={`/sessions/${primaryTarget.session_id}` as Route}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5ea] bg-white px-3 py-1 text-xs font-semibold text-[#1b1717] hover:border-neutral-400 hover:bg-neutral-50 transition-colors shadow-2xs"
+                >
+                  <span>Open Quotation Workspace</span>
+                  <ArrowRight size={12} weight="bold" />
+                </Link>
+              ) : sessionEntries.length > 1 ? (
+                <div className="relative group">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5ea] bg-white px-3 py-1 text-xs font-semibold text-[#1b1717] hover:border-neutral-400 hover:bg-neutral-50 transition-colors shadow-2xs cursor-pointer"
+                  >
+                    <span>Open Quotation Workspace</span>
+                    <CaretDown size={12} weight="bold" />
+                  </button>
+                  <div className="invisible opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 transition-all absolute right-0 top-full mt-1 z-30 min-w-[210px] rounded-xl border border-[#e5e5ea] bg-white p-1.5 shadow-lg">
+                    {sessionEntries.map((entryItem) => (
+                      <Link
+                        key={entryItem.id}
+                        href={`/sessions/${entryItem.session_id}` as Route}
+                        className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#1b1717] hover:bg-[#f5f5f7]"
+                      >
+                        <span className="truncate">{formatShortInsurerName(entryItem.company_name)}</span>
+                        {entryItem.is_recommended && (
+                          <span className="text-[10px] font-bold text-emerald-700">★ Winner</span>
+                        )}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })()}
 
         {/* Vehicle Info & Action Header */}
         <div className="rounded-2xl border border-[#e5e5ea] bg-white p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -2374,8 +2403,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           {/* ============================================================== */}
           {/* CENTER PANE: Dynamic Side-by-Side Underwriter Columns           */}
           {/* ============================================================== */}
-          <div id="tour-comparison-matrix" className="min-w-0 overflow-x-auto pb-4 print:overflow-visible print:w-full">
-            <div className="flex gap-4 min-w-max print:min-w-0 print:flex-wrap">
+          <div id="tour-comparison-matrix" className="min-w-0 overflow-x-auto pb-4 px-1 print:overflow-visible print:w-full">
+            <div className="flex gap-5 min-w-max print:min-w-0 print:flex-wrap">
               {companyGroups.map((group) => {
                 const activeIds = getActiveEntryIdsForGroup(group);
                 const activeEntries = group.entries.filter(
@@ -2597,6 +2626,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         visibleRanksMap={visibleRanksMap}
         ncdData={data?.ncd}
         roundingMode={roundingMode}
+        activeDynamicAddons={data?.active_dynamic_addons}
       />
 
       {/* 100% Precision Autonomous Detection Logs Modal */}

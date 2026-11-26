@@ -18,6 +18,8 @@ export function IncludedCard({
   isPurchasedAddon = false,
   hideColumnButtons = false,
   companyName,
+  isHighlighted = false,
+  onApproveBenefit,
 }: {
   card: BenefitCardSummary;
   index: number;
@@ -28,6 +30,8 @@ export function IncludedCard({
   isPurchasedAddon?: boolean;
   hideColumnButtons?: boolean;
   companyName?: string | null;
+  isHighlighted?: boolean;
+  onApproveBenefit?: (card: BenefitCardSummary) => void;
 }) {
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || String(selectionId).startsWith("pending:");
@@ -354,10 +358,17 @@ export function IncludedCard({
   const handleRemove = () => setConfirmRemoveOpen(true);
 
   return (
-    <article className={`group flex items-start justify-between gap-3.5 rounded-[var(--rl-radius-sm)] border p-4 shadow-xs transition-all ${card.is_detected
-      ? "border-amber-300 bg-amber-50/50 ring-1 ring-amber-300/60"
-      : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
-      }`}>
+    <article
+      data-selection-id={selectionId || card.card_key}
+      id={`workspace-benefit-${selectionId || card.card_key}`}
+      className={`group flex items-start justify-between gap-3.5 rounded-[var(--rl-radius-sm)] border p-4 shadow-xs transition-all ${
+        isHighlighted
+          ? "border-amber-500 bg-amber-50/90 ring-2 ring-amber-400 shadow-sm"
+          : card.is_detected
+            ? "border-amber-300 bg-amber-50/50 ring-1 ring-amber-300/60"
+            : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
+      }`}
+    >
       {/* Left: index + image */}
       <div className="flex items-start gap-2.5 shrink-0">
         <span className="flex h-8 min-w-8 px-1.5 items-center justify-center rounded bg-neutral-100 font-mono text-[16px] font-bold text-[var(--rl-text-muted)] mt-0.5">
@@ -404,12 +415,26 @@ export function IncludedCard({
           {card.is_detected ? (
             <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[12px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
           ) : null}
-          {card.cost_status === "unknown" ? (
+          {(card.cost_status === "unknown" || card.plan_tier_uncertain || Boolean(card.needs_review_reason)) ? (
             <span
-              className="rounded bg-amber-50 border border-amber-300 px-1.5 py-0.5 text-[12px] font-bold text-amber-800 shrink-0 flex items-center gap-0.5"
-              title="Unclassified cost status from source quotation: Review whether this is Free/Included or a Paid add-on"
+              className="group/verify inline-flex items-center overflow-hidden rounded bg-amber-50 border border-amber-300 px-1.5 py-0.5 text-[12px] font-bold text-amber-800 shrink-0"
+              title={card.needs_review_reason || "Unclassified cost status from source quotation: Review whether this is Free/Included or a Paid add-on"}
             >
-              ⚠️ Review Cost
+              <span>⚠ {card.cost_status === "unknown" ? "Review Cost" : "Verify"}</span>
+              {onApproveBenefit ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onApproveBenefit(card);
+                  }}
+                  className="ml-0 group-hover/verify:ml-1 group-focus-within/verify:ml-1 inline-flex items-center justify-center overflow-hidden max-w-0 opacity-0 group-hover/verify:max-w-[28px] group-hover/verify:opacity-100 group-focus-within/verify:max-w-[28px] group-focus-within/verify:opacity-100 rounded bg-emerald-600 px-0 group-hover/verify:px-1.5 group-focus-within/verify:px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 transition-all duration-150 cursor-pointer"
+                  title="Approve benefit"
+                  aria-label={`Approve ${card.label}`}
+                >
+                  <Check size={11} weight="bold" />
+                </button>
+              ) : null}
             </span>
           ) : null}
           {savedField ? (
@@ -603,12 +628,16 @@ export function AddonCard({
   assetUrl,
   onQueue,
   companyName,
+  isHighlighted = false,
+  onApproveBenefit,
 }: {
   card: BenefitCardSummary;
   index: number;
   assetUrl?: string | null;
   onQueue: (operation: Record<string, unknown> & { op: string }, path: string, revertOp?: Record<string, unknown> & { op: string }) => void;
   companyName?: string | null;
+  isHighlighted?: boolean;
+  onApproveBenefit?: (card: BenefitCardSummary) => void;
 }) {
   const selectionId = card.selection_id;
   const pending = !selectionId || String(selectionId).startsWith("pending:");
@@ -895,10 +924,17 @@ export function AddonCard({
   };
 
   return (
-    <article className={`group flex items-start justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-dashed p-2.5 transition-all ${card.is_detected
-      ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300/60"
-      : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-black)] hover:bg-white"
-      }`}>
+    <article
+      data-selection-id={selectionId || card.card_key}
+      id={`workspace-benefit-${selectionId || card.card_key}`}
+      className={`group flex items-start justify-between gap-2.5 rounded-[var(--rl-radius-sm)] border border-dashed p-2.5 transition-all ${
+        isHighlighted
+          ? "border-amber-500 bg-amber-50/90 ring-2 ring-amber-400 shadow-sm"
+          : card.is_detected
+            ? "border-amber-400 bg-amber-50/50 ring-1 ring-amber-300/60"
+            : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-black)] hover:bg-white"
+      }`}
+    >
       {/* Left: index + image */}
       <div className="flex items-start gap-2 shrink-0">
         <span className="flex h-6 w-6 items-center justify-center rounded bg-neutral-100 font-mono text-[10px] font-bold text-[var(--rl-text-muted)] mt-0.5">
@@ -945,12 +981,26 @@ export function AddonCard({
           {card.is_detected ? (
             <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800 ring-1 ring-amber-400/50 shrink-0">★ Detected</span>
           ) : null}
-          {card.cost_status === "unknown" ? (
+          {(card.cost_status === "unknown" || card.plan_tier_uncertain || Boolean(card.needs_review_reason)) ? (
             <span
-              className="rounded bg-amber-50 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-800 shrink-0 flex items-center gap-0.5"
-              title="Unclassified cost status from source quotation: Review whether this is Free/Included or a Paid add-on"
+              className="group/verify inline-flex items-center overflow-hidden rounded bg-amber-50 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-800 shrink-0"
+              title={card.needs_review_reason || "Unclassified cost status from source quotation: Review whether this is Free/Included or a Paid add-on"}
             >
-              ⚠️ Review Cost
+              <span>⚠ {card.cost_status === "unknown" ? "Review Cost" : "Verify"}</span>
+              {onApproveBenefit ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onApproveBenefit(card);
+                  }}
+                  className="ml-0 group-hover/verify:ml-1 group-focus-within/verify:ml-1 inline-flex items-center justify-center overflow-hidden max-w-0 opacity-0 group-hover/verify:max-w-[24px] group-hover/verify:opacity-100 group-focus-within/verify:max-w-[24px] group-focus-within/verify:opacity-100 rounded bg-emerald-600 px-0 group-hover/verify:px-1 group-focus-within/verify:px-1 py-0.5 text-[9px] font-bold text-white hover:bg-emerald-700 transition-all duration-150 cursor-pointer"
+                  title="Approve benefit"
+                  aria-label={`Approve ${card.label}`}
+                >
+                  <Check size={9} weight="bold" />
+                </button>
+              ) : null}
             </span>
           ) : null}
           {savedField ? (
@@ -1148,6 +1198,8 @@ export function MatrixAddonCard({
   onToggleSelect,
   onQueue,
   companyName,
+  isHighlighted = false,
+  onApproveBenefit,
 }: {
   card: BenefitCardSummary;
   index: number;
@@ -1157,6 +1209,8 @@ export function MatrixAddonCard({
   onToggleSelect: (willSelect: boolean) => void;
   onQueue: (operation: Record<string, unknown> & { op: string }, path: string, revertOp?: Record<string, unknown> & { op: string }) => void;
   companyName?: string | null;
+  isHighlighted?: boolean;
+  onApproveBenefit?: (card: BenefitCardSummary) => void;
 }) {
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || String(selectionId).startsWith("pending:");
@@ -1421,10 +1475,14 @@ export function MatrixAddonCard({
 
   return (
     <article
-      className={`group flex items-start gap-3.5 rounded-[var(--rl-radius-sm)] border p-4 shadow-xs transition-all ${isSelected
-        ? "border-emerald-300 bg-emerald-50/40 ring-1 ring-emerald-400/40"
-        : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
-        }`}
+      data-selection-id={selectionId || card.card_key}
+      className={`group flex items-start gap-3.5 rounded-[var(--rl-radius-sm)] border p-4 shadow-xs transition-all ${
+        isHighlighted
+          ? "border-amber-500 bg-amber-50/90 ring-2 ring-amber-400"
+          : isSelected
+            ? "border-emerald-300 bg-emerald-50/40 ring-1 ring-emerald-400/40"
+            : "border-[var(--rl-border)] bg-[var(--rl-surface)] hover:border-[var(--rl-border-strong)]"
+      }`}
     >
       {/* 1. Design 2 Checkbox (Click to toggle Selected / Ticked; locked when managed by parent bundle) */}
       <button
@@ -1525,26 +1583,31 @@ export function MatrixAddonCard({
             </span>
           ) : null}
 
-          {card.plan_tier_uncertain && (
+          {(card.plan_tier_uncertain || Boolean(card.needs_review_reason) || card.cost_status === "unknown") && (
             <span
-              className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-800 shrink-0"
+              className="group/verify inline-flex items-center overflow-hidden rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-800 shrink-0"
               title={card.needs_review_reason || "Plan tier was uncertain and defaulted to Plan 1. Please verify."}
             >
-              <span>⚠ Verify Plan</span>
-              {selectionId && !pending ? (
+              <span>⚠ {card.cost_status === "unknown" ? "Review Cost" : "Verify Plan"}</span>
+              {(onApproveBenefit || (selectionId && !pending)) ? (
                 <button
                   type="button"
-                  onClick={() =>
-                    onQueue(
-                      { op: "benefit_update", selection_id: selectionId, confirm_plan_tier: true },
-                      `benefits.${selectionId}.plan_tier`
-                    )
-                  }
-                  className="inline-flex items-center gap-0.5 rounded bg-emerald-600 px-1 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 cursor-pointer"
-                  title="Confirm detected plan tier"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onApproveBenefit) {
+                      onApproveBenefit(card);
+                    } else if (selectionId && !pending) {
+                      onQueue(
+                        { op: "benefit_update", selection_id: selectionId, confirm_plan_tier: true },
+                        `benefits.${selectionId}.plan_tier`
+                      );
+                    }
+                  }}
+                  className="ml-0 group-hover/verify:ml-1 group-focus-within/verify:ml-1 inline-flex items-center justify-center overflow-hidden max-w-0 opacity-0 group-hover/verify:max-w-[28px] group-hover/verify:opacity-100 group-focus-within/verify:max-w-[28px] group-focus-within/verify:opacity-100 rounded bg-emerald-600 px-0 group-hover/verify:px-1.5 group-focus-within/verify:px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 transition-all duration-150 cursor-pointer"
+                  title="Approve benefit"
+                  aria-label={`Approve ${card.label}`}
                 >
-                  <Check size={9} weight="bold" />
-                  <span>Confirm</span>
+                  <Check size={10} weight="bold" />
                 </button>
               ) : null}
             </span>

@@ -60,6 +60,8 @@ export interface BenefitsManagerPanelProps {
   customPrice: string;
   setCustomPrice: (v: string) => void;
   addCustomBenefit: (payload?: any) => void;
+  highlightedSelectionId?: string | null;
+  onApproveBenefit?: (card: BenefitCardSummary) => void;
 }
 
 export function BenefitsManagerPanel({
@@ -88,6 +90,8 @@ export function BenefitsManagerPanel({
   removePack,
   addPack,
   addCustomBenefit,
+  highlightedSelectionId = null,
+  onApproveBenefit,
 }: BenefitsManagerPanelProps) {
   const [showAddCustomModal, setShowAddCustomModal] = useState(false);
   const [customModalPlacement, setCustomModalPlacement] = useState<"foc" | "addon">("addon");
@@ -408,6 +412,7 @@ export function BenefitsManagerPanel({
                     (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
                   );
                   const assetUrl = resolveAssetUrl(card);
+                  const cardSelId = (selection && "id" in selection ? String(selection.id) : card.selection_id) || card.card_key;
                   return (
                     <IncludedCard
                       key={card.offering_id || card.card_key || idx}
@@ -419,6 +424,8 @@ export function BenefitsManagerPanel({
                       onQueue={onQueue}
                       hideColumnButtons={false}
                       companyName={companyName}
+                      isHighlighted={Boolean(highlightedSelectionId && (highlightedSelectionId === cardSelId || highlightedSelectionId === card.card_key))}
+                      onApproveBenefit={onApproveBenefit}
                     />
                   );
                 })
@@ -604,6 +611,7 @@ export function BenefitsManagerPanel({
                       (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
                     );
                     const assetUrl = resolveAssetUrl(card);
+                    const cardSelId = (selection && "id" in selection ? String(selection.id) : card.selection_id) || card.card_key;
                     return (
                       <MatrixAddonCard
                         key={card.offering_id || card.card_key || `purchased-${idx}`}
@@ -615,6 +623,8 @@ export function BenefitsManagerPanel({
                         onToggleSelect={(willSelect) => handleToggleSelect(card, willSelect)}
                         onQueue={onQueue}
                         companyName={companyName}
+                        isHighlighted={Boolean(highlightedSelectionId && (highlightedSelectionId === cardSelId || highlightedSelectionId === card.card_key))}
+                        onApproveBenefit={onApproveBenefit}
                       />
                     );
                   })}
@@ -626,6 +636,7 @@ export function BenefitsManagerPanel({
                     );
                     const assetUrl = resolveAssetUrl(card);
                     const effectiveIndex = filteredPurchasedAddons.length + idx;
+                    const cardSelId = (selection && "id" in selection ? String(selection.id) : card.selection_id) || card.card_key;
                     return (
                       <MatrixAddonCard
                         key={card.offering_id || card.card_key || `addon-${idx}`}
@@ -637,6 +648,8 @@ export function BenefitsManagerPanel({
                         onToggleSelect={(willSelect) => handleToggleSelect(card, willSelect)}
                         onQueue={onQueue}
                         companyName={companyName}
+                        isHighlighted={Boolean(highlightedSelectionId && (highlightedSelectionId === cardSelId || highlightedSelectionId === card.card_key))}
+                        onApproveBenefit={onApproveBenefit}
                       />
                     );
                   })}

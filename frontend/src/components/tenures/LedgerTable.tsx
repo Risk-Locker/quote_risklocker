@@ -36,6 +36,8 @@ export interface LedgerTableProps {
   onOpenMissModal: (tenure: TenureRow) => void;
   onOpenDrawer: (id: string) => void;
   onOpenEditModal: (tenure: TenureRow) => void;
+  hasActiveFilters?: boolean;
+  onResetFilters?: () => void;
 }
 
 function SortIndicator({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
@@ -75,6 +77,8 @@ export function LedgerTable({
   onOpenMissModal,
   onOpenDrawer,
   onOpenEditModal,
+  hasActiveFilters = false,
+  onResetFilters,
 }: LedgerTableProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const layout = resolveLedgerColumns(density, hiddenColumns);
@@ -206,12 +210,25 @@ export function LedgerTable({
                   Loading Motor Renewal Ledger...
                 </td>
               </tr>
-            ) : tenures.length === 0 ? (
+            ) : tenures.length === 0 || vehicleGroups.length === 0 ? (
               <tr>
-                <td colSpan={layout.columnCount} className="py-14 text-center text-neutral-400">
-                  {category === "lost"
-                    ? "No lost client records found matching the active filters."
-                    : `No active renewal policies found for ${selectedMonth === "all" ? selectedYear : selectedMonth}.`}
+                <td colSpan={layout.columnCount} className="py-14 text-center text-neutral-500">
+                  <div className="flex flex-col items-center gap-2.5">
+                    <span>
+                      {category === "lost"
+                        ? "No lost client records found matching the active filters."
+                        : `No active renewal policies found for ${selectedMonth === "all" ? selectedYear : selectedMonth}.`}
+                    </span>
+                    {hasActiveFilters && onResetFilters && (
+                      <button
+                        type="button"
+                        onClick={onResetFilters}
+                        className="rounded-md border border-neutral-300 bg-white px-3 py-1 text-xs font-semibold text-neutral-800 hover:bg-neutral-50 cursor-pointer shadow-2xs"
+                      >
+                        Reset Filters
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ) : (

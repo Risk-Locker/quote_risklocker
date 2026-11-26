@@ -102,9 +102,18 @@ def apply_gemini_result(
     brand_verdict: dict[str, Any] | None = None,
 ) -> None:
     """Apply Gemini AI extraction results to draft, extraction record, tracked vehicle, and catalog."""
+    from sqlalchemy import func
+    from sqlalchemy.orm.attributes import flag_modified
     from app.domain.motor.discount_calculator import calculate_motor_discount, to_decimal_clean
-    from app.extraction.draft_mapper import reconcile_vehicle_capacity_and_fees
-    from app.models.tables import TrackedVehicle
+    from app.extraction.candidate_finder import is_blocked_vehicle_field_value
+    from app.extraction.draft_mapper import normalize_vehicle_model_text, reconcile_vehicle_capacity_and_fees
+    from app.models.tables import InsuranceTenure, TrackedVehicle
+    from app.services.insurance_tenure_service import (
+        is_valid_chassis,
+        normalize_chassis,
+        record_vehicle_plate_history,
+    )
+    from app.services.vehicle_tracking_service import is_valid_malaysian_plate, normalize_plate
 
     _SKIP_KEYS = {
         "detected_benefits",
@@ -127,12 +136,55 @@ def apply_gemini_result(
     fields = dict(draft.fields or {})
     preserved_pct = to_decimal_clean(fields.get("motor_discount_pct"), Decimal("0.00"))
     preserved_flat = to_decimal_clean(fields.get("quotation_discount"), Decimal("0.00"))
+
+    # Clear stale blocked/hallucinated vehicle fields whenever Gemini returns blank OR existing value is a label placeholder
+    _vehicle_auth_keys = {"vehicle_no", "car_brand", "car_model", "chassis_no", "engine_no"}
+    for auth_key in _vehicle_auth_keys:
+        existing_entry = fields.get(auth_key)
+        existing_val = str(existing_entry.get("value") if isinstance(existing_entry, dict) else (existing_entry or "")).strip()
+        gem_has_key = auth_key in gemini_res
+        gem_val = gemini_res.get(auth_key)
+        gem_blank = gem_val is None or str(gem_val).strip() == ""
+        should_clear = (
+            (gem_has_key and gem_blank)
+            or is_blocked_vehicle_field_value(existing_val)
+            or (auth_key == "vehicle_no" and bool(existing_val) and not is_valid_malaysian_plate(existing_val))
+        )
+        if should_clear and auth_key in fields:
+            if isinstance(existing_entry, dict):
+                fields[auth_key] = {**existing_entry, "value": "", "status": "ready", "message": ""}
+            else:
+                fields[auth_key] = ""
+
     for key, val in gemini_res.items():
         if key in _SKIP_KEYS or val is None:
             continue
         clean_val = str(val).strip()
-        if clean_val:
-            fields[key] = {"value": clean_val, "status": "ready", "message": ""}
+        if not clean_val:
+            continue
+        if key in _vehicle_auth_keys and is_blocked_vehicle_field_value(clean_val):
+            continue
+        if key == "vehicle_no" and not is_valid_malaysian_plate(clean_val):
+            continue
+        fields[key] = {"value": clean_val, "status": "ready", "message": ""}
+
+    # Normalize car_model so stale field-label prefixes or blocked brands never linger
+    raw_brand_v = str((fields.get("car_brand") or {}).get("value") if isinstance(fields.get("car_brand"), dict) else (fields.get("car_brand") or "")).strip()
+    raw_model_v = str((fields.get("car_model") or {}).get("value") if isinstance(fields.get("car_model"), dict) else (fields.get("car_model") or "")).strip()
+    if raw_model_v:
+        clean_model_v = normalize_vehicle_model_text(raw_model_v, raw_brand_v or None)
+        if clean_model_v:
+            fields["car_model"] = {"value": clean_model_v, "status": "ready", "message": ""}
+
+    # Unregistered vehicle fallback: if vehicle_no has no valid Malaysian plate, fall back to bare normalized chassis_no
+    cur_vno = str((fields.get("vehicle_no") or {}).get("value") if isinstance(fields.get("vehicle_no"), dict) else (fields.get("vehicle_no") or "")).strip()
+    cur_chassis = str((fields.get("chassis_no") or {}).get("value") if isinstance(fields.get("chassis_no"), dict) else (fields.get("chassis_no") or "")).strip()
+    clean_chassis = normalize_chassis(cur_chassis) if (cur_chassis and not is_blocked_vehicle_field_value(cur_chassis)) else ""
+    if is_valid_malaysian_plate(cur_vno):
+        norm_vno = normalize_plate(cur_vno)
+        fields["vehicle_no"] = {"value": norm_vno, "status": "ready", "message": ""}
+    elif is_valid_chassis(clean_chassis):
+        fields["vehicle_no"] = {"value": clean_chassis, "status": "ready", "message": ""}
 
     gemini_benefits = gemini_res.get("detected_benefits") or []
 
@@ -195,7 +247,9 @@ def apply_gemini_result(
     curr_opts["include_road_tax"] = str((fields.get("include_road_tax") or {}).get("value") or "true").lower() != "false"
     curr_opts["include_runner_fee"] = str((fields.get("include_runner_fee") or {}).get("value") or "true").lower() != "false"
     draft.display_options = curr_opts
+    flag_modified(draft, "display_options")
     draft.fields = fields
+    flag_modified(draft, "fields")
     draft.status = (
         RecordStatus.CHECK_NEEDED.value
         if accounting_verdict.quarantine_reason
@@ -221,12 +275,66 @@ def apply_gemini_result(
     if getattr(session, "tracked_vehicle_id", None):
         tv = db.get(TrackedVehicle, session.tracked_vehicle_id)
         if tv:
-            if (fields.get("car_brand") or {}).get("value"):
-                tv.car_brand = str(fields["car_brand"]["value"])
-            if (fields.get("car_model") or {}).get("value"):
-                tv.car_model = str(fields["car_model"]["value"])
-            if (fields.get("engine_cc") or {}).get("value"):
-                tv.engine_cc = str(fields["engine_cc"]["value"])
+            f_brand = str((fields.get("car_brand") or {}).get("value") or "").strip()
+            f_model = str((fields.get("car_model") or {}).get("value") or "").strip()
+            f_cc = str((fields.get("engine_cc") or {}).get("value") or "").strip()
+            f_chassis = str((fields.get("chassis_no") or {}).get("value") or "").strip()
+            f_engine = str((fields.get("engine_no") or {}).get("value") or "").strip()
+            f_vno = str((fields.get("vehicle_no") or {}).get("value") or "").strip()
+
+            if f_brand and not is_blocked_vehicle_field_value(f_brand):
+                tv.car_brand = f_brand
+            elif tv.car_brand and is_blocked_vehicle_field_value(tv.car_brand):
+                tv.car_brand = None
+            if f_model and not is_blocked_vehicle_field_value(f_model):
+                tv.car_model = f_model
+            elif tv.car_model and is_blocked_vehicle_field_value(tv.car_model):
+                tv.car_model = None
+            if f_cc:
+                tv.engine_cc = f_cc
+            if f_chassis and not is_blocked_vehicle_field_value(f_chassis) and not tv.chassis_no:
+                tv.chassis_no = normalize_chassis(f_chassis) or f_chassis
+            if f_engine and not is_blocked_vehicle_field_value(f_engine):
+                tv.engine_no = f_engine
+            elif tv.engine_no and is_blocked_vehicle_field_value(tv.engine_no):
+                tv.engine_no = None
+
+            tv_vno_bad = (
+                not tv.vehicle_no
+                or is_blocked_vehicle_field_value(tv.vehicle_no)
+                or str(tv.vehicle_no).upper().startswith("CHASSIS")
+                or str(tv.vehicle_no).upper().startswith("ENGINE")
+                or str(tv.vehicle_no).upper().startswith("UNPLATED")
+            )
+            target_vno = normalize_plate(f_vno) if is_valid_malaysian_plate(f_vno) else (clean_chassis if is_valid_chassis(clean_chassis) else "")
+            if target_vno and tv_vno_bad:
+                collision = db.scalar(
+                    select(TrackedVehicle).where(
+                        func.upper(func.replace(TrackedVehicle.vehicle_no, " ", "")) == target_vno,
+                        TrackedVehicle.id != tv.id,
+                    )
+                )
+                if not collision:
+                    tv.vehicle_no = target_vno
+                    if is_valid_malaysian_plate(target_vno):
+                        record_vehicle_plate_history(
+                            db,
+                            tracked_vehicle=tv,
+                            new_plate=target_vno,
+                            source_tenure_id=getattr(session, "tenure_id", None),
+                        )
+            if getattr(session, "tenure_id", None):
+                tenure_obj = db.get(InsuranceTenure, session.tenure_id)
+                if tenure_obj and target_vno and tenure_obj.stage != "Close - Win" and not tenure_obj.covernote_session_id:
+                    t_bad = (
+                        not tenure_obj.vehicle_no
+                        or is_blocked_vehicle_field_value(tenure_obj.vehicle_no)
+                        or str(tenure_obj.vehicle_no).upper().startswith("CHASSIS")
+                        or str(tenure_obj.vehicle_no).upper().startswith("ENGINE")
+                        or str(tenure_obj.vehicle_no).upper().startswith("UNPLATED")
+                    )
+                    if t_bad:
+                        tenure_obj.vehicle_no = target_vno
 
     candidates = dict(extraction.candidates or {})
     if gemini_res.get("detected_packs"):

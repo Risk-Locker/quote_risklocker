@@ -14,7 +14,7 @@ from app.extraction.brand_logo_scanner import (
     render_page1_logo_crop,
     verify_brand_logo_with_vision,
 )
-from app.extraction.candidate_finder import find_candidates
+from app.extraction.candidate_finder import find_candidates, is_blocked_vehicle_field_value
 from app.extraction.benefit_lines import extract_benefit_lines, is_spurious_benefit_line
 from app.extraction.draft_mapper import build_draft
 from app.extraction.layout import detect_layout
@@ -199,13 +199,56 @@ class ExtractionOrchestrator:
                 priority=int(kwargs.get("priority", 100) or 100),
             )
             if gemini_res:
+                from app.services.vehicle_tracking_service import is_valid_malaysian_plate
+
                 winning_call = next((t for t in reversed(gemini_telemetry) if t.get("is_success")), None)
                 used_model = winning_call.get("model") if winning_call else "gemini"
                 method_summary.append(f"Gemini AI Extraction ({used_model})")
+
+                vision_authoritative_fields = {
+                    "vehicle_no",
+                    "car_brand",
+                    "car_model",
+                    "customer_name",
+                    "chassis_no",
+                    "engine_no",
+                    "cover_start_date",
+                    "cover_end_date",
+                }
+                brand_lookup = {
+                    re.sub(r"\s+", " ", str(b)).strip().lower()
+                    for b in (db_brands or [])
+                    if str(b).strip()
+                }
+                for auth_key in vision_authoritative_fields:
+                    if auth_key not in gemini_res:
+                        continue
+                    auth_val = gemini_res.get(auth_key)
+                    if auth_val is None or str(auth_val).strip() == "":
+                        existing_cands = candidates.get(auth_key, [])
+                        if auth_key == "vehicle_no":
+                            candidates[auth_key] = [
+                                c for c in existing_cands
+                                if is_valid_malaysian_plate(c.value) and not is_blocked_vehicle_field_value(c.value)
+                            ]
+                        elif auth_key == "car_brand":
+                            candidates[auth_key] = [
+                                c for c in existing_cands
+                                if brand_lookup
+                                and re.sub(r"\s+", " ", str(c.value)).strip().lower() in brand_lookup
+                                and not is_blocked_vehicle_field_value(c.value)
+                            ]
+                        else:
+                            candidates[auth_key] = []
+
                 for key, val in gemini_res.items():
                     if key in {"detected_benefits", "detected_package_name"} or val is None or str(val).strip() == "":
                         continue
                     clean_val = str(val).strip()
+                    if key in {"vehicle_no", "car_brand", "car_model", "chassis_no", "engine_no"} and is_blocked_vehicle_field_value(clean_val):
+                        continue
+                    if key == "vehicle_no" and not is_valid_malaysian_plate(clean_val):
+                        continue
                     keys_to_populate = [key]
                     if key in {"coverage_amount", "sum_insured"}:
                         keys_to_populate = ["coverage_amount", "sum_insured", "market_value", "agreed_value"]

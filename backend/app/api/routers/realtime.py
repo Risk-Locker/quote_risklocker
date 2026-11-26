@@ -17,13 +17,14 @@ from app.services.realtime_hub import format_sse_message, realtime_hub
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
 
-RealtimeScope = Literal["ledger", "comparison", "workspace", "sessions", "clients"]
+RealtimeScope = Literal["ledger", "comparison", "workspace", "sessions", "clients", "upload_runs"]
 
 
 class PresenceUpdateRequest(BaseModel):
     scope: RealtimeScope
     resource_id: str = Field(default="all", min_length=1, max_length=120)
     field: str | None = Field(default=None, max_length=120)
+    tab_id: str | None = Field(default=None, max_length=120)
 
 
 class PresenceClearRequest(BaseModel):
@@ -80,12 +81,17 @@ def get_realtime_presence(
     resource_id: str = Query(default="all", min_length=1, max_length=120),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Read-only snapshot of active editors + current realtime revision."""
+    """Read-only snapshot of active editors + per-resource realtime revision."""
     _ = user
+    state = realtime_hub.get_resource_state(scope, resource_id)
     return {
         "scope": scope,
         "resource_id": resource_id,
-        "version": realtime_hub.current_version(),
+        "version": state["version"],
+        "last_origin_tab_id": state["last_origin_tab_id"],
+        "last_actor_id": state["last_actor_id"],
+        "last_actor_name": state["last_actor_name"],
+        "last_summary": state["last_summary"],
         "active_editors": realtime_hub.get_presence(scope, resource_id),
     }
 
@@ -104,6 +110,7 @@ def update_realtime_presence(
         user_email=user.email,
         user_name=user.name or user.email,
         field=payload.field.strip() if payload.field else None,
+        tab_id=payload.tab_id.strip() if payload.tab_id else None,
     )
     return {
         "ok": True,

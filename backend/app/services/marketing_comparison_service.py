@@ -1236,17 +1236,36 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
     veh_yom = waterfall_yom or (getattr(tenure.tracked_vehicle, "manufacture_year", None) if tenure.tracked_vehicle else None)
     veh_seating = "5"
 
+    from app.extraction.candidate_finder import is_blocked_vehicle_field_value
+    from app.services.insurance_tenure_service import is_valid_chassis, normalize_chassis
+    from app.services.vehicle_tracking_service import is_valid_malaysian_plate
+
+    if veh_engine_no and is_blocked_vehicle_field_value(veh_engine_no):
+        veh_engine_no = ""
+    if veh_chassis_no and is_blocked_vehicle_field_value(veh_chassis_no):
+        veh_chassis_no = ""
+
+    clean_chassis_display = normalize_chassis(veh_chassis_no)
     clean_final_plate = re.sub(r"\s+", "", (veh_plate or "").upper())
     is_plate_undetected = (
         not veh_plate
-        or clean_final_plate in ("UNREGISTERED", "NEW", "UNKNOWN", "N/A", "PENDING", "-", "--", "")
+        or is_blocked_vehicle_field_value(veh_plate)
+        or clean_final_plate in ("UNREGISTERED", "NEW", "UNKNOWN", "N/A", "PENDING", "-", "--", "", "NOTSTATED", "CUBICCAPACITY")
         or clean_final_plate.startswith("RM")
+        or clean_final_plate.startswith("CHASSIS")
+        or clean_final_plate.startswith("ENGINE")
+        or clean_final_plate.startswith("UNPLATED")
+        or not is_valid_malaysian_plate(clean_final_plate)
     )
-    final_plate_display = "N/A" if is_plate_undetected else clean_final_plate
-    tracking_by_chassis = bool(is_plate_undetected and veh_chassis_no)
+    if is_plate_undetected and is_valid_chassis(clean_chassis_display):
+        final_plate_display = clean_chassis_display
+        tracking_by_chassis = True
+    else:
+        final_plate_display = "N/A" if is_plate_undetected else clean_final_plate
+        tracking_by_chassis = bool(is_plate_undetected and clean_chassis_display)
 
     effective_cust_name = cust_name or tenure.customer_name
-    effective_veh_no = final_plate_display if final_plate_display != "N/A" else tenure.vehicle_no
+    effective_veh_no = final_plate_display if final_plate_display != "N/A" else (clean_chassis_display or tenure.vehicle_no)
 
     if cust_name and tenure.customer_name != cust_name:
         if allow_commit:
@@ -1307,13 +1326,14 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
                 tenure.tracked_vehicle.manufacture_year = veh_yom
             needs_commit = True
         tv_clean = re.sub(r"\s+", "", (tenure.tracked_vehicle.vehicle_no or "").upper())
-        if final_plate_display != "N/A" and tv_clean != clean_final_plate:
+        target_tv_clean = re.sub(r"\s+", "", final_plate_display.upper())
+        if final_plate_display != "N/A" and tv_clean != target_tv_clean:
             if allow_commit:
                 existing_other_veh = db.scalar(
                     select(TrackedVehicle).where(
                         or_(
                             TrackedVehicle.vehicle_no == final_plate_display,
-                            func.replace(TrackedVehicle.vehicle_no, " ", "") == clean_final_plate,
+                            func.replace(TrackedVehicle.vehicle_no, " ", "") == target_tv_clean,
                         ),
                         TrackedVehicle.id != tenure.tracked_vehicle.id,
                     )
