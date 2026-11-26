@@ -74,7 +74,8 @@ export function ManualQuoteModal({
   const [excess, setExcess] = useState("0");
   const [windscreen, setWindscreen] = useState("");
   const [specialPerils, setSpecialPerils] = useState("");
-  const [llpLlop, setLlpLlop] = useState("");
+  const [llp, setLlp] = useState("");
+  const [llop, setLlop] = useState("");
   const [notes, setNotes] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -121,7 +122,8 @@ export function ManualQuoteModal({
       setExcess(initialData.excess !== undefined && initialData.excess !== null ? String(initialData.excess) : "0");
       setWindscreen(initialData.windscreen_sum_insured ? String(initialData.windscreen_sum_insured) : "");
       setSpecialPerils(initialData.special_perils || "");
-      setLlpLlop(initialData.llp_llop || "");
+      setLlp(initialData.llp || "");
+      setLlop(initialData.llop || "");
       setNotes(initialData.notes || "");
 
       // Breakdown & Rating fields
@@ -153,7 +155,8 @@ export function ManualQuoteModal({
       setExcess("0");
       setWindscreen("");
       setSpecialPerils("");
-      setLlpLlop("");
+      setLlp("");
+      setLlop("");
       setNotes("");
       setBasicFigureAmount("");
       setBasicFigureName("Basic Premium");
@@ -249,7 +252,9 @@ export function ManualQuoteModal({
         excess: parseFloat(excess) || 0,
         windscreen_sum_insured: windscreen ? parseFloat(windscreen) : null,
         special_perils: specialPerils || null,
-        llp_llop: llpLlop || null,
+        llp: llp || null,
+        llop: llop || null,
+        llp_llop: llp || llop ? "Included" : null,
         notes: notes || null,
         basic_figure_amount: basicFigureAmount ? parseFloat(basicFigureAmount) : undefined,
         source_quotation_no: sourceQuotationNo ? sourceQuotationNo.trim() : undefined,
@@ -743,7 +748,7 @@ export function ManualQuoteModal({
             </div>
 
             {/* Special Perils & Legal Liability */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
                   Special Perils / Flood
@@ -759,13 +764,26 @@ export function ManualQuoteModal({
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
-                  LLP / LLOP (Passenger)
+                  LLP (To Passengers)
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Included or RM 30.00"
-                  value={llpLlop}
-                  onChange={(e) => setLlpLlop(e.target.value)}
+                  placeholder="e.g. Included"
+                  value={llp}
+                  onChange={(e) => setLlp(e.target.value)}
+                  className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#6e6e73] mb-1.5">
+                  LLOP (Of Passengers)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Included"
+                  value={llop}
+                  onChange={(e) => setLlop(e.target.value)}
                   className="w-full rounded-lg border border-[#e5e5ea] bg-white px-3 py-2 text-sm text-[#1b1717] focus:outline-none focus:ring-2 focus:ring-[#1b1717]"
                 />
               </div>

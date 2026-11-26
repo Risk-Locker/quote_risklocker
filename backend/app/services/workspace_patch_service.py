@@ -742,11 +742,13 @@ def _reset_conditional_targets_for_trigger(
     trigger_concept_id: str | None,
     *,
     trigger_selection: DraftBenefitSelection | None = None,
+    force_reset_bundle_target: bool = False,
 ) -> None:
     """Clear temporary overrides on target benefits when a trigger add-on or bundle changes plan or is removed."""
     if (not trigger_concept_id and trigger_selection is None) or not getattr(draft, "company_id", None):
         return
     target_ids: set[str] = set()
+    bundle_target_ids: set[str] = set()
     if trigger_concept_id:
         try:
             conds = list(
@@ -774,7 +776,9 @@ def _reset_conditional_targets_for_trigger(
                 for t in list(getattr(b, "tiers", None) or []):
                     for eff in list(getattr(t, "effects", None) or []):
                         if getattr(eff, "target_concept_id", None):
-                            target_ids.add(str(eff.target_concept_id))
+                            tc_str = str(eff.target_concept_id)
+                            target_ids.add(tc_str)
+                            bundle_target_ids.add(tc_str)
     except Exception:
         pass
     if not target_ids:
@@ -782,9 +786,15 @@ def _reset_conditional_targets_for_trigger(
     all_sels = _draft_selections_with_pending(db, draft.id)
     for sel in all_sels:
         if sel.concept_id and str(sel.concept_id) in target_ids:
-            ev_s = sel.evidence_snapshot if isinstance(sel.evidence_snapshot, dict) else {}
-            if str(ev_s.get("source") or "").lower() == "manual" or ev_s.get("manually_edited"):
-                continue
+            ev_s = dict(sel.evidence_snapshot or {}) if isinstance(sel.evidence_snapshot, dict) else {}
+            is_manual_target = str(ev_s.get("source") or "").lower() == "manual" or bool(ev_s.get("manually_edited"))
+            if is_manual_target:
+                if not (force_reset_bundle_target and str(sel.concept_id) in bundle_target_ids):
+                    continue
+                ev_s.pop("manually_edited", None)
+                if str(ev_s.get("source") or "").lower() == "manual":
+                    ev_s["source"] = "bundle_reset"
+                sel.evidence_snapshot = ev_s
             if sel.item_kind == "catalog":
                 sel.label_override = None
             sel.typed_value_override = None
@@ -808,7 +818,7 @@ def _clear_bundle_tier_metadata(selection: DraftBenefitSelection) -> None:
     """Clear selected bundle tier and uncertain review metadata when a bundle is unticked/removed."""
     selection.bundle_tier_id = None
     ev = dict(selection.evidence_snapshot or {}) if isinstance(selection.evidence_snapshot, dict) else {}
-    for k in ("bundle_id", "plan_tier", "plan_tier_uncertain", "needs_review_reason"):
+    for k in ("bundle_id", "plan_tier", "plan_tier_uncertain", "needs_review_reason", "deactivated_by_comparison_sync"):
         ev.pop(k, None)
     selection.evidence_snapshot = ev
 
@@ -846,6 +856,7 @@ def _apply_bundle_tier_fields(
         ev["plan_tier"] = tier.label
         ev["plan_tier_uncertain"] = False
         ev.pop("needs_review_reason", None)
+        ev.pop("deactivated_by_comparison_sync", None)
         selection.evidence_snapshot = ev
         return True
 
@@ -1024,7 +1035,13 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
         for conflict in current_conflicts:
             conflict.state = ReviewedBenefitState.REMOVED.value
     if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
-        _reset_conditional_targets_for_trigger(db, draft, selected.concept_id, trigger_selection=selected)
+        _reset_conditional_targets_for_trigger(
+            db,
+            draft,
+            selected.concept_id,
+            trigger_selection=selected,
+            force_reset_bundle_target=bool(tier_changed or "bundle_tier_id" in operation or "state" in operation),
+        )
     return f"benefits.{selected.id}"
 
 
@@ -1132,7 +1149,13 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
     selection.selected_by = user.id
     _ensure_selection_row_invariants(selection)
     if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
-        _reset_conditional_targets_for_trigger(db, draft, selection.concept_id, trigger_selection=selection)
+        _reset_conditional_targets_for_trigger(
+            db,
+            draft,
+            selection.concept_id,
+            trigger_selection=selection,
+            force_reset_bundle_target=bool(tier_changed or "bundle_tier_id" in operation or "state" in operation),
+        )
     return f"benefits.{selection.id}"
 
 
@@ -1157,7 +1180,13 @@ def _apply_revert_benefit(db, draft: QuotationDraft, user, operation: dict) -> s
         predecessors[0].state = ReviewedBenefitState.CURRENT.value
         predecessors[0].superseded_by_id = None
         predecessors[0].selected_by = user.id
-    _reset_conditional_targets_for_trigger(db, draft, selection.concept_id)
+    _reset_conditional_targets_for_trigger(
+        db,
+        draft,
+        selection.concept_id,
+        trigger_selection=selection,
+        force_reset_bundle_target=True,
+    )
     return f"benefits.{selection.id}"
 
 

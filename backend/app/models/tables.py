@@ -408,6 +408,8 @@ class TenureComparisonEntry(Base, TimestampMixin):
     windscreen_sum_insured: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     special_perils: Mapped[str | None] = mapped_column(String(50), nullable=True)
     llp_llop: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llp: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llop: Mapped[str | None] = mapped_column(String(50), nullable=True)
     personal_accident: Mapped[str | None] = mapped_column(String(50), nullable=True)
     extra_addons: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"), nullable=False)
     rank: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)

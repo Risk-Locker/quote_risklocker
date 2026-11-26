@@ -65,7 +65,8 @@ export function EditCoverNoteModal({
   const [windscreen, setWindscreen] = useState("");
   const [towingLimit, setTowingLimit] = useState("Unlimited");
   const [specialPerils, setSpecialPerils] = useState<"Included" | "Not Included">("Not Included");
-  const [llpLlop, setLlpLlop] = useState<"Included" | "Not Included">("Not Included");
+  const [llp, setLlp] = useState<"Included" | "Not Included">("Not Included");
+  const [llop, setLlop] = useState<"Included" | "Not Included">("Not Included");
   const [waiverBetterment, setWaiverBetterment] = useState(false);
   const [bettermentRate, setBettermentRate] = useState<number | null>(null);
   const [bettermentMode, setBettermentMode] = useState<"auto" | "waived" | "no" | "copay">("auto");
@@ -107,8 +108,13 @@ export function EditCoverNoteModal({
         ? "Included"
         : "Not Included"
     );
-    setLlpLlop(
-      covernotePolicy.llp_llop && !String(covernotePolicy.llp_llop).toLowerCase().includes("not")
+    setLlp(
+      covernotePolicy.llp && !String(covernotePolicy.llp).toLowerCase().includes("not")
+        ? "Included"
+        : "Not Included"
+    );
+    setLlop(
+      covernotePolicy.llop && !String(covernotePolicy.llop).toLowerCase().includes("not")
         ? "Included"
         : "Not Included"
     );
@@ -172,11 +178,8 @@ export function EditCoverNoteModal({
     setIncludedPerils(nextPerils);
     const upperSet = new Set(nextPerils.map((p) => p.toUpperCase()));
     setSpecialPerils(upperSet.has("FLOOD") ? "Included" : "Not Included");
-    if (upperSet.has("LLP") || upperSet.has("LLOP")) {
-      setLlpLlop("Included");
-    } else {
-      setLlpLlop("Not Included");
-    }
+    setLlp(upperSet.has("LLP") ? "Included" : "Not Included");
+    setLlop(upperSet.has("LLOP") ? "Included" : "Not Included");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -237,7 +240,9 @@ export function EditCoverNoteModal({
       windscreen_sum_insured: parsedWs,
       towing_limit: towingLimit.trim() || "Unlimited",
       special_perils: specialPerils,
-      llp_llop: llpLlop,
+      llp: llp,
+      llop: llop,
+      llp_llop: llp === "Included" || llop === "Included" ? "Included" : "Not Included",
       included_perils: includedPerils,
       extra_addons: extraAddons,
       betterment_mode: bettermentMode,
@@ -518,7 +523,7 @@ export function EditCoverNoteModal({
 
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)] mb-1">
-                LLP / LLOP
+                LLP (To Passengers)
               </label>
               <div className="grid grid-cols-2 gap-1.5">
                 {(["Included", "Not Included"] as const).map((opt) => (
@@ -526,15 +531,42 @@ export function EditCoverNoteModal({
                     key={opt}
                     type="button"
                     onClick={() => {
-                      setLlpLlop(opt);
+                      setLlp(opt);
                       setIncludedPerils((prev) =>
                         opt === "Included"
                           ? Array.from(new Set([...prev, "LLP"]))
-                          : prev.filter((p) => p !== "LLP" && p !== "LLOP")
+                          : prev.filter((p) => p !== "LLP")
                       );
                     }}
                     className={`py-2 px-2 rounded-[var(--rl-radius-sm)] text-xs font-semibold border cursor-pointer ${
-                      llpLlop === opt ? "bg-[#1b1717] text-white border-[#1b1717]" : "bg-[#f5f5f7] text-[#1b1717] border-[#e5e5ea]"
+                      llp === opt ? "bg-[#1b1717] text-white border-[#1b1717]" : "bg-[#f5f5f7] text-[#1b1717] border-[#e5e5ea]"
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)] mb-1">
+                LLOP (Of Passengers)
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(["Included", "Not Included"] as const).map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => {
+                      setLlop(opt);
+                      setIncludedPerils((prev) =>
+                        opt === "Included"
+                          ? Array.from(new Set([...prev, "LLOP"]))
+                          : prev.filter((p) => p !== "LLOP")
+                      );
+                    }}
+                    className={`py-2 px-2 rounded-[var(--rl-radius-sm)] text-xs font-semibold border cursor-pointer ${
+                      llop === opt ? "bg-[#1b1717] text-white border-[#1b1717]" : "bg-[#f5f5f7] text-[#1b1717] border-[#e5e5ea]"
                     }`}
                   >
                     {opt}

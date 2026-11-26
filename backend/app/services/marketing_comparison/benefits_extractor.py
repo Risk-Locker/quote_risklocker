@@ -111,6 +111,8 @@ _SCALAR_REVIEW_FIELD_MAP: dict[str, str] = {
     "windscreen": "windscreen_sum_insured",
     "windscreen_sum_insured": "windscreen_sum_insured",
     "special_perils": "special_perils",
+    "llp": "llp",
+    "llop": "llop",
     "llp_llop": "llp_llop",
     "valuation_type": "valuation_type",
     "waiver_of_betterment": "waiver_betterment",
@@ -1060,8 +1062,11 @@ def _resolve_comparison_benefits(
             matched.add("windscreen")
         if any(w in blob for w in ("special-peril", "special_peril", "special peril", "flood", "banjir", "peril khas")):
             matched.add("special-perils")
-        if any(w in blob for w in ("legal-liability", "liability to passenger", "liability of passenger", "llp", "llop", "lltp")):
-            matched.add("llp_llop")
+        if any(w in blob for w in ("legal-liability-of-passengers", "legal_liability_of_passengers", "legal liability of passenger", "liability of passenger", "negligent act", "llna")) or re.search(r"\bllop\b", blob):
+            matched.add("llop")
+        blob_no_llna = re.sub(r"\bllp\s+for\s+negligent\s+acts?\b", " ", blob)
+        if any(w in blob_no_llna for w in ("legal-liability-to-passengers", "legal_liability_to_passengers", "legal liability to passenger", "liability to passenger", "lltp")) or (re.search(r"\bllp\b", blob_no_llna) and "llop" not in matched):
+            matched.add("llp")
         if "betterment" in blob:
             matched.add("betterment")
         if any(w in blob for w in ("ehailing", "e-hailing", "e hailing", "private hire")):
@@ -1165,7 +1170,7 @@ def _resolve_comparison_benefits(
                                 tokens.append(str(bl[bk]))
 
     # 3. Add clean scalar fields text (ignore raw JSON/evidence blocks)
-    for k in ("special_perils", "optional_covers", "benefits_selected", "extra_benefits", "llp_llop", "towing", "towing_limit", "windscreen_coverage", "windscreen_sum_insured"):
+    for k in ("special_perils", "optional_covers", "benefits_selected", "extra_benefits", "llp", "llop", "llp_llop", "towing", "towing_limit", "windscreen_coverage", "windscreen_sum_insured"):
         val = f.get(k)
         if val:
             if isinstance(val, dict):
@@ -1328,33 +1333,64 @@ def _resolve_comparison_benefits(
         if windscreen_target and _is_valid_windscreen_amt(float(windscreen_target)):
             windscreen_amount = float(windscreen_target)
 
-    # --- LLP / LLOP ---
-    llp_field_raw = f.get("llp_llop")
-    llp_manual_override = isinstance(llp_field_raw, dict) and llp_field_raw.get("status") == "manual_override"
-    if "llp_llop" in disabled_domains and not llp_manual_override:
+    # --- LLP & LLOP (Separated) ---
+    _llp_exclude_re = re.compile(
+        r"\b(?:offence\s+under\s+the\s+law|without\s+extending|against\s+claims\s+from\s+passengers|"
+        r"excludes?|not\s+covered|not\s+included|tidak\s+termasuk)\b",
+        re.IGNORECASE,
+    )
+    _llp_pos_re = re.compile(
+        r"\b(?:legal\s+liability\s+to\s+passenger|liability\s+to\s+passenger|lltp|llp)\b",
+        re.IGNORECASE,
+    )
+    _llop_pos_re = re.compile(
+        r"\b(?:legal\s+liability\s+of\s+passenger|liability\s+of\s+passenger|"
+        r"llp\s+for\s+negligent\s+acts?|negligent\s+act|llop|llna)\b",
+        re.IGNORECASE,
+    )
+
+    llp_only_raw = f.get("llp")
+    llp_only_manual = isinstance(llp_only_raw, dict) and llp_only_raw.get("status") == "manual_override"
+    llop_only_raw = f.get("llop")
+    llop_only_manual = isinstance(llop_only_raw, dict) and llop_only_raw.get("status") == "manual_override"
+    llp_comb_raw = f.get("llp_llop")
+    llp_comb_manual = isinstance(llp_comb_raw, dict) and llp_comb_raw.get("status") == "manual_override"
+
+    if "llp" in disabled_domains and not llp_only_manual:
         has_llp = False
-    elif llp_manual_override:
-        has_llp = is_special_perils_value_included(llp_field_raw.get("value"))
-    elif "llp_llop" in active_domains or bool({"100", "72"}.intersection(end_tokens)) or bool(re.search(r"\b(?:endorsement|endt?\.?)\s*(?:100|72)\b", combined_text)):
+    elif llp_only_manual:
+        has_llp = is_special_perils_value_included(llp_only_raw.get("value"))
+    elif "llp" in active_domains or "100" in end_tokens or bool(re.search(r"\b(?:endorsement|endt?\.?)\s*100\b", combined_text)):
         has_llp = True
     else:
-        _llp_exclude_re = re.compile(
-            r"\b(?:offence\s+under\s+the\s+law|without\s+extending|against\s+claims\s+from\s+passengers|"
-            r"excludes?|not\s+covered|not\s+included|tidak\s+termasuk)\b",
-            re.IGNORECASE,
-        )
-        _llp_pos_re = re.compile(
-            r"\b(?:legal\s+liability\s+to\s+passenger|legal\s+liability\s+of\s+passenger|"
-            r"liability\s+to\s+passenger|liability\s+of\s+passenger|llp|llop|lltp)\b",
-            re.IGNORECASE,
-        )
         has_llp = any(
-            _llp_pos_re.search(ln) and not _llp_exclude_re.search(ln)
+            _llp_pos_re.search(re.sub(r"\bllp\s+for\s+negligent\s+acts?\b", " ", ln, flags=re.IGNORECASE))
+            and not _llp_exclude_re.search(ln)
             for tok in tokens
             for ln in str(tok).splitlines()
             if ln.strip()
         )
+
+    if "llop" in disabled_domains and not llop_only_manual:
+        has_llop = False
+    elif llop_only_manual:
+        has_llop = is_special_perils_value_included(llop_only_raw.get("value"))
+    elif "llop" in active_domains or "72" in end_tokens or bool(re.search(r"\b(?:endorsement|endt?\.?)\s*72\b", combined_text)):
+        has_llop = True
+    else:
+        has_llop = any(
+            _llop_pos_re.search(ln) and not _llp_exclude_re.search(ln)
+            for tok in tokens
+            for ln in str(tok).splitlines()
+            if ln.strip()
+        )
+
     llp_val = "Included" if has_llp else None
+    llop_val = "Included" if has_llop else None
+    if not llp_only_manual and not llop_only_manual and llp_comb_manual:
+        llp_llop_val = "Included" if is_special_perils_value_included(llp_comb_raw.get("value")) else None
+    else:
+        llp_llop_val = "Included" if (has_llp or has_llop) else None
 
     # --- TOWING ---
     from app.domain.quote_sync_engine import resolve_session_company_id
@@ -1399,6 +1435,8 @@ def _resolve_comparison_benefits(
     # Resolve authoritative active DB CompanyBenefitBundle towing upgrade before legacy fallback
     towing_field_raw = f.get("towing") or f.get("towing_limit")
     towing_manual_override = isinstance(towing_field_raw, dict) and towing_field_raw.get("status") == "manual_override"
+    disabled_bundle_aliases: list[str] = []
+    disabled_bundle_ids: set[str] = set()
     if not towing_manual_override and "towing" not in disabled_domains and target_comp_id:
         from app.models.tables import BenefitCatalog, BenefitCatalogRevision
         from app.services.bundle_plan_matcher import match_bundle_for_selection, match_bundle_for_text, resolve_bundle_tier
@@ -1424,16 +1462,34 @@ def _resolve_comparison_benefits(
                         ).scalar_one_or_none()
                         if rev_row:
                             cat_name = str(rev_row)
+            active_bundle_ids: set[str] = set()
             matched_bundle = None
             matched_sel = None
             for sel in selections:
                 mb = match_bundle_for_selection(sel, None, concepts.get(sel.concept_id) if sel.concept_id else None, comp_bundles, catalog_name=cat_name)
                 if mb is not None:
-                    matched_bundle = mb
-                    matched_sel = sel
-                    break
+                    active_bundle_ids.add(str(mb.id))
+                    if matched_bundle is None:
+                        matched_bundle = mb
+                        matched_sel = sel
+            inactive_bundle_ids: set[str] = set()
+            for sel in inactive_selections:
+                sel_ev_inact = getattr(sel, "evidence_snapshot", None)
+                if isinstance(sel_ev_inact, dict) and sel_ev_inact.get("deactivated_by_comparison_sync"):
+                    continue
+                mb_inact = match_bundle_for_selection(sel, None, concepts.get(sel.concept_id) if sel.concept_id else None, comp_bundles, catalog_name=cat_name)
+                if mb_inact is not None:
+                    inactive_bundle_ids.add(str(mb_inact.id))
+            disabled_bundle_ids = inactive_bundle_ids - active_bundle_ids
+            for b in comp_bundles:
+                if str(b.id) in disabled_bundle_ids:
+                    for al in (getattr(b, "name", None), getattr(b, "bundle_key", None), *(getattr(b, "match_aliases", None) or [])):
+                        al_s = str(al or "").strip().lower()
+                        if al_s and al_s not in disabled_bundle_aliases:
+                            disabled_bundle_aliases.append(al_s)
             if matched_bundle is None:
-                matched_bundle = match_bundle_for_text(combined_text, comp_bundles, catalog_name=cat_name)
+                eligible_bundles = [b for b in comp_bundles if str(b.id) not in disabled_bundle_ids]
+                matched_bundle = match_bundle_for_text(combined_text, eligible_bundles, catalog_name=cat_name)
             if matched_bundle is not None:
                 chosen_tier, is_unc = resolve_bundle_tier(
                     matched_bundle,
@@ -1520,6 +1576,19 @@ def _resolve_comparison_benefits(
         clean_towing = normalize_towing_km(raw_towing, combined_text="", company_name=comp_name_str)
     elif "towing" in disabled_domains and not towing_manual_override:
         clean_towing = "No towing"
+    elif (
+        bundle_towing_km
+        and towing_uncertain
+        and not disabled_bundle_ids
+        and (
+            (towing_sel_display and "unlimited" in towing_sel_display.lower())
+            or bool(re.search(r"\bunlimited\s+(?:towing|mileage|distance|auto\s+assistance)\b", combined_text))
+        )
+    ):
+        clean_towing = "Unlimited"
+        towing_uncertain = False
+        towing_uncertain_reason = None
+        selection_review_flags.pop("towing_limit", None)
     elif bundle_towing_km and not towing_manual_override:
         clean_towing = bundle_towing_km
     elif towing_sel_display and "unlimited" in towing_sel_display.lower() and not towing_manual_override:
@@ -1532,6 +1601,7 @@ def _resolve_comparison_benefits(
             extracted_towing=effective_ext_towing,
             catalog_display_value=towing_limit_val,
             company_obj=comp_obj,
+            disabled_bundle_aliases=disabled_bundle_aliases,
         )
         if clean_towing == "-":
             clean_towing = None
@@ -1625,7 +1695,7 @@ def _resolve_comparison_benefits(
             "is_included": True,
         })
 
-    if ("LLP" in canonical_perils_list or (llp_val and "LLOP" not in canonical_perils_list)) and not _is_peril_already_represented(("liability to passenger", "llp", "lltp", "negligent act")):
+    if ("LLP" in canonical_perils_list or llp_val) and not _is_peril_already_represented(("liability to passenger", "lltp", "legal liability to passengers")):
         seen_peril_names.add("legal liability to passengers (llp)")
         detailed_perils.append({
             "name": "Legal Liability to Passengers (LLP)",
@@ -1635,7 +1705,7 @@ def _resolve_comparison_benefits(
             "is_included": False,
         })
 
-    if ("LLOP" in canonical_perils_list or "llop" in combined_text or "72" in end_tokens) and not _is_peril_already_represented(("liability of passenger", "llop")):
+    if ("LLOP" in canonical_perils_list or llop_val) and not _is_peril_already_represented(("liability of passenger", "llop", "negligent act", "llna")):
         seen_peril_names.add("legal liability of passengers (llop)")
         detailed_perils.append({
             "name": "Legal Liability of Passengers (LLOP)",
@@ -1722,9 +1792,22 @@ def _resolve_comparison_benefits(
     sp_f = f.get("special_perils", {})
     if isinstance(sp_f, dict) and sp_f.get("status") == "manual_override":
         special_perils_val = str(sp_f.get("value") or "")
-    llp_f = f.get("llp_llop", {})
+    llp_f = f.get("llp", {})
     if isinstance(llp_f, dict) and llp_f.get("status") == "manual_override":
-        llp_val = str(llp_f.get("value") or "")
+        llp_val = str(llp_f.get("value") or "") or None
+    llop_f = f.get("llop", {})
+    if isinstance(llop_f, dict) and llop_f.get("status") == "manual_override":
+        llop_val = str(llop_f.get("value") or "") or None
+    llp_comb_f = f.get("llp_llop", {})
+    if (
+        isinstance(llp_comb_f, dict)
+        and llp_comb_f.get("status") == "manual_override"
+        and not (isinstance(llp_f, dict) and llp_f.get("status") == "manual_override")
+        and not (isinstance(llop_f, dict) and llop_f.get("status") == "manual_override")
+    ):
+        llp_llop_val = str(llp_comb_f.get("value") or "") or None
+    else:
+        llp_llop_val = "Included" if (llp_val or llop_val) else None
     ws_f = f.get("windscreen", {})
     if isinstance(ws_f, dict) and ws_f.get("status") == "manual_override":
         windscreen_amount = _to_float(ws_f)
@@ -1739,6 +1822,8 @@ def _resolve_comparison_benefits(
         base_benefits.append(EvaluatedBenefit(concept_id="special_perils", display_title="Special Perils (Flood & Storm)", display_description=special_perils_val))
     if llp_val:
         base_benefits.append(EvaluatedBenefit(concept_id="llp", display_title="Legal Liability to Passengers (LLP)", display_description=llp_val))
+    if llop_val:
+        base_benefits.append(EvaluatedBenefit(concept_id="llop", display_title="Legal Liability of Passengers (LLOP)", display_description=llop_val))
     if clean_towing:
         base_benefits.append(EvaluatedBenefit(concept_id="towing", display_title="Roadside Towing", display_description=clean_towing))
     for sel in selections:
@@ -1784,11 +1869,18 @@ def _resolve_comparison_benefits(
             if eval_map["special_perils"].is_modified:
                 special_perils_val = eval_map["special_perils"].display_description
                 
-        if "llp" not in eval_map:
+        if "llp" not in eval_map and not (isinstance(llp_f, dict) and llp_f.get("status") == "manual_override"):
             llp_val = None
-        else:
-            if eval_map["llp"].is_modified:
-                llp_val = eval_map["llp"].display_description
+        elif "llp" in eval_map and eval_map["llp"].is_modified and not (isinstance(llp_f, dict) and llp_f.get("status") == "manual_override"):
+            llp_val = eval_map["llp"].display_description
+
+        if "llop" not in eval_map and not (isinstance(llop_f, dict) and llop_f.get("status") == "manual_override"):
+            llop_val = None
+        elif "llop" in eval_map and eval_map["llop"].is_modified and not (isinstance(llop_f, dict) and llop_f.get("status") == "manual_override"):
+            llop_val = eval_map["llop"].display_description
+
+        if not (isinstance(llp_comb_f, dict) and llp_comb_f.get("status") == "manual_override"):
+            llp_llop_val = "Included" if (is_special_perils_value_included(llp_val) or is_special_perils_value_included(llop_val)) else None
                 
         if "towing" not in eval_map and not (isinstance(t_f, dict) and t_f.get("status") == "manual_override"):
             clean_towing = None
@@ -1811,10 +1903,16 @@ def _resolve_comparison_benefits(
                 elif eval_map["special_perils"].is_modified:
                     dp["name"] = eval_map["special_perils"].display_title if eval_map["special_perils"].display_title != "Special Perils (Flood & Storm)" else dp["name"]
                     dp["coverage_limit"] = eval_map["special_perils"].display_description
-            elif "llp" in n_lower or "liability to passenger" in n_lower:
-                if "llp" not in eval_map:
+            elif "llop" in n_lower or "liability of passenger" in n_lower:
+                if "llop" not in eval_map and not (isinstance(llop_f, dict) and llop_f.get("status") == "manual_override"):
                     dp["name"] = "HIDDEN"
-                elif eval_map["llp"].is_modified:
+                elif "llop" in eval_map and eval_map["llop"].is_modified:
+                    dp["name"] = eval_map["llop"].display_title if eval_map["llop"].display_title != "Legal Liability of Passengers (LLOP)" else dp["name"]
+                    dp["coverage_limit"] = eval_map["llop"].display_description
+            elif "llp" in n_lower or "liability to passenger" in n_lower:
+                if "llp" not in eval_map and not (isinstance(llp_f, dict) and llp_f.get("status") == "manual_override"):
+                    dp["name"] = "HIDDEN"
+                elif "llp" in eval_map and eval_map["llp"].is_modified:
                     dp["name"] = eval_map["llp"].display_title if eval_map["llp"].display_title != "Legal Liability to Passengers (LLP)" else dp["name"]
                     dp["coverage_limit"] = eval_map["llp"].display_description
 
@@ -1842,8 +1940,8 @@ def _resolve_comparison_benefits(
             (ws_explicitly_removed or windscreen_amount is None, "WINDSCREEN"),
             ("towing" in disabled_domains or (clean_towing or "").lower() == "no towing", "TOWING"),
             (not has_special_perils, "FLOOD"),
-            (not has_llp, "LLP"),
-            (not has_llp, "LLOP"),
+            (not is_special_perils_value_included(llp_val), "LLP"),
+            (not is_special_perils_value_included(llop_val), "LLOP"),
             ("betterment" in disabled_domains or (isinstance(f.get("waiver_of_betterment"), dict) and f["waiver_of_betterment"].get("status") == "manual_override" and str(f["waiver_of_betterment"].get("value") or "").lower() != "included"), "BETTERMENT"),
             (extra_addons_map.get("ehailing") != "Yes", "E-HAILING"),
             ("srcc" in disabled_domains or extra_addons_map.get("srcc") != "Yes", "SRCC"),
@@ -1858,7 +1956,9 @@ def _resolve_comparison_benefits(
     return {
         "special_perils": special_perils_val,
         "windscreen_sum_insured": windscreen_amount,
-        "llp_llop": llp_val,
+        "llp": llp_val,
+        "llop": llop_val,
+        "llp_llop": llp_llop_val,
         "towing_limit": clean_towing,
         "towing_km": clean_towing,
         "towing_uncertain": towing_uncertain,

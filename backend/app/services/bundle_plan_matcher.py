@@ -194,6 +194,41 @@ def match_tier_from_text(bundle: Any, raw_text: str) -> tuple[Any | None, bool]:
             if re.search(rf"\b{re.escape(norm_c)}\b", padded_norm):
                 return tier, False
 
+    # Pass 3: match against tier effect towing limits (non-fallback tiers first, highest sort_order first)
+    neg_unlim_re = re.compile(r"\b(?:not|no|non|without)\s+unlimited\b", re.IGNORECASE)
+    pass3_tiers = sorted(
+        tiers,
+        key=lambda t: (1 if getattr(t, "is_default_fallback", False) else 0, -int(getattr(t, "sort_order", 0) or 0)),
+    )
+    for tier in pass3_tiers:
+        for eff in sorted(list(getattr(tier, "effects", None) or []), key=lambda x: int(getattr(x, "sort_order", 0) or 0)):
+            eff_type = str(getattr(eff, "effect_type", "") or "")
+            if eff_type not in ("upgrade_to_box2", "add_to_box2"):
+                continue
+            title = str(getattr(eff, "display_title", "") or "")
+            cv = str(getattr(eff, "comparison_value", "") or "")
+            if "towing" not in title.lower() and not cv:
+                continue
+            eff_blob = f"{cv} {title}".lower()
+            if "unlimited" in eff_blob:
+                if (
+                    re.search(r"\bunlimited(?:\s+(?:towing|mileage|distance|km|auto\s+assistance))?\b", padded_norm)
+                    and not neg_unlim_re.search(range_free)
+                ):
+                    return tier, False
+                continue
+            m_km = re.search(r"\b(\d+)\s*km\b", eff_blob)
+            if m_km:
+                num = re.escape(m_km.group(1))
+                if re.search(rf"\b{num}\s*km\b", padded_norm):
+                    return tier, False
+                continue
+            m_rm = re.search(r"\b(?:rm|myr)\s*([\d,]+)\b", eff_blob)
+            if m_rm:
+                num = re.escape(m_rm.group(1).replace(",", ""))
+                if re.search(rf"\b(?:rm|myr)\s*{num}\b", padded_norm):
+                    return tier, False
+
     return fallback, True
 
 

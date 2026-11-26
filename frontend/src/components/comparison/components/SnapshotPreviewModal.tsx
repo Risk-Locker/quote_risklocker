@@ -436,8 +436,10 @@ export function SnapshotPreviewModal({
                       0;
 
                     const floodCovered = isFloodPerilsCovered(card.special_perils);
-                    const llpIncluded = isLlpLlopIncluded(card.llp_llop);
-                    const llpLabel = formatLlpLlop(card.llp_llop);
+                    const llpIncluded = isLlpLlopIncluded(card.llp);
+                    const llpLabel = formatLlpLlop(card.llp);
+                    const llopIncluded = isLlpLlopIncluded(card.llop);
+                    const llopLabel = formatLlpLlop(card.llop);
                     const rawTowing = formatBenefitCoverage(
                       card.towing_limit || card.towing_km || "Standard",
                       undefined,
@@ -699,12 +701,22 @@ export function SnapshotPreviewModal({
                             </div>
 
                             <div className="flex items-center justify-between gap-2">
-                              <span style={{ color: "#6B7280" }}>LLP/LLOP:</span>
+                              <span style={{ color: "#6B7280" }}>LLP:</span>
                               <span
                                 className={`text-right ${llpIncluded ? "font-bold" : "font-semibold"}`}
                                 style={{ color: llpIncluded ? "#4B4F56" : "#9CA3AF" }}
                               >
                                 {llpLabel}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <span style={{ color: "#6B7280" }}>LLOP:</span>
+                              <span
+                                className={`text-right ${llopIncluded ? "font-bold" : "font-semibold"}`}
+                                style={{ color: llopIncluded ? "#4B4F56" : "#9CA3AF" }}
+                              >
+                                {llopLabel}
                               </span>
                             </div>
 

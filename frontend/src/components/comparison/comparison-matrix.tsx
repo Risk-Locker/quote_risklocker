@@ -220,6 +220,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
       excess?: number;
       windscreen_sum_insured: number | null;
       special_perils?: string | null;
+      llp?: string | null;
+      llop?: string | null;
       llp_llop?: string | null;
       extra_addons?: Record<string, string>;
       canonical_perils?: string[];
@@ -1381,6 +1383,8 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 towing_limit: res.towing_limit ?? e.towing_limit,
                 towing_km: res.towing_km ?? e.towing_km,
                 special_perils: res.special_perils !== undefined ? res.special_perils : e.special_perils,
+                llp: res.llp !== undefined ? res.llp : e.llp,
+                llop: res.llop !== undefined ? res.llop : e.llop,
                 llp_llop: res.llp_llop !== undefined ? res.llp_llop : e.llp_llop,
                 extra_addons: res.extra_addons !== undefined ? res.extra_addons : e.extra_addons,
                 excess: res.excess !== undefined ? res.excess : e.excess,

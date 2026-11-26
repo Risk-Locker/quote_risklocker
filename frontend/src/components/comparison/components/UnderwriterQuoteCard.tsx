@@ -743,24 +743,46 @@ export function UnderwriterQuoteCard({
             )}
           </div>
 
-          {/* LLP / LLOP (Passenger Liability) */}
+          {/* LLP (Legal Liability to Passengers) */}
           <div className="h-8 flex items-center justify-between pt-2">
-            <span className="text-[#6e6e73]">LLP / LLOP:</span>
+            <span className="text-[#6e6e73]">LLP:</span>
             {onPatchEntryField ? (
               <InlineComparisonFieldEditor
-                field="llp_llop"
-                label="LLP / LLOP"
-                currentValue={entry.llp_llop || "Not Included"}
-                isOverridden={isFieldOverridden("llp_llop")}
+                field="llp"
+                label="LLP"
+                currentValue={entry.llp || "Not Included"}
+                isOverridden={isFieldOverridden("llp")}
                 onSave={(patch) => onPatchEntryField(entry, patch)}
               >
-                <span className={`font-bold ${isLlpLlopIncluded(entry.llp_llop) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
-                  {formatLlpLlop(entry.llp_llop)}
+                <span className={`font-bold ${isLlpLlopIncluded(entry.llp) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
+                  {formatLlpLlop(entry.llp)}
                 </span>
               </InlineComparisonFieldEditor>
             ) : (
-              <span className={`font-bold ${isLlpLlopIncluded(entry.llp_llop) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
-                {formatLlpLlop(entry.llp_llop)}
+              <span className={`font-bold ${isLlpLlopIncluded(entry.llp) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
+                {formatLlpLlop(entry.llp)}
+              </span>
+            )}
+          </div>
+
+          {/* LLOP (Legal Liability of Passengers) */}
+          <div className="h-8 flex items-center justify-between pt-2">
+            <span className="text-[#6e6e73]">LLOP:</span>
+            {onPatchEntryField ? (
+              <InlineComparisonFieldEditor
+                field="llop"
+                label="LLOP"
+                currentValue={entry.llop || "Not Included"}
+                isOverridden={isFieldOverridden("llop")}
+                onSave={(patch) => onPatchEntryField(entry, patch)}
+              >
+                <span className={`font-bold ${isLlpLlopIncluded(entry.llop) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
+                  {formatLlpLlop(entry.llop)}
+                </span>
+              </InlineComparisonFieldEditor>
+            ) : (
+              <span className={`font-bold ${isLlpLlopIncluded(entry.llop) ? "text-[#1b1717]" : "text-[#6e6e73]"}`}>
+                {formatLlpLlop(entry.llop)}
               </span>
             )}
           </div>
