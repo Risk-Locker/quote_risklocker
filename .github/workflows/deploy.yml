@@ -319,6 +319,7 @@ jobs:
             # cap the Next build can trip the OOM killer mid-deploy.
             echo "== Building frontend..."
             NODE_OPTIONS="--max-old-space-size=1536" npm run build
+            test -f .next/standalone/server.js && test -d .next/standalone/.next/static
 
             # Stop worker during migration/pre-flight to release pool connections cleanly
             pm2 stop rl-quote-worker 2>/dev/null || true
@@ -337,8 +338,10 @@ jobs:
               docker compose down 2>/dev/null || true
             fi
 
-            # Reload all three processes; startOrReload alone does not revive
-            # apps that PM2 previously stopped (e.g. after a crash loop).
+            # Reload all three processes; delete rl-quote-frontend first so PM2
+            # picks up the updated standalone script/cwd/interpreter and resets
+            # the legacy restart counter cleanly.
+            pm2 delete rl-quote-frontend 2>/dev/null || true
             RL_DEPLOY_PATH=/var/www/html/quote_risklocker pm2 startOrReload ecosystem.config.cjs --update-env || true
             pm2 start rl-quote-api rl-quote-worker rl-quote-frontend 2>/dev/null || true
             pm2 save
@@ -358,6 +361,19 @@ jobs:
               echo "::error::Backend /api/health did not return 200 after deploy (last: $code)."
               curl -sv -m 5 http://127.0.0.1:8100/api/health || true
               pm2 logs rl-quote-api --nostream --lines 30 || true
+              exit 1
+            fi
+
+            # Frontend health gate: standalone Next.js server must answer /login within 30s
+            fe_code=000
+            for i in $(seq 1 10); do
+              fe_code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1:3000/login || true)
+              [ "$fe_code" = "200" ] && break
+              sleep 3
+            done
+            if [ "$fe_code" != "200" ]; then
+              echo "::error::Frontend /login did not return 200 after deploy (last: $fe_code)."
+              pm2 logs rl-quote-frontend --nostream --lines 30 || true
               exit 1
             fi
 
