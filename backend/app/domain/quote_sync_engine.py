@@ -174,10 +174,22 @@ def _tier_matches_target_towing(eff_val: str | None, target_clean: str) -> bool:
     return tg_is_rm == ev_is_rm
 
 
-def _deactivate_selection_row(sel: DraftBenefitSelection, user_id: str | None) -> Decimal:
+def _deactivate_selection_row(
+    sel: DraftBenefitSelection,
+    user_id: str | None,
+    *,
+    by_comparison_sync: bool = False,
+) -> Decimal:
     applied = selection_applied_to_premium(sel)
     sel.state = "available_addon" if sel.item_kind == "catalog" else "removed"
     sel.superseded_by_id = None
+    sel.bundle_tier_id = None
+    ev = dict(sel.evidence_snapshot or {}) if isinstance(sel.evidence_snapshot, dict) else {}
+    for k in ("bundle_id", "plan_tier", "plan_tier_key", "plan_tier_uncertain", "needs_review_reason"):
+        ev.pop(k, None)
+    if by_comparison_sync:
+        ev["deactivated_by_comparison_sync"] = True
+    sel.evidence_snapshot = ev
     if user_id:
         sel.selected_by = user_id
     stamp_applied_to_premium(sel, _ZERO)
@@ -228,10 +240,13 @@ def _activate_bundle_selection(
         if target.item_kind == "custom" or tier_label:
             target.label_override = tier_display
         prev_ev = dict(target.evidence_snapshot or {})
+        prev_ev.pop("deactivated_by_comparison_sync", None)
         target.evidence_snapshot = {**prev_ev, **ev_patch}
         if selection_applied_to_premium(target) == _ZERO:
-            target.cost_status = target.cost_status if target.cost_status in {"included", "foc"} else "included"
+            target.cost_status = "paid" if getattr(bundle, "force_box2", True) else (target.cost_status if target.cost_status in {"included", "foc"} else "included")
             stamp_applied_to_premium(target, _ZERO)
+        elif getattr(bundle, "force_box2", True):
+            target.cost_status = "paid"
         if user_id:
             target.selected_by = user_id
         return
@@ -270,8 +285,10 @@ def _activate_bundle_selection(
         existing_by_key.bundle_tier_id = getattr(tier, "id", None)
         if existing_by_key.item_kind == "custom" or tier_label:
             existing_by_key.label_override = tier_display
-        existing_by_key.evidence_snapshot = {**dict(existing_by_key.evidence_snapshot or {}), **ev_patch}
-        existing_by_key.cost_status = "included"
+        prev_ev_k = dict(existing_by_key.evidence_snapshot or {})
+        prev_ev_k.pop("deactivated_by_comparison_sync", None)
+        existing_by_key.evidence_snapshot = {**prev_ev_k, **ev_patch}
+        existing_by_key.cost_status = "paid" if getattr(bundle, "force_box2", True) else "included"
         stamp_applied_to_premium(existing_by_key, _ZERO)
         if user_id:
             existing_by_key.selected_by = user_id
@@ -291,7 +308,7 @@ def _activate_bundle_selection(
         concept_id=primary_cid,
         item_kind=item_kind,
         state="current",
-        cost_status="included",
+        cost_status="paid" if getattr(bundle, "force_box2", True) else "included",
         label_override=tier_display if (item_kind == "custom" or tier_label) else None,
         typed_value_override=None,
         evidence_snapshot={**ev_patch, "applied_to_premium": "0.00"},
@@ -367,7 +384,7 @@ def sync_towing_and_insurer_bundle_to_draft(
                 catalog_name=cat_name,
             )
             if mb is not None and mb.id in towing_bundle_ids:
-                removed_applied += _deactivate_selection_row(sel, user_id)
+                removed_applied += _deactivate_selection_row(sel, user_id, by_comparison_sync=True)
         return removed_applied
 
     # Find matching (bundle, tier) for the target towing value (e.g. "Unlimited" or "300 km")
@@ -401,7 +418,7 @@ def sync_towing_and_insurer_bundle_to_draft(
         )
         if mb is not None and mb.id in towing_bundle_ids:
             if matched_bundle is None or mb.id != matched_bundle.id:
-                removed_applied += _deactivate_selection_row(sel, user_id)
+                removed_applied += _deactivate_selection_row(sel, user_id, by_comparison_sync=True)
 
     if matched_bundle is not None and matched_tier is not None:
         _activate_bundle_selection(db, draft, selections, concepts_by_id, matched_bundle, matched_tier, user_id)
@@ -417,6 +434,19 @@ def sync_towing_and_insurer_bundle_to_draft(
         {"type": "string", "display_text": tow_clean},
         user_id,
     )
+    if matched_bundle is not None and matched_tier is not None:
+        from app.services.marketing_comparison.workspace_sync import _selection_matches_domain
+
+        for sel in selections:
+            if sel.state == "current" and _selection_matches_domain(sel, concepts_by_id, "towing"):
+                ev_t = dict(sel.evidence_snapshot or {}) if isinstance(sel.evidence_snapshot, dict) else {}
+                if ev_t.pop("manually_edited", None) is not None or ev_t.get("source") == "manual":
+                    if ev_t.get("source") == "manual":
+                        ev_t["source"] = "comparison_sync"
+                    sel.evidence_snapshot = ev_t
+                if sel.item_kind == "catalog":
+                    sel.label_override = None
+                sel.typed_value_override = None
     return removed_applied
 
 
@@ -448,16 +478,23 @@ def sync_comparison_from_workspace(
             draft.fields = f
             flag_modified(draft, "fields")
 
-    # Clear stale scalar manual_override on towing when user mutates Box 2 bundles/benefits
+    # Clear stale scalar manual_override on benefits when user mutates Box 2 bundles/benefits
     towing_explicitly_edited = any("fields.towing" in p for p in changed_paths)
-    if has_benefit_mutation and not towing_explicitly_edited:
-        tow_changed = False
-        for tk in ("towing", "towing_limit"):
-            node = f.get(tk)
+    if has_benefit_mutation:
+        stale_keys: list[str] = []
+        if not towing_explicitly_edited:
+            stale_keys.extend(["towing", "towing_limit"])
+        if not any("fields.llp" in p for p in changed_paths):
+            stale_keys.extend(["llp", "llop", "llp_llop"])
+        if not any("fields.special_perils" in p for p in changed_paths):
+            stale_keys.append("special_perils")
+        stale_changed = False
+        for sk in stale_keys:
+            node = f.get(sk)
             if isinstance(node, dict) and node.get("status") == "manual_override":
-                f.pop(tk, None)
-                tow_changed = True
-        if tow_changed:
+                f.pop(sk, None)
+                stale_changed = True
+        if stale_changed:
             draft.fields = f
             flag_modified(draft, "fields")
 
@@ -526,6 +563,8 @@ def sync_comparison_from_workspace(
                 ws_sync = _q2(b_sync.get("windscreen_sum_insured"))
                 ce.windscreen_sum_insured = ws_sync if ws_sync > _ZERO else None
                 ce.special_perils = b_sync.get("special_perils")
+                ce.llp = b_sync.get("llp")
+                ce.llop = b_sync.get("llop")
                 ce.llp_llop = b_sync.get("llp_llop")
                 if b_sync.get("towing_km") and not towing_explicitly_edited:
                     ce.towing_limit = str(b_sync["towing_km"])
@@ -555,7 +594,7 @@ def sync_comparison_from_workspace(
                     ce.betterment_rate = _ZERO if has_bet_active else (to_decimal_clean(b_rate) if b_rate is not None else None)
                     ce.betterment_display = "Yes (0%)" if has_bet_active else b_disp
 
-                for clr_key in ("windscreen_sum_insured", "special_perils", "llp_llop", "towing_limit", "waiver_betterment", "motor_premium"):
+                for clr_key in ("windscreen_sum_insured", "special_perils", "llp", "llop", "llp_llop", "towing_limit", "waiver_betterment", "motor_premium"):
                     record_manual_overrides(ce, clear_field=clr_key)
             elif changed_paths:
                 if any("fields.premium" in p for p in changed_paths):

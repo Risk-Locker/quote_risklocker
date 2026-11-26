@@ -627,6 +627,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
                 rate_percentage=rate_val,
                 windscreen_sum_insured=b_res["windscreen_sum_insured"],
                 special_perils=b_res["special_perils"],
+                llp=b_res["llp"],
+                llop=b_res["llop"],
                 llp_llop=b_res["llp_llop"],
                 extra_addons=dict(b_res.get("extra_addons") or {}),
                 review_flags=_build_persisted_review_flags(
@@ -731,6 +733,10 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
                         existing_match.windscreen_sum_insured = b_res["windscreen_sum_insured"]
                     if not is_field_overridden(existing_match, "special_perils"):
                         existing_match.special_perils = b_res["special_perils"]
+                    if not is_field_overridden(existing_match, "llp"):
+                        existing_match.llp = b_res["llp"]
+                    if not is_field_overridden(existing_match, "llop"):
+                        existing_match.llop = b_res["llop"]
                     if not is_field_overridden(existing_match, "llp_llop"):
                         existing_match.llp_llop = b_res["llp_llop"]
                     if not is_field_overridden(existing_match, "extra_addons"):
@@ -774,6 +780,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
                         rate_percentage=rate_val,
                         windscreen_sum_insured=b_res["windscreen_sum_insured"],
                         special_perils=b_res["special_perils"],
+                        llp=b_res["llp"],
+                        llop=b_res["llop"],
                         llp_llop=b_res["llp_llop"],
                         extra_addons=dict(b_res.get("extra_addons") or {}),
                         review_flags=_build_persisted_review_flags(
@@ -1036,6 +1044,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
         prev_rate_pct = float(best_prev.rate_percentage) if (best_prev and best_prev.rate_percentage is not None) else None
         prev_windscreen = float(best_prev.windscreen_sum_insured) if (best_prev and best_prev.windscreen_sum_insured) else None
         prev_sp = best_prev.special_perils if best_prev else None
+        prev_llp_only = best_prev.llp if best_prev else None
+        prev_llop_only = best_prev.llop if best_prev else None
         prev_llp = best_prev.llp_llop if best_prev else None
         prev_ea = dict(best_prev.extra_addons or {}) if best_prev else {}
         prev_towing = (best_prev.towing_km or best_prev.towing_limit) if best_prev else None
@@ -1059,6 +1069,10 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
                 prev_windscreen = p_res.get("windscreen_sum_insured")
             if prev_sp is None:
                 prev_sp = p_res.get("special_perils")
+            if prev_llp_only is None:
+                prev_llp_only = p_res.get("llp")
+            if prev_llop_only is None:
+                prev_llop_only = p_res.get("llop")
             if prev_llp is None:
                 prev_llp = p_res.get("llp_llop")
             if not prev_ea:
@@ -1101,6 +1115,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
             "excess": prev_excess,
             "rate_percentage": prev_rate_pct,
             "special_perils": prev_sp,
+            "llp": prev_llp_only,
+            "llop": prev_llop_only,
             "llp_llop": prev_llp,
             "extra_addons": prev_ea,
         }
@@ -1533,6 +1549,17 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
         bnm_5c_net_tot = float(apply_bnm_cash_rounding(net_exact_tot))
         whole_net_tot = float(apply_whole_ringgit_rounding(net_exact_tot))
 
+        resp_llp = getattr(e, "llp", None)
+        resp_llop = getattr(e, "llop", None)
+        if resp_llp is None and resp_llop is None:
+            if s_obj:
+                if not is_field_overridden(e, "llp"):
+                    resp_llp = entry_b_res.get("llp")
+                if not is_field_overridden(e, "llop"):
+                    resp_llop = entry_b_res.get("llop")
+            elif e.llp_llop:
+                resp_llp = e.llp_llop
+
         entry_dicts.append({
             "id": e.id,
             "tenure_id": e.tenure_id,
@@ -1583,6 +1610,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
             "ncd_percentage": float(entry_ncd) if entry_ncd is not None else (float(cand_ncd) if cand_ncd is not None else None),
             "windscreen_sum_insured": float(e.windscreen_sum_insured) if e.windscreen_sum_insured else None,
             "special_perils": e.special_perils,
+            "llp": resp_llp,
+            "llop": resp_llop,
             "llp_llop": e.llp_llop,
             "personal_accident": e.personal_accident,
             "extra_addons": entry_extra_addons,
@@ -1907,6 +1936,8 @@ def get_marketing_comparison(db: Session, tenure_id: str, allow_commit: bool = T
             "towing_limit": cn_b_res.get("towing_km") or "Unlimited",
             "towing_km": cn_b_res.get("towing_km") or "Unlimited",
             "special_perils": cn_b_res.get("special_perils"),
+            "llp": cn_b_res.get("llp"),
+            "llop": cn_b_res.get("llop"),
             "llp_llop": cn_b_res.get("llp_llop"),
             "extra_addons": cn_b_res.get("extra_addons") or {},
             "canonical_perils": cn_b_res.get("canonical_perils") or [],
@@ -2532,7 +2563,15 @@ def save_comparison_entry(
         entry.windscreen_sum_insured = _to_float(payload["windscreen_sum_insured"]) or None
     if "special_perils" in payload:
         entry.special_perils = _safe_str(payload["special_perils"]) or None
-    if "llp_llop" in payload:
+    if "llp" in payload:
+        llp_s = _safe_str(payload["llp"]).strip()
+        entry.llp = None if llp_s.lower() in {"not included", "no", "none", "excluded", "-", ""} else llp_s
+    if "llop" in payload:
+        llop_s = _safe_str(payload["llop"]).strip()
+        entry.llop = None if llop_s.lower() in {"not included", "no", "none", "excluded", "-", ""} else llop_s
+    if "llp" in payload or "llop" in payload:
+        entry.llp_llop = "Included" if (entry.llp or entry.llop) else None
+    elif "llp_llop" in payload:
         entry.llp_llop = _safe_str(payload["llp_llop"]) or None
     if "extra_addons" in payload and isinstance(payload["extra_addons"], dict):
         from app.services.marketing_comparison.dynamic_addons import sanitize_extra_addons_map
@@ -2581,6 +2620,8 @@ def save_comparison_entry(
                 "excess": entry.excess,
                 "windscreen_sum_insured": entry.windscreen_sum_insured,
                 "special_perils": entry.special_perils or "Not Included",
+                "llp": entry.llp or "Not Included",
+                "llop": entry.llop or "Not Included",
                 "llp_llop": entry.llp_llop or "Not Included",
                 "extra_addons": getattr(entry, "extra_addons", None) or {},
             },
@@ -2765,6 +2806,11 @@ def select_winner_and_generate_draft(
                     "towing_limit": entry.towing_limit,
                     "agreed_value": entry.agreed_value,
                     "waiver_of_betterment": entry.waiver_betterment,
+                    "windscreen_sum_insured": float(entry.windscreen_sum_insured) if entry.windscreen_sum_insured else None,
+                    "special_perils": entry.special_perils,
+                    "llp": entry.llp,
+                    "llop": entry.llop,
+                    "llp_llop": entry.llp_llop,
                     "excess": float(entry.excess),
                     "coverage_start_date": tenure.coverage_start_date.isoformat(),
                     "coverage_end_date": tenure.coverage_end_date.isoformat(),
@@ -2795,9 +2841,41 @@ def select_winner_and_generate_draft(
             db.add(session_model)
             db.flush()
 
-            # Associate entry with this session
+            # Associate entry with this session and seed DraftBenefitSelections
             entry.session_id = session_model.id
             session_id = session_model.id
+
+            from app.services.marketing_comparison.workspace_sync import sync_session_draft_from_comparison
+
+            seed_fields = ["towing_limit", "waiver_betterment"]
+            if entry.windscreen_sum_insured:
+                seed_fields.append("windscreen_sum_insured")
+            if entry.special_perils:
+                seed_fields.append("special_perils")
+            if entry.llp:
+                seed_fields.append("llp")
+            if entry.llop:
+                seed_fields.append("llop")
+            if getattr(entry, "extra_addons", None):
+                seed_fields.append("extra_addons")
+            sync_session_draft_from_comparison(
+                db,
+                tenure,
+                session_model.id,
+                edited_fields=seed_fields,
+                field_values={
+                    "towing_limit": entry.towing_limit,
+                    "windscreen_sum_insured": entry.windscreen_sum_insured,
+                    "special_perils": entry.special_perils or "Not Included",
+                    "llp": entry.llp or "Not Included",
+                    "llop": entry.llop or "Not Included",
+                    "llp_llop": entry.llp_llop or "Not Included",
+                    "waiver_betterment": entry.waiver_betterment,
+                    "extra_addons": getattr(entry, "extra_addons", None) or {},
+                },
+                explicit_motor_premium=False,
+                user_id=user_id,
+            )
 
     # Query all currently recommended entries under this tenure
     all_entries = list(
@@ -3256,6 +3334,10 @@ def rescan_comparison_tenure(
                 entry.windscreen_sum_insured = b_res["windscreen_sum_insured"]
             if not is_field_overridden(entry, "special_perils"):
                 entry.special_perils = b_res["special_perils"]
+            if not is_field_overridden(entry, "llp"):
+                entry.llp = b_res["llp"]
+            if not is_field_overridden(entry, "llop"):
+                entry.llop = b_res["llop"]
             if not is_field_overridden(entry, "llp_llop"):
                 entry.llp_llop = b_res["llp_llop"]
             if not is_field_overridden(entry, "extra_addons"):

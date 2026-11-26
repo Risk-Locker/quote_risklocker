@@ -8,7 +8,7 @@ with safe fallback defaults in `company_rules.py` for unit tests without DB rows
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Sequence
 
 from app.services.marketing_comparison.company_rules import resolve_company_towing_rule
 
@@ -93,6 +93,7 @@ def resolve_insurer_towing_limit(
     catalog_display_value: str | None = None,
     *,
     company_obj: Any = None,
+    disabled_bundle_aliases: Sequence[str] = (),
 ) -> str:
     """Resolve exact towing limit string (RM, km, Unlimited, or No towing) from DB policy_rules."""
     comp = (company_name or getattr(company_obj, "name", None) or "").lower().strip()
@@ -115,10 +116,17 @@ def resolve_insurer_towing_limit(
     metric_low = metric.lower()
     is_rm_based = metric_low == "rm" or metric_low == "unlimited"
 
+    disabled_set = {str(a).strip().lower() for a in (disabled_bundle_aliases or ()) if str(a).strip()}
+
+    def _filter_triggers(trigs: list[str]) -> list[str]:
+        if not disabled_set:
+            return trigs
+        return [t for t in trigs if not any(da in t or t in da for da in disabled_set)]
+
     respect_universal = rule.get("respect_universal_unlimited", True)
     if respect_universal and (
-        any(kw in text for kw in _UNIVERSAL_UNLIMITED_KW)
-        or any(kw in raw_ext.lower() for kw in _UNIVERSAL_UNLIMITED_KW)
+        any(kw in raw_ext.lower() for kw in _UNIVERSAL_UNLIMITED_KW)
+        or (not disabled_set and any(kw in text for kw in _UNIVERSAL_UNLIMITED_KW))
     ):
         return "Unlimited"
 
@@ -128,8 +136,8 @@ def resolve_insurer_towing_limit(
             return matched_cdv
 
     # 1. SDPA / plan-tiered RM rider (e.g., Lonpac E-Assist Smart Driver)
-    sdpa_triggers = [str(t).lower() for t in (rule.get("sdpa_triggers") or [])]
-    raw_sdpa_triggers = [str(t).lower() for t in (rule.get("raw_ext_sdpa_triggers") or [])]
+    sdpa_triggers = _filter_triggers([str(t).lower() for t in (rule.get("sdpa_triggers") or [])])
+    raw_sdpa_triggers = _filter_triggers([str(t).lower() for t in (rule.get("raw_ext_sdpa_triggers") or [])])
     if sdpa_triggers and (
         any(kw in text for kw in sdpa_triggers) or any(kw in raw_ext.lower() for kw in raw_sdpa_triggers)
     ):
@@ -143,8 +151,8 @@ def resolve_insurer_towing_limit(
         return str(rule.get("unlimited_label") or "Unlimited")
 
     # 2. Plan-tiered KM upgrade riders (e.g., Takaful Malaysia Motor PA Plus)
-    upgrade_triggers = [str(t).lower() for t in (rule.get("upgrade_triggers") or [])]
-    raw_upgrade_triggers = [str(t).lower() for t in (rule.get("raw_ext_upgrade_triggers") or [])]
+    upgrade_triggers = _filter_triggers([str(t).lower() for t in (rule.get("upgrade_triggers") or [])])
+    raw_upgrade_triggers = _filter_triggers([str(t).lower() for t in (rule.get("raw_ext_upgrade_triggers") or [])])
     plan_limits = rule.get("plan_limits") if isinstance(rule.get("plan_limits"), dict) else {}
     if upgrade_triggers and plan_limits and (
         any(kw in text for kw in upgrade_triggers) or any(kw in raw_ext.lower() for kw in raw_upgrade_triggers)
@@ -156,12 +164,12 @@ def resolve_insurer_towing_limit(
         return str(plan_limits.get("plan 1") or rule.get("base_limit") or "100 km")
 
     # 3. Direct Unlimited triggers (QBE N4/DPA/DPP, Etiqa OTO 360, Tune AutoBuddy, Allianz Road Rangers, etc.)
-    unlimited_triggers = [str(t).lower() for t in (rule.get("unlimited_triggers") or [])]
-    raw_unlim_triggers = [str(t).lower() for t in (rule.get("raw_ext_unlimited_triggers") or [])]
+    unlimited_triggers = _filter_triggers([str(t).lower() for t in (rule.get("unlimited_triggers") or [])])
+    raw_unlim_triggers = _filter_triggers([str(t).lower() for t in (rule.get("raw_ext_unlimited_triggers") or [])])
     if unlimited_triggers and (
         any(kw in text for kw in unlimited_triggers)
         or any(kw in raw_ext.lower() for kw in raw_unlim_triggers)
-        or (not respect_universal and "unlimited" in text)
+        or (not respect_universal and not disabled_set and "unlimited" in text)
     ):
         return str(rule.get("unlimited_label") or "Unlimited")
 

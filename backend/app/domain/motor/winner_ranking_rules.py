@@ -188,10 +188,25 @@ def _format_prev_policy_yoy_insight(
     elif prev_sp and not curr_sp:
         reasons.append("removed Special Perils")
 
-    prev_llp = _has_cover(prev_policy.get("llp_llop")) or ("llp" in str(prev_policy.get("perils") or "").lower())
-    curr_llp = _has_cover(getattr(entry, "llp_llop", None))
+    prev_llp = _has_cover(prev_policy.get("llp")) or (
+        prev_policy.get("llp") is None
+        and prev_policy.get("llop") is None
+        and (_has_cover(prev_policy.get("llp_llop")) or ("llp" in str(prev_policy.get("perils") or "").lower()))
+    )
+    prev_llop = _has_cover(prev_policy.get("llop")) or ("llop" in str(prev_policy.get("perils") or "").lower())
+    curr_llp = _has_cover(getattr(entry, "llp", None)) or (
+        getattr(entry, "llp", None) is None
+        and getattr(entry, "llop", None) is None
+        and _has_cover(getattr(entry, "llp_llop", None))
+    )
+    curr_llop = _has_cover(getattr(entry, "llop", None))
+    added_liab = []
     if curr_llp and not prev_llp:
-        reasons.append("added LLP/LLOP")
+        added_liab.append("LLP")
+    if curr_llop and not prev_llop:
+        added_liab.append("LLOP")
+    if added_liab:
+        reasons.append(f"added {' & '.join(added_liab)}")
 
     prev_ea = {k for k, v in (prev_policy.get("extra_addons") or {}).items() if str(v).lower() == "yes"}
     curr_ea = {k for k, v in (getattr(entry, "extra_addons", None) or {}).items() if str(v).lower() == "yes"}

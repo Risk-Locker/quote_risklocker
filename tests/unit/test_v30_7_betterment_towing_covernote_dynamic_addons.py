@@ -743,3 +743,328 @@ def test_v32_two_way_bundle_betterment_readonly_get_and_covernote_single_discoun
     assert cn_out["covernote_policy"]["net_motor_premium"] == 950.0
     assert cn_out["covernote_policy"]["net_total_payable"] == 970.0
 
+
+def test_motor_pa_plus_unlimited_towing_removal_switch_and_revert(db: Session):
+    """Verify:
+    1. STMB Motor PA Plus + 'Unlimited Towing' (without literal 'Plan 4') resolves Unlimited.
+    2. Removing Motor PA Plus in Workspace downgrades Comparison to 50 km even with raw PDF lines.
+    3. Switching Motor PA Plus Plan 1 -> Plan 4 overrides stale manually_edited on towing card.
+    4. Reverting towing_limit override via PATCH clear_override_field syncs back to Workspace.
+    """
+    from app.api.routers.comparison import UpdateComparisonEntryPatch, patch_comparison_entry
+    from app.api.routers.sessions import draft_workspace_patch
+    from app.api.schemas import WorkspacePatchRequest
+    from app.models.tables import (
+        Batch,
+        BenefitProfile,
+        CatalogOffering,
+        CompanyBenefitBundle,
+        CompanyBenefitBundleEffect,
+        CompanyBenefitBundleTier,
+        ExtractionBenefitLine,
+        ExtractionRecord,
+        UploadedFile,
+    )
+    from app.rendering.render_context import resolve_benefit_cards
+    from app.services.marketing_comparison.benefits_extractor import _resolve_comparison_benefits
+
+    staff = User(id=new_id(), email="staff-towing-fix@rl.test", password_hash="x", role="staff", status="active")
+    stmb = InsuranceCompany(
+        id=new_id(),
+        name="Syarikat Takaful Malaysia Am Berhad",
+        slug="takaful-malaysia",
+        policy_rules={
+            "towing": {
+                "metric": "km",
+                "base_limit": "50 km",
+                "upgrade_triggers": ["motor pa plus", "motor pa"],
+                "plan_limits": {"plan 1": "100 km", "plan 2": "200 km", "plan 3": "300 km", "plan 4": "Unlimited"},
+            },
+        },
+    )
+    prod = InsuranceProduct(id=new_id(), company_id=stmb.id, product_key="stmb-car", name="Private Car")
+    cat = BenefitCatalog(id=new_id(), company_id=stmb.id, product_id=prod.id, name="STMB Catalog")
+    rev = BenefitCatalogRevision(id=new_id(), catalog_id=cat.id, revision_number=1, state="published", content_hash="h-mpa")
+    prof = BenefitProfile(id=new_id(), name="Default Profile", is_active=True, status="active")
+
+    c_mpa = BenefitConcept(id=new_id(), concept_key="motor-pa-plus", label="Motor PA Plus", description="PA + Towing")
+    c_tow = BenefitConcept(id=new_id(), concept_key="towing", label="Emergency Towing Assistance", description="Towing")
+
+    off_mpa = CatalogOffering(
+        id=new_id(), catalog_revision_id=rev.id, concept_id=c_mpa.id,
+        offering_key="motor-pa-plus", offering_kind="optional", role="addon_option", sort_order=20,
+    )
+    off_tow = CatalogOffering(
+        id=new_id(), catalog_revision_id=rev.id, concept_id=c_tow.id,
+        offering_key="towing-base", offering_kind="base", role="included", display_value="50 km", sort_order=10,
+    )
+
+    bundle = CompanyBenefitBundle(
+        id=new_id(), company_id=stmb.id, profile_id=prof.id, bundle_key="stmb-motor-pa-plus",
+        name="Motor PA Plus", primary_concept_id=c_mpa.id, trigger_concept_ids=[c_mpa.id],
+        match_aliases=["motor pa plus", "motor pa+", "motor pa"], has_plan_tiers=True, is_active=True,
+    )
+    tier1 = CompanyBenefitBundleTier(
+        id=new_id(), bundle_id=bundle.id, tier_key="plan_1", label="Plan 1",
+        match_tokens=["plan 1", "p1"], sort_order=10, is_default_fallback=True,
+    )
+    eff1 = CompanyBenefitBundleEffect(
+        id=new_id(), tier_id=tier1.id, target_concept_id=c_tow.id, effect_type="upgrade_to_box2",
+        display_title="Towing Assistance (100 km)", comparison_value="100 km", sort_order=10,
+    )
+    tier4 = CompanyBenefitBundleTier(
+        id=new_id(), bundle_id=bundle.id, tier_key="plan_4", label="Plan 4",
+        match_tokens=["plan 4", "p4"], sort_order=40, is_default_fallback=False,
+    )
+    eff4 = CompanyBenefitBundleEffect(
+        id=new_id(), tier_id=tier4.id, target_concept_id=c_tow.id, effect_type="upgrade_to_box2",
+        display_title="Unlimited Towing Assistance", comparison_value="Unlimited", icon_hint="unlimited_towing", sort_order=10,
+    )
+
+    batch = Batch(id=new_id(), owner_id=staff.id, name="STMB Batch", status="ready")
+    ufile = UploadedFile(
+        id=new_id(), batch_id=batch.id, owner_id=staff.id, original_filename="stmb.pdf",
+        content_type="application/pdf", storage_path="local/stmb.pdf", insurance_company_id=stmb.id,
+    )
+    ext_rec = ExtractionRecord(
+        id=new_id(), uploaded_file_id=ufile.id,
+        raw_text="Motor PA Plus\nUnlimited Towing Assistance\n",
+        benefit_lines=[{"raw_label": "Motor PA Plus"}, {"raw_label": "Unlimited Towing"}],
+    )
+    ext_line = ExtractionBenefitLine(
+        id=new_id(), extraction_record_id=ext_rec.id, line_id="l-mpa",
+        raw_label="Motor PA Plus - Unlimited Towing", normalized_label="motor pa plus unlimited towing",
+        inclusion_state="included", evidence={"raw_text": "Motor PA Plus Unlimited Towing"},
+    )
+
+    veh = TrackedVehicle(id=new_id(), vehicle_no="VPA88", car_brand="Perodua", car_model="Myvi", manufacture_year=2022)
+    tenure = InsuranceTenure(
+        id=new_id(), tracked_vehicle_id=veh.id, vehicle_no="VPA88", customer_name="Siti",
+        coverage_start_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 4, 30, tzinfo=timezone.utc),
+        expiry_month="2027-04", road_tax=20.0, runner_fee=0.0, include_road_tax=True, include_runner_fee=False,
+    )
+    draft = QuotationDraft(
+        id=new_id(), uploaded_file_id=ufile.id, owner_id=staff.id, company_id=stmb.id,
+        catalog_revision_id=rev.id, revision=1, status="ready",
+        fields={"premium": {"value": "900.00", "status": "ready"}, "sum_insured": {"value": "50000.00", "status": "ready"}},
+        display_options={}, scalar_decisions={},
+    )
+    sess = SessionModel(
+        id=new_id(), owner_id=staff.id, uploaded_file_id=ufile.id,
+        draft_id=draft.id, tenure_id=tenure.id, detected_company=stmb.name, status="active", is_tenure_active=True,
+    )
+    tow_sel = DraftBenefitSelection(
+        id=new_id(), draft_id=draft.id, selection_key=f"catalog:{off_tow.offering_key}",
+        catalog_offering_id=off_tow.id, concept_id=c_tow.id, item_kind="catalog",
+        state="current", cost_status="included", evidence_snapshot={"source": "manual", "manually_edited": True},
+    )
+    mpa_sel = DraftBenefitSelection(
+        id=new_id(), draft_id=draft.id, selection_key=f"catalog:{off_mpa.offering_key}",
+        catalog_offering_id=off_mpa.id, concept_id=c_mpa.id, item_kind="catalog",
+        state="current", cost_status="paid", evidence_snapshot={"extracted_label": "Motor PA Plus - Unlimited Towing"},
+    )
+    entry = TenureComparisonEntry(
+        id=new_id(), tenure_id=tenure.id, session_id=sess.id, company_id=stmb.id, company_name=stmb.name,
+        sum_insured=50000.0, motor_premium=900.0, total_payable=920.0, towing_limit="50 km", towing_km="50 km",
+        extra_addons={}, manual_overrides=[], review_flags={}, version=1,
+    )
+    db.add_all([
+        staff, stmb, prod, cat, rev, prof, c_mpa, c_tow, off_mpa, off_tow,
+        bundle, tier1, eff1, tier4, eff4, batch, ufile, ext_rec, ext_line,
+        veh, tenure, draft, sess, tow_sel, mpa_sel, entry,
+    ])
+    db.commit()
+
+    # 1. Unlimited Towing detected from Pass 3 effect matching even without literal 'Plan 4'
+    b_res = _resolve_comparison_benefits(db, sess, stmb.id, draft.fields, None)
+    assert b_res["towing_km"] == "Unlimited"
+    assert b_res["towing_uncertain"] is False
+
+    # 2. Removing Motor PA Plus in Workspace downgrades Comparison to '50 km' (no PDF text re-trigger)
+    draft_workspace_patch(
+        draft_id=draft.id,
+        payload=WorkspacePatchRequest(
+            base_revision=draft.revision,
+            operations=[{"op": "benefit_update", "selection_id": mpa_sel.id, "state": "removed"}],
+        ),
+        db=db,
+        user=staff,
+    )
+    db.refresh(entry)
+    assert entry.towing_limit == "50 km"
+
+    # 3. Re-add Motor PA Plus at Plan 1 then switch to Plan 4; stale manually_edited on towing card is cleared
+    db.refresh(draft)
+    draft_workspace_patch(
+        draft_id=draft.id,
+        payload=WorkspacePatchRequest(
+            base_revision=draft.revision,
+            operations=[{"op": "benefit_update", "selection_id": mpa_sel.id, "state": "current", "bundle_tier_id": tier1.id}],
+        ),
+        db=db,
+        user=staff,
+    )
+    db.refresh(entry)
+    assert entry.towing_limit == "100 km"
+
+    db.refresh(draft)
+    draft_workspace_patch(
+        draft_id=draft.id,
+        payload=WorkspacePatchRequest(
+            base_revision=draft.revision,
+            operations=[{"op": "benefit_update", "selection_id": mpa_sel.id, "bundle_tier_id": tier4.id}],
+        ),
+        db=db,
+        user=staff,
+    )
+    db.refresh(entry)
+    db.refresh(tow_sel)
+    assert entry.towing_limit == "Unlimited"
+    cards = resolve_benefit_cards(
+        selections=[tow_sel, mpa_sel],
+        offerings=[off_tow, off_mpa],
+        concepts=[c_tow, c_mpa],
+        relations=[],
+        facets=[],
+        company_bundles=[bundle],
+    )
+    towing_card = next(c for c in cards["current_benefits"] if c["concept_key"] == "towing")
+    assert towing_card["label"] == "Unlimited Towing Assistance"
+    assert towing_card["is_bundle_effect"] is True
+
+    # 4. Override towing_limit to 200 km in Comparison, then revert via clear_override_field -> syncs back to Workspace
+    patch_comparison_entry(
+        tenure_id=tenure.id,
+        entry_id=entry.id,
+        payload=UpdateComparisonEntryPatch(towing_limit="200 km"),
+        db=db,
+        user=staff,
+    )
+    db.refresh(entry)
+    assert entry.towing_limit == "200 km"
+    assert "towing_limit" in (entry.manual_overrides or [])
+
+    patch_comparison_entry(
+        tenure_id=tenure.id,
+        entry_id=entry.id,
+        payload=UpdateComparisonEntryPatch(clear_override_field="towing_limit"),
+        db=db,
+        user=staff,
+    )
+    db.refresh(entry)
+    db.refresh(mpa_sel)
+    assert entry.towing_limit == "Unlimited"
+    assert "towing_limit" not in (entry.manual_overrides or [])
+    assert mpa_sel.state == "current" and mpa_sel.bundle_tier_id == tier4.id
+
+
+def test_llp_and_llop_separated_across_comparison_and_workspace(db: Session):
+    """Verify LLP (Endt 100) and LLOP (Endt 72 / Negligent Acts) stay independent across Comparison <-> Workspace."""
+    from app.api.routers.comparison import UpdateComparisonEntryPatch, patch_comparison_entry
+    from app.api.routers.sessions import draft_workspace_patch
+    from app.api.schemas import WorkspacePatchRequest
+    from app.models.tables import CatalogOffering
+    from app.services.marketing_comparison.benefits_extractor import _resolve_comparison_benefits
+
+    staff = User(id=new_id(), email="staff-llp-sep@rl.test", password_hash="x", role="staff", status="active")
+    etiqa = InsuranceCompany(id=new_id(), name="Etiqa General Insurance", slug="etiqa", policy_rules={})
+    prod = InsuranceProduct(id=new_id(), company_id=etiqa.id, product_key="etiqa-car", name="Private Car")
+    cat = BenefitCatalog(id=new_id(), company_id=etiqa.id, product_id=prod.id, name="Etiqa Catalog")
+    rev = BenefitCatalogRevision(id=new_id(), catalog_id=cat.id, revision_number=1, state="published", content_hash="h-llp")
+
+    c_llp = BenefitConcept(id=new_id(), concept_key="legal-liability-to-passengers", label="Legal Liability to Passengers", description="Endt 100")
+    c_llop = BenefitConcept(id=new_id(), concept_key="legal-liability-of-passengers", label="Legal Liability of Passengers", description="Endt 72")
+    off_llp = CatalogOffering(
+        id=new_id(), catalog_revision_id=rev.id, concept_id=c_llp.id,
+        offering_key="llp-addon", offering_kind="optional", role="addon_option", sort_order=10,
+    )
+    off_llop = CatalogOffering(
+        id=new_id(), catalog_revision_id=rev.id, concept_id=c_llop.id,
+        offering_key="llop-addon", offering_kind="optional", role="addon_option", sort_order=20,
+    )
+
+    veh = TrackedVehicle(id=new_id(), vehicle_no="VLLP1", car_brand="Honda", car_model="City", manufacture_year=2023)
+    tenure = InsuranceTenure(
+        id=new_id(), tracked_vehicle_id=veh.id, vehicle_no="VLLP1", customer_name="Ah Chong",
+        coverage_start_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        coverage_end_date=datetime(2027, 5, 31, tzinfo=timezone.utc),
+        expiry_month="2027-05", road_tax=20.0, runner_fee=0.0, include_road_tax=True, include_runner_fee=False,
+    )
+    draft = QuotationDraft(
+        id=new_id(), uploaded_file_id=new_id(), owner_id=staff.id, company_id=etiqa.id,
+        catalog_revision_id=rev.id, revision=1, status="ready",
+        fields={
+            "premium": {"value": "1200.00", "status": "ready"},
+            "sum_insured": {"value": "70000.00", "status": "ready"},
+            "optional_covers": {"value": "LLP for Negligent Acts (Endorsement 72)", "status": "ready"},
+        },
+        display_options={}, scalar_decisions={},
+    )
+    sess = SessionModel(
+        id=new_id(), owner_id=staff.id, uploaded_file_id=draft.uploaded_file_id,
+        draft_id=draft.id, tenure_id=tenure.id, detected_company=etiqa.name, status="active", is_tenure_active=True,
+    )
+    llop_sel = DraftBenefitSelection(
+        id=new_id(), draft_id=draft.id, selection_key=f"catalog:{off_llop.offering_key}",
+        catalog_offering_id=off_llop.id, concept_id=c_llop.id, item_kind="catalog",
+        state="current", cost_status="paid", label_override=None, evidence_snapshot={},
+    )
+    db.add_all([staff, etiqa, prod, cat, rev, c_llp, c_llop, off_llp, off_llop, veh, tenure, draft, sess, llop_sel])
+    db.commit()
+
+    # 1. 'LLP for Negligent Acts' (Endt 72) resolves LLOP='Included' and LLP=None
+    b_res = _resolve_comparison_benefits(db, sess, etiqa.id, draft.fields, None)
+    assert b_res["llop"] == "Included"
+    assert b_res["llp"] is None
+
+    comp = get_marketing_comparison(db, tenure.id, allow_commit=True)
+    entry_id = comp["entries"][0]["id"]
+    assert comp["entries"][0]["llop"] == "Included"
+    assert comp["entries"][0]["llp"] is None
+
+    # 2. Enabling LLP in Comparison activates ONLY legal-liability-to-passengers in Workspace
+    patch_comparison_entry(
+        tenure_id=tenure.id,
+        entry_id=entry_id,
+        payload=UpdateComparisonEntryPatch(llp="Included"),
+        db=db,
+        user=staff,
+    )
+    llp_sel = db.scalar(select(DraftBenefitSelection).where(DraftBenefitSelection.draft_id == draft.id, DraftBenefitSelection.concept_id == c_llp.id))
+    db.refresh(llop_sel)
+    assert llp_sel is not None and llp_sel.state == "current"
+    assert llop_sel.state == "current"
+
+    # 3. Disabling LLOP in Comparison deactivates ONLY LLOP while keeping LLP active
+    patch_comparison_entry(
+        tenure_id=tenure.id,
+        entry_id=entry_id,
+        payload=UpdateComparisonEntryPatch(llop="Not Included"),
+        db=db,
+        user=staff,
+    )
+    db.refresh(llp_sel)
+    db.refresh(llop_sel)
+    assert llp_sel.state == "current"
+    assert llop_sel.state == "available_addon"
+
+    # 4. Removing LLP in Quotation Workspace clears entry.llp without affecting entry.llop
+    db.refresh(draft)
+    draft_workspace_patch(
+        draft_id=draft.id,
+        payload=WorkspacePatchRequest(
+            base_revision=draft.revision,
+            operations=[
+                {"op": "benefit_update", "selection_id": llp_sel.id, "state": "available_addon"},
+                {"op": "benefit_update", "selection_id": llop_sel.id, "state": "current"},
+            ],
+        ),
+        db=db,
+        user=staff,
+    )
+    entry_row = db.get(TenureComparisonEntry, entry_id)
+    assert entry_row.llp is None
+    assert entry_row.llop == "Included"
+
+

@@ -42,6 +42,14 @@ _CONCEPT_MATCHERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ("special-perils", "special_perils", "flood"),
         ("special peril", "flood", "banjir", "peril khas", "convulsions"),
     ),
+    "llp": (
+        ("legal-liability-to-passengers", "lltp"),
+        ("legal liability to passenger", "liability to passenger", "lltp"),
+    ),
+    "llop": (
+        ("legal-liability-of-passengers", "llop", "llna"),
+        ("legal liability of passenger", "liability of passenger", "llop", "negligent act", "llna"),
+    ),
     "llp_llop": (
         ("legal-liability-to-passengers", "legal-liability-of-passengers", "llp", "llop"),
         ("legal liability to passenger", "legal liability of passenger", "llp", "llop", "lltp"),
@@ -88,12 +96,19 @@ def _selection_matches_domain(
 ) -> bool:
     c_keys, keywords = _CONCEPT_MATCHERS[domain_key]
     concept = concepts_by_id.get(sel.concept_id) if sel.concept_id else None
-    if concept and (concept.concept_key or "").strip().lower() in c_keys:
-        return True
+    c_key = (concept.concept_key or "").strip().lower() if concept else ""
     s_key = (sel.selection_key or "").strip().lower()
+    lbl = (sel.label_override or (concept.label if concept else "") or "").strip().lower()
+    if domain_key == "llp":
+        combined = f"{c_key} {s_key} {lbl}"
+        if any(neg in combined for neg in ("legal-liability-of-passengers", "of passenger", "llop", "negligent act", "llna")):
+            return False
+    if c_key and c_key in c_keys:
+        return True
     if any(ck in s_key for ck in c_keys):
         return True
-    lbl = (sel.label_override or (concept.label if concept else "") or "").strip().lower()
+    if domain_key == "llp" and re.search(r"\bllp\b", re.sub(r"\bllp\s+for\s+negligent\s+acts?\b", " ", lbl)):
+        return True
     return any(kw in lbl for kw in keywords)
 
 
@@ -303,6 +318,8 @@ def sync_session_draft_from_comparison(
     benefit_sync_keys = {
         "windscreen_sum_insured",
         "special_perils",
+        "llp",
+        "llop",
         "llp_llop",
         "towing_limit",
         "towing_km",
@@ -356,7 +373,41 @@ def sync_session_draft_from_comparison(
             else:
                 removed_applied_total += _deactivate_domain_selections(selections, concepts_by_id, "special-perils", user_id)
 
-        if "llp_llop" in edited_set:
+        if "llp" in edited_set:
+            llp_raw = field_values.get("llp")
+            if is_special_perils_value_included(llp_raw):
+                _activate_domain_selection(
+                    db,
+                    draft,
+                    selections,
+                    concepts_by_id,
+                    "llp",
+                    ("legal-liability-to-passengers",),
+                    "Legal Liability to Passengers",
+                    {"type": "boolean", "value": True, "display_text": str(llp_raw or "Included")},
+                    user_id,
+                )
+            else:
+                removed_applied_total += _deactivate_domain_selections(selections, concepts_by_id, "llp", user_id)
+
+        if "llop" in edited_set:
+            llop_raw = field_values.get("llop")
+            if is_special_perils_value_included(llop_raw):
+                _activate_domain_selection(
+                    db,
+                    draft,
+                    selections,
+                    concepts_by_id,
+                    "llop",
+                    ("legal-liability-of-passengers",),
+                    "Legal Liability of Passengers",
+                    {"type": "boolean", "value": True, "display_text": str(llop_raw or "Included")},
+                    user_id,
+                )
+            else:
+                removed_applied_total += _deactivate_domain_selections(selections, concepts_by_id, "llop", user_id)
+
+        if "llp_llop" in edited_set and "llp" not in edited_set and "llop" not in edited_set:
             llp_raw = field_values.get("llp_llop")
             if is_special_perils_value_included(llp_raw):
                 _activate_domain_selection(
@@ -468,7 +519,20 @@ def sync_session_draft_from_comparison(
         sp_out = str(field_values.get("special_perils") or "Not Included")
         _set_manual_field("special_perils", sp_out)
 
-    if "llp_llop" in edited_set:
+    if "llp" in edited_set:
+        llp_out = str(field_values.get("llp") or "Not Included")
+        _set_manual_field("llp", llp_out)
+
+    if "llop" in edited_set:
+        llop_out = str(field_values.get("llop") or "Not Included")
+        _set_manual_field("llop", llop_out)
+
+    if "llp" in edited_set or "llop" in edited_set:
+        cur_llp_v = field_values.get("llp") if "llp" in edited_set else (d_fields.get("llp", {}).get("value") if isinstance(d_fields.get("llp"), dict) else d_fields.get("llp"))
+        cur_llop_v = field_values.get("llop") if "llop" in edited_set else (d_fields.get("llop", {}).get("value") if isinstance(d_fields.get("llop"), dict) else d_fields.get("llop"))
+        derived_comb = "Included" if (is_special_perils_value_included(cur_llp_v) or is_special_perils_value_included(cur_llop_v)) else "Not Included"
+        _set_manual_field("llp_llop", derived_comb)
+    elif "llp_llop" in edited_set:
         llp_out = str(field_values.get("llp_llop") or "Not Included")
         _set_manual_field("llp_llop", llp_out)
 

@@ -294,6 +294,10 @@ def sync_and_update_covernote(
         peril_set = {str(p).strip().upper() for p in sync_payload["included_perils"] if str(p).strip()}
         if "special_perils" not in sync_payload:
             sync_payload["special_perils"] = "Included" if ("FLOOD" in peril_set or "SPECIAL PERILS" in peril_set) else "Not Included"
+        if "llp" not in sync_payload:
+            sync_payload["llp"] = "Included" if "LLP" in peril_set else "Not Included"
+        if "llop" not in sync_payload:
+            sync_payload["llop"] = "Included" if "LLOP" in peril_set else "Not Included"
         if "llp_llop" not in sync_payload:
             sync_payload["llp_llop"] = "Included" if ("LLP" in peril_set or "LLOP" in peril_set) else "Not Included"
         if "towing_limit" not in sync_payload and "TOWING" not in peril_set:
@@ -325,6 +329,8 @@ def sync_and_update_covernote(
             "windscreen_sum_insured",
             "towing_limit",
             "special_perils",
+            "llp",
+            "llop",
             "llp_llop",
             "excess",
             "waiver_betterment",
@@ -419,7 +425,15 @@ def sync_and_update_covernote(
             if sync_payload.get("special_perils") is not None:
                 sp_s = str(sync_payload["special_perils"]).strip()
                 ce.special_perils = None if sp_s.lower() in {"not included", "no", "none", "excluded", "-", ""} else sp_s
-            if sync_payload.get("llp_llop") is not None:
+            if sync_payload.get("llp") is not None:
+                llp_only_s = str(sync_payload["llp"]).strip()
+                ce.llp = None if llp_only_s.lower() in {"not included", "no", "none", "excluded", "-", ""} else llp_only_s
+            if sync_payload.get("llop") is not None:
+                llop_only_s = str(sync_payload["llop"]).strip()
+                ce.llop = None if llop_only_s.lower() in {"not included", "no", "none", "excluded", "-", ""} else llop_only_s
+            if sync_payload.get("llp") is not None or sync_payload.get("llop") is not None:
+                ce.llp_llop = "Included" if (ce.llp or ce.llop) else None
+            elif sync_payload.get("llp_llop") is not None:
                 llp_s = str(sync_payload["llp_llop"]).strip()
                 ce.llp_llop = None if llp_s.lower() in {"not included", "no", "none", "excluded", "-", ""} else llp_s
             if isinstance(sync_payload.get("extra_addons"), dict):

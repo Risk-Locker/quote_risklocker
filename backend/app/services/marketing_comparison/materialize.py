@@ -22,6 +22,8 @@ OVERRIDABLE_ENTRY_FIELDS: frozenset[str] = frozenset(
         "excess",
         "windscreen_sum_insured",
         "special_perils",
+        "llp",
+        "llop",
         "llp_llop",
         "extra_addons",
         "notes",
@@ -43,6 +45,8 @@ LEGACY_DEFAULT_LOCKED_FIELDS: tuple[str, ...] = (
     "excess",
     "windscreen_sum_insured",
     "special_perils",
+    "llp",
+    "llop",
     "llp_llop",
     "notes",
 )

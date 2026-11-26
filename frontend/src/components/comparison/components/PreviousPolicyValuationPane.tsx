@@ -618,18 +618,33 @@ export function PreviousPolicyValuationPane({
                   )}
                 </div>
                 <div className="flex justify-between items-center text-[11px]">
-                  <span className="text-neutral-500">LLP / LLOP:</span>
+                  <span className="text-neutral-500">LLP:</span>
                   {onPatchCovernoteField ? (
                     <InlineComparisonFieldEditor
-                      field="llp_llop"
-                      label="LLP / LLOP"
-                      currentValue={cn.llp_llop || "Not Included"}
+                      field="llp"
+                      label="LLP"
+                      currentValue={cn.llp || "Not Included"}
                       onSave={onPatchCovernoteField}
                     >
-                      <span className="font-medium text-neutral-800">{cn.llp_llop || "Not Included"}</span>
+                      <span className="font-medium text-neutral-800">{cn.llp || "Not Included"}</span>
                     </InlineComparisonFieldEditor>
                   ) : (
-                    <span className="font-medium text-neutral-800">{cn.llp_llop || "Not Included"}</span>
+                    <span className="font-medium text-neutral-800">{cn.llp || "Not Included"}</span>
+                  )}
+                </div>
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-neutral-500">LLOP:</span>
+                  {onPatchCovernoteField ? (
+                    <InlineComparisonFieldEditor
+                      field="llop"
+                      label="LLOP"
+                      currentValue={cn.llop || "Not Included"}
+                      onSave={onPatchCovernoteField}
+                    >
+                      <span className="font-medium text-neutral-800">{cn.llop || "Not Included"}</span>
+                    </InlineComparisonFieldEditor>
+                  ) : (
+                    <span className="font-medium text-neutral-800">{cn.llop || "Not Included"}</span>
                   )}
                 </div>
 

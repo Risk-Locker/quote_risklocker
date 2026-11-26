@@ -29,6 +29,8 @@ export type InlineEditableFieldKey =
   | "waiver_betterment"
   | "towing_limit"
   | "special_perils"
+  | "llp"
+  | "llop"
   | "llp_llop"
   | "excess"
   | "windscreen_sum_insured"
@@ -118,7 +120,7 @@ export function InlineComparisonFieldEditor({
     if (!open) return;
     const initStr =
       currentValue === null || currentValue === undefined
-        ? field === "special_perils" || field === "llp_llop"
+        ? field === "special_perils" || field === "llp" || field === "llop" || field === "llp_llop"
           ? "Not Included"
           : isExtraAddonField
             ? "No"
@@ -167,7 +169,8 @@ export function InlineComparisonFieldEditor({
     field === "motor_premium" ||
     field === "total_payable";
 
-  const isToggleField = field === "special_perils" || field === "llp_llop";
+  const isToggleField =
+    field === "special_perils" || field === "llp" || field === "llop" || field === "llp_llop";
   const isTowingField = field === "towing_limit";
   const isBettermentField = field === "waiver_betterment";
   const isAgreedField = field === "agreed_value";
@@ -245,7 +248,7 @@ export function InlineComparisonFieldEditor({
       setError("Notes must be 160 characters or fewer.");
       return;
     }
-    if ((field === "special_perils" || field === "llp_llop") && raw.length > 50) {
+    if ((field === "special_perils" || field === "llp" || field === "llop" || field === "llp_llop") && raw.length > 50) {
       setError("Value must be 50 characters or fewer.");
       return;
     }

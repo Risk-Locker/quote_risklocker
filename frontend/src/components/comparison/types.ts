@@ -102,6 +102,8 @@ export interface ComparisonEntry {
   rate_percentage: number | null;
   windscreen_sum_insured: number | null;
   special_perils: string | null;
+  llp?: string | null;
+  llop?: string | null;
   llp_llop: string | null;
   extra_addons?: Record<string, string>;
   canonical_perils?: string[];

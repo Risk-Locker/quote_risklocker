@@ -107,6 +107,8 @@ class ComparisonEntryUpsertRequest(BaseModel):
     discount: float | None = None
     windscreen_sum_insured: float | None = None
     special_perils: str | None = None
+    llp: str | None = None
+    llop: str | None = None
     llp_llop: str | None = None
     extra_addons: dict[str, str] | None = None
     betterment_rate: float | None = None
@@ -816,6 +818,8 @@ class UpdateComparisonEntryPatch(BaseModel):
     basic_figure_amount: float | None = None
     towing_limit: str | None = None
     special_perils: str | None = None
+    llp: str | None = None
+    llop: str | None = None
     llp_llop: str | None = None
     extra_addons: dict[str, str] | None = None
     excess: float | None = None
@@ -866,6 +870,10 @@ def patch_comparison_entry(
         raise HTTPException(status_code=422, detail="Towing limit must be 100 characters or fewer.")
     if payload.special_perils is not None and len(payload.special_perils.strip()) > 50:
         raise HTTPException(status_code=422, detail="Special Perils value must be 50 characters or fewer.")
+    if payload.llp is not None and len(payload.llp.strip()) > 50:
+        raise HTTPException(status_code=422, detail="LLP value must be 50 characters or fewer.")
+    if payload.llop is not None and len(payload.llop.strip()) > 50:
+        raise HTTPException(status_code=422, detail="LLOP value must be 50 characters or fewer.")
     if payload.llp_llop is not None and len(payload.llp_llop.strip()) > 50:
         raise HTTPException(status_code=422, detail="LLP / LLOP value must be 50 characters or fewer.")
     if payload.notes is not None and len(payload.notes.strip()) > 160:
@@ -914,6 +922,8 @@ def patch_comparison_entry(
             "betterment_rate",
             "towing_limit",
             "special_perils",
+            "llp",
+            "llop",
             "llp_llop",
             "extra_addons",
             "excess",
@@ -1020,7 +1030,33 @@ def patch_comparison_entry(
             entry.special_perils = None
             clear_field = "special_perils"
 
-    if payload.llp_llop is not None:
+    if payload.llp is not None:
+        clean_llp_only = payload.llp.strip()
+        if clean_llp_only.lower() in {"not included", "no", "none", "excluded", "-"}:
+            entry.llp = None
+            edited_fields.append("llp")
+        elif clean_llp_only:
+            entry.llp = clean_llp_only
+            edited_fields.append("llp")
+        else:
+            entry.llp = None
+            clear_field = "llp"
+
+    if payload.llop is not None:
+        clean_llop_only = payload.llop.strip()
+        if clean_llop_only.lower() in {"not included", "no", "none", "excluded", "-"}:
+            entry.llop = None
+            edited_fields.append("llop")
+        elif clean_llop_only:
+            entry.llop = clean_llop_only
+            edited_fields.append("llop")
+        else:
+            entry.llop = None
+            clear_field = "llop"
+
+    if payload.llp is not None or payload.llop is not None:
+        entry.llp_llop = "Included" if (entry.llp or entry.llop) else None
+    elif payload.llp_llop is not None:
         clean_llp = payload.llp_llop.strip()
         if clean_llp.lower() in {"not included", "no", "none", "excluded", "-"}:
             entry.llp_llop = None
@@ -1070,6 +1106,8 @@ def patch_comparison_entry(
             draft_keys_map = {
                 "towing_limit": ("towing", "towing_limit"),
                 "special_perils": ("special_perils",),
+                "llp": ("llp",),
+                "llop": ("llop",),
                 "llp_llop": ("llp_llop",),
                 "excess": ("excess", "excess_amount"),
                 "windscreen_sum_insured": ("windscreen_sum_insured", "windscreen"),
@@ -1092,6 +1130,12 @@ def patch_comparison_entry(
                 entry.towing_km = entry.towing_limit
             elif clear_field == "special_perils":
                 entry.special_perils = b_rev.get("special_perils")
+            elif clear_field == "llp":
+                entry.llp = b_rev.get("llp")
+                entry.llp_llop = "Included" if (entry.llp or entry.llop) else None
+            elif clear_field == "llop":
+                entry.llop = b_rev.get("llop")
+                entry.llp_llop = "Included" if (entry.llp or entry.llop) else None
             elif clear_field == "llp_llop":
                 entry.llp_llop = b_rev.get("llp_llop")
             elif clear_field == "extra_addons":
@@ -1136,6 +1180,12 @@ def patch_comparison_entry(
     elif clear_field:
         if clear_field == "special_perils":
             entry.special_perils = None
+        elif clear_field == "llp":
+            entry.llp = None
+            entry.llp_llop = "Included" if entry.llop else None
+        elif clear_field == "llop":
+            entry.llop = None
+            entry.llp_llop = "Included" if entry.llp else None
         elif clear_field == "llp_llop":
             entry.llp_llop = None
         elif clear_field == "extra_addons":
@@ -1174,7 +1224,7 @@ def patch_comparison_entry(
                 return abs(float(cur_val or 0.0) - float(base_val or 0.0)) < 0.01
             if fk in ("agreed_value", "waiver_betterment"):
                 return bool(cur_val) == bool(base_val)
-            if fk in ("special_perils", "llp_llop"):
+            if fk in ("special_perils", "llp", "llop", "llp_llop"):
                 return _norm_opt_text(cur_val) == _norm_opt_text(base_val)
             if fk in ("towing_limit", "valuation_type"):
                 return str(cur_val or "").strip().lower() == str(base_val or "").strip().lower()
@@ -1215,7 +1265,7 @@ def patch_comparison_entry(
                         remaining_edited.append(bf)
         edited_fields = [f for f in remaining_edited if f not in auto_cleared_fields]
 
-    sync_fields = list(dict.fromkeys([*edited_fields, *auto_cleared_fields]))
+    sync_fields = list(dict.fromkeys([*edited_fields, *auto_cleared_fields, *([clear_field] if clear_field else [])]))
 
     if edited_fields or clear_field or auto_cleared_fields:
         record_manual_overrides(
@@ -1248,6 +1298,8 @@ def patch_comparison_entry(
                 "betterment_display": entry.betterment_display,
                 "towing_limit": entry.towing_limit,
                 "special_perils": entry.special_perils or "Not Included",
+                "llp": entry.llp or "Not Included",
+                "llop": entry.llop or "Not Included",
                 "llp_llop": entry.llp_llop or "Not Included",
                 "extra_addons": getattr(entry, "extra_addons", None) or {},
                 "excess": entry.excess,
@@ -1259,7 +1311,8 @@ def patch_comparison_entry(
         if prem_delta_dec != Decimal("0.00") and "motor_premium" not in sync_fields:
             entry.motor_premium = round(max(0.0, float(entry.motor_premium or 0.0) + float(prem_delta_dec)), 2)
 
-        if auto_cleared_fields and s_baseline_sess and s_baseline_sess.draft and isinstance(s_baseline_sess.draft.fields, dict):
+        cleared_for_draft = list(dict.fromkeys([*auto_cleared_fields, *([clear_field] if clear_field else [])]))
+        if cleared_for_draft and s_baseline_sess and s_baseline_sess.draft and isinstance(s_baseline_sess.draft.fields, dict):
             draft_clear_map = {
                 "sum_insured": ("sum_insured", "coverage_amount"),
                 "motor_premium": ("motor_premium", "premium", "premium_due"),
@@ -1267,6 +1320,8 @@ def patch_comparison_entry(
                 "valuation_type": ("valuation_type",),
                 "towing_limit": ("towing", "towing_limit"),
                 "special_perils": ("special_perils",),
+                "llp": ("llp", "llp_llop"),
+                "llop": ("llop", "llp_llop"),
                 "llp_llop": ("llp_llop",),
                 "waiver_betterment": ("waiver_of_betterment",),
                 "betterment_rate": ("betterment_rate",),
@@ -1276,7 +1331,7 @@ def patch_comparison_entry(
             }
             df_clean = dict(s_baseline_sess.draft.fields)
             df_touched = False
-            for cf in auto_cleared_fields:
+            for cf in cleared_for_draft:
                 for dk in draft_clear_map.get(cf, ()):
                     if isinstance(df_clean.get(dk), dict) and df_clean[dk].get("status") == "manual_override":
                         df_clean[dk] = {**df_clean[dk], "status": "ready"}
@@ -1325,6 +1380,8 @@ def patch_comparison_entry(
                             "valuation_type": ("valuation_type",),
                             "towing_limit": ("towing", "towing_limit"),
                             "special_perils": ("special_perils",),
+                            "llp": ("llp",),
+                            "llop": ("llop",),
                             "llp_llop": ("llp_llop",),
                             "waiver_betterment": ("waiver_of_betterment",),
                             "betterment_rate": ("betterment_rate",),
@@ -1395,6 +1452,8 @@ def patch_comparison_entry(
         "towing_limit": entry.towing_limit,
         "towing_km": entry.towing_limit if "towing_limit" in get_entry_overrides(entry) else (entry.towing_km or entry.towing_limit),
         "special_perils": entry.special_perils,
+        "llp": entry.llp,
+        "llop": entry.llop,
         "llp_llop": entry.llp_llop,
         "extra_addons": getattr(entry, "extra_addons", None) or {},
         "review_flags": get_entry_review_flags(entry),
@@ -1713,6 +1772,8 @@ class CovernotePatchRequest(BaseModel):
     windscreen_sum_insured: float | None = None
     towing_limit: str | None = None
     special_perils: str | None = None
+    llp: str | None = None
+    llop: str | None = None
     llp_llop: str | None = None
     extra_addons: dict[str, str] | None = None
     included_perils: list[str] | None = None
