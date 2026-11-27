@@ -130,8 +130,13 @@ function isLlpLlopIncluded(val: string | null | undefined): boolean {
   );
 }
 
-export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
+export function ComparisonMatrix({
+  tenureId,
+  highlightEntryId = null,
+  highlightCompany = null,
+}: ComparisonMatrixProps) {
   const router = useRouter();
+  const [spotlightEntryId, setSpotlightEntryId] = useState<string | null>(null);
   const [data, setData] = useState<{
     tenure: TenureSpec;
     entries: ComparisonEntry[];
@@ -596,6 +601,32 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   // Card Visibility & Ranking States
   const [showHiddenCards, setShowHiddenCards] = useState(false);
   const [highlightedSessionId, setHighlightedSessionId] = useState<string | null>(null);
+  const spotlightAppliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const key = highlightEntryId || highlightCompany || "";
+    if (!key || loading || !data?.entries?.length || spotlightAppliedRef.current === key) return;
+    const match =
+      (highlightEntryId && data.entries.find((e) => e.id === highlightEntryId)) ||
+      (highlightCompany &&
+        data.entries.find((e) =>
+          e.company_name.toLowerCase().includes(highlightCompany.toLowerCase())
+        ));
+    if (!match) return;
+    spotlightAppliedRef.current = key;
+    setActiveVersionsByCompany((prev) => ({
+      ...prev,
+      [match.company_name]: [match.id],
+    }));
+    setSpotlightEntryId(match.id);
+    setTimeout(() => {
+      document
+        .getElementById(`comparison-entry-${match.id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    }, 150);
+    const timer = setTimeout(() => setSpotlightEntryId(null), 4500);
+    return () => clearTimeout(timer);
+  }, [highlightEntryId, highlightCompany, loading, data]);
   const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
   const [resolvingDuplicateId, setResolvingDuplicateId] = useState<string | null>(null);
   const snapshotGridRef = useRef<HTMLDivElement>(null);
@@ -1426,6 +1457,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
         group={group}
         activeIds={activeIds}
         isViewingPdf={activePdfSession?.sessionId === entry.session_id}
+        isSpotlighted={spotlightEntryId === entry.id}
         visibleRanksMap={visibleRanksMap}
         visibleDisplayEntriesCount={visibleDisplayEntries.length}
         editingRankEntryId={editingRankEntryId}

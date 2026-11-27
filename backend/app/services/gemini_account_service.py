@@ -157,9 +157,9 @@ class GeminiAccountManager:
         settings = get_settings()
         self._max_rpd_per_key = getattr(settings, "gemini_max_rpd_per_key", 480)
         self._max_rpm_per_key = getattr(settings, "gemini_max_rpm_per_key", 13)
-        self._max_tpm_per_key = getattr(settings, "gemini_max_tpm_per_key", 200_000)
+        self._max_tpm_per_key = getattr(settings, "gemini_max_tpm_per_key", 220_000)
         self._max_prompt_tokens = getattr(settings, "gemini_max_prompt_tokens", 60_000)
-        self._max_accounts = getattr(settings, "gemini_max_accounts", 8)
+        self._max_accounts = getattr(settings, "gemini_max_accounts", 16)
 
         self._accounts: list[GeminiAccount] = []
         self._active_index: int = 0
@@ -175,16 +175,20 @@ class GeminiAccountManager:
         self._successful_calls: int = 0
         self._failed_calls: int = 0
 
-        # Initialize from provided keys
-        if keys:
+        # Optional constructor keys are only accepted in hermetic test runs
+        import os, sys
+        if keys and (os.getenv("APP_ENV") == "test" or "pytest" in sys.modules):
             for idx, k in enumerate(keys):
                 if k.strip():
                     self._accounts.append(
                         GeminiAccount(
-                            id=f"env_{idx}",
+                            id=f"test_{idx}",
                             key=k.strip(),
-                            label=f"Account {idx + 1} (.env Primary)" if idx == 0 else f"Account {idx + 1} (.env)",
-                            source="env",
+                            label=f"Account {idx + 1} (Test)",
+                            source="test",
+                            status="ready",
+                            status_label="Ready · Test",
+                            status_color="green",
                         )
                     )
         self._init_parallel_slots()
@@ -207,11 +211,12 @@ class GeminiAccountManager:
             self._pool_cutoff_active = False
 
     def sync_accounts(self, db: Any = None) -> None:
-        """Sync accounts between .env configuration and Postgres AppSetting manual keys without losing live metrics."""
+        """Sync accounts exclusively from Postgres AppSetting keys without losing live metrics."""
+        import os, sys
+
         with self._lock:
             self._check_daily_reset()
-            settings = get_settings()
-            env_keys = [k.strip() for k in settings.gemini_api_keys if k.strip()]
+            in_test = os.getenv("APP_ENV") == "test" or "pytest" in sys.modules
 
             manual_items: list[dict[str, Any]] = []
             paused_ids: set[str] = set()
@@ -236,8 +241,7 @@ class GeminiAccountManager:
                     if pri and pri in PARALLEL_MODELS:
                         self._primary_model = pri
             else:
-                import os
-                if os.getenv("APP_ENV") != "test":
+                if not in_test:
                     try:
                         from app.db.session import SessionLocal
                         from app.models.tables import AppSetting
@@ -261,40 +265,13 @@ class GeminiAccountManager:
                 s = str(val or "all").strip().lower()
                 return s if s in ("all", "extraction_only", "copilot_only") else "all"
 
-            # 1. Primary .env key(s)
-            for idx, k in enumerate(env_keys):
-                acc_id = f"env_{idx}"
-                is_p = acc_id in paused_ids
-                w_scope = _norm_scope(scope_map.get(acc_id, existing_by_key[k].workload_scope if k in existing_by_key else "all"))
-                if k in existing_by_key:
-                    acc = existing_by_key[k]
-                    acc.label = f"Account {idx + 1} (.env Primary)" if idx == 0 else f"Account {idx + 1} (.env)"
-                    acc.source = "env"
-                    acc.is_paused = is_p
-                    acc.workload_scope = w_scope
-                    new_accounts.append(acc)
-                else:
-                    new_accounts.append(
-                        GeminiAccount(
-                            id=acc_id,
-                            key=k,
-                            label=f"Account {idx + 1} (.env Primary)" if idx == 0 else f"Account {idx + 1} (.env)",
-                            source="env",
-                            status="ready",
-                            status_label="Ready · Configured",
-                            status_color="green",
-                            is_paused=is_p,
-                            workload_scope=w_scope,
-                        )
-                    )
-
-            # 2. Manual keys from Postgres AppSetting
+            # 1. Database-managed keys from Postgres AppSetting (only authoritative source)
             for idx, item in enumerate(manual_items):
                 k = item.get("key", "").strip()
                 if not k or any(na.key == k for na in new_accounts):
                     continue
                 acc_id = item.get("id") or f"manual_{idx}"
-                acc_label = item.get("label") or f"Account {len(new_accounts) + 1} (Manual)"
+                acc_label = item.get("label") or f"API Key {len(new_accounts) + 1}"
                 is_p = (acc_id in paused_ids) or bool(item.get("is_paused", False))
                 w_scope = _norm_scope(scope_map.get(acc_id) or item.get("workload_scope") or (existing_by_key[k].workload_scope if k in existing_by_key else "all"))
                 if k in existing_by_key:
@@ -313,13 +290,22 @@ class GeminiAccountManager:
                             label=acc_label,
                             source="manual",
                             status=item.get("last_status", "ready"),
-                            status_label="Ready · Manual Key" if item.get("last_status") == "ready" else "Untested",
+                            status_label="Ready · Settings Key" if item.get("last_status") == "ready" else "Untested",
                             status_color="green" if item.get("last_status") == "ready" else "gray",
                             last_probed_at=item.get("last_probed_at"),
                             is_paused=is_p,
                             workload_scope=w_scope,
                         )
                     )
+
+            # Hermetic test-only fallback for in-memory GeminiAccountManager(keys=...) fixtures
+            if in_test and not new_accounts:
+                for acc in self._accounts:
+                    if acc.source == "test":
+                        acc.is_paused = acc.id in paused_ids
+                        if acc.id in scope_map:
+                            acc.workload_scope = _norm_scope(scope_map[acc.id])
+                        new_accounts.append(acc)
 
             # 3. Synchronize honest daily usage counts from Postgres gemini_api_call_logs
             import os, sys
@@ -900,7 +886,7 @@ class GeminiAccountManager:
 
     @staticmethod
     def probe_single_key(key: str, model: str | None = None) -> dict[str, Any]:
-        """Test a single key against Google Generative Language API without modifying pool state."""
+        """Verify an API key rapidly via Google AI Studio model metadata (0 tokens, ~150ms, no 504)."""
         import os, sys
 
         if os.getenv("APP_ENV") == "test" or "pytest" in sys.modules:
@@ -913,16 +899,16 @@ class GeminiAccountManager:
 
         settings = get_settings()
         target_model = resolve_active_gemini_model(model or getattr(settings, "gemini_model", None))
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={key}"
-        test_payload = {
-            "contents": [{"parts": [{"text": "ping"}]}],
-            "generationConfig": {"maxOutputTokens": 5},
-        }
+        model_url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}?key={key}"
+        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
 
         start_t = time.time()
         try:
-            with httpx.Client(timeout=httpx.Timeout(25.0, connect=10.0), http2=False) as client:
-                res = client.post(url, json=test_payload)
+            with httpx.Client(timeout=httpx.Timeout(8.0, connect=4.0), http2=False) as client:
+                res = client.get(model_url)
+                if res.status_code == 404:
+                    # Fallback to listing models so valid keys still verify cleanly if a model alias shifts
+                    res = client.get(list_url, timeout=httpx.Timeout(6.0, connect=3.0))
                 latency_ms = int((time.time() - start_t) * 1000)
                 if res.status_code == 200:
                     return {
@@ -932,25 +918,24 @@ class GeminiAccountManager:
                         "latency_ms": latency_ms,
                         "model": target_model,
                     }
-                else:
-                    err_text = ""
-                    try:
-                        err_text = res.json().get("error", {}).get("message", "")
-                    except Exception:
-                        err_text = res.text[:200]
-                    return {
-                        "ok": False,
-                        "status_code": res.status_code,
-                        "error": err_text or f"HTTP {res.status_code} error from Gemini API",
-                        "latency_ms": latency_ms,
-                        "model": target_model,
-                    }
+                err_text = ""
+                try:
+                    err_text = res.json().get("error", {}).get("message", "")
+                except Exception:
+                    err_text = res.text[:200]
+                return {
+                    "ok": False,
+                    "status_code": res.status_code,
+                    "error": err_text or f"HTTP {res.status_code} error from Gemini API",
+                    "latency_ms": latency_ms,
+                    "model": target_model,
+                }
         except httpx.TimeoutException:
             latency_ms = int((time.time() - start_t) * 1000)
             return {
                 "ok": False,
                 "status_code": 504,
-                "error": "Gemini API request timed out (>25s)",
+                "error": "Google API metadata check timed out (>8s). Please retry.",
                 "latency_ms": latency_ms,
                 "model": target_model,
             }
@@ -1315,11 +1300,10 @@ _account_manager: GeminiAccountManager | None = None
 
 
 def get_key_pool() -> GeminiAccountManager:
-    """Retrieve singleton GeminiAccountManager, syncing keys from .env and Postgres."""
+    """Retrieve singleton GeminiAccountManager, syncing DB-managed keys from Postgres."""
     global _account_manager
     if _account_manager is None:
-        settings = get_settings()
-        _account_manager = GeminiAccountManager(settings.gemini_api_keys)
+        _account_manager = GeminiAccountManager()
         _account_manager.sync_accounts()
     return _account_manager
 

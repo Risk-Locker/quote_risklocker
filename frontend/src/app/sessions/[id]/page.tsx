@@ -19,10 +19,10 @@ export default function SessionWorkspacePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ step?: string }>;
+  searchParams: Promise<{ step?: string; highlight_field?: string }>;
 }) {
   const { id } = use(params);
-  const { step } = use(searchParams);
+  const { step, highlight_field } = use(searchParams);
   const router = useRouter();
   const phase = step === "preview" ? "preview" : "review";
 
@@ -31,7 +31,11 @@ export default function SessionWorkspacePage({
       <AnimatePresence mode="wait" initial={false}>
         {phase === "review" ? (
           <motion.div key="review" {...SLIDE}>
-            <ReviewPhase id={id} onNext={() => router.push(`?step=preview`, { scroll: false })} />
+            <ReviewPhase
+              id={id}
+              highlightField={highlight_field}
+              onNext={() => router.push(`?step=preview`, { scroll: false })}
+            />
           </motion.div>
         ) : (
           <motion.div key="preview" {...SLIDE}>

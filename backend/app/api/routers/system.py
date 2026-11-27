@@ -1005,16 +1005,16 @@ def settings_gemini_add_key(
     pool = get_key_pool()
     pool.sync_accounts(db=db)
 
-    # Check for duplicates across .env and existing manual keys
+    # Check for duplicates across existing DB-managed keys
     for acc in pool.get_accounts():
         if acc.key == raw_key:
             raise AppError(f"This API key is already configured as '{acc.label}'.", 400)
 
-    # Check maximum accounts capacity (e.g. 6)
-    if len(pool.get_accounts()) >= getattr(settings, "gemini_max_accounts", 6):
+    # Check maximum accounts capacity
+    if len(pool.get_accounts()) >= getattr(settings, "gemini_max_accounts", 16):
         raise AppError(f"Maximum limit of {settings.gemini_max_accounts} accounts reached. Remove an existing key first.", 400)
 
-    # LIVE PROBE GATE: Probe key against Google Generative Language API before saving!
+    # LIVE PROBE GATE: Fast metadata verification against Google Generative Language API before saving
     target_model = resolve_active_gemini_model(getattr(settings, "gemini_model", None))
     probe_res = pool.probe_single_key(raw_key, model=target_model)
 
@@ -1025,6 +1025,8 @@ def settings_gemini_add_key(
             f"Google Gemini API rejected this key (HTTP {status_code}): {err}. Key was not added to the pool.",
             400,
         )
+
+    from sqlalchemy.orm.attributes import flag_modified
 
     # Key is 100% valid! Persist into AppSetting in Postgres
     setting = db.get(AppSetting, "gemini_manual_api_keys")
@@ -1040,7 +1042,7 @@ def settings_gemini_add_key(
     new_account = {
         "id": new_id,
         "key": raw_key,
-        "label": label or f"Account {account_num} (Manual)",
+        "label": label or f"API Key {account_num}",
         "workload_scope": workload_scope,
         "added_at": datetime.now(timezone.utc).isoformat(),
         "last_status": "ready",
@@ -1049,6 +1051,7 @@ def settings_gemini_add_key(
     keys_list.append(new_account)
     current_val["keys"] = keys_list
     setting.value = current_val
+    flag_modified(setting, "value")
 
     scope_setting = db.get(AppSetting, "gemini_key_workload_scopes")
     if not scope_setting:
@@ -1059,6 +1062,7 @@ def settings_gemini_add_key(
     scopes_map[new_id] = workload_scope
     scopes_val["scopes"] = scopes_map
     scope_setting.value = scopes_val
+    flag_modified(scope_setting, "value")
 
     db.commit()
     db.refresh(setting)
@@ -1090,11 +1094,12 @@ def settings_gemini_delete_key(
     user: User = Depends(current_user),
 ) -> dict:
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from sqlalchemy.orm.attributes import flag_modified
     from app.extraction.gemini_extractor import get_key_pool
 
     setting = db.get(AppSetting, "gemini_manual_api_keys")
     if not setting or not isinstance(setting.value, dict):
-        raise AppError("No manual keys configured.", 404)
+        raise AppError("API key not found in Settings.", 404)
 
     current_val = dict(setting.value)
     keys_list = list(current_val.get("keys", []))
@@ -1102,10 +1107,30 @@ def settings_gemini_delete_key(
     keys_list = [k for k in keys_list if k.get("id") != key_id]
 
     if len(keys_list) == initial_len:
-        raise AppError("API key not found or it is defined in .env (cannot delete .env keys from UI).", 404)
+        raise AppError("API key not found in Settings.", 404)
 
     current_val["keys"] = keys_list
     setting.value = current_val
+    flag_modified(setting, "value")
+
+    scope_setting = db.get(AppSetting, "gemini_key_workload_scopes")
+    if scope_setting and isinstance(scope_setting.value, dict):
+        s_val = dict(scope_setting.value)
+        s_map = dict(s_val.get("scopes", {}) or {})
+        if key_id in s_map:
+            s_map.pop(key_id, None)
+            s_val["scopes"] = s_map
+            scope_setting.value = s_val
+            flag_modified(scope_setting, "value")
+
+    paused_setting = db.get(AppSetting, "gemini_paused_keys")
+    if paused_setting and isinstance(paused_setting.value, dict):
+        p_val = dict(paused_setting.value)
+        p_ids = [pid for pid in list(p_val.get("paused_ids", []) or []) if pid != key_id]
+        p_val["paused_ids"] = p_ids
+        paused_setting.value = p_val
+        flag_modified(paused_setting, "value")
+
     db.commit()
     db.refresh(setting)
 

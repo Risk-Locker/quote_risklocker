@@ -22,6 +22,7 @@ export interface LedgerTableProps {
   selectedMonth: string;
   selectedYear: string;
   highlightedTenureId: string | null;
+  highlightedTenureIds?: Set<string>;
   pics: PicItem[];
   density?: LedgerDensity;
   hiddenColumns?: string[];
@@ -63,6 +64,7 @@ export function LedgerTable({
   selectedMonth,
   selectedYear,
   highlightedTenureId,
+  highlightedTenureIds,
   pics,
   density = "comfortable",
   hiddenColumns = [],
@@ -240,6 +242,7 @@ export function LedgerTable({
                   onToggleSelectGroup={onToggleSelectGroup}
                   onDeleteTarget={onDeleteTarget}
                   highlightedTenureId={highlightedTenureId}
+                  highlightedTenureIds={highlightedTenureIds}
                   pics={pics}
                   density={density}
                   hiddenColumns={hiddenColumns}

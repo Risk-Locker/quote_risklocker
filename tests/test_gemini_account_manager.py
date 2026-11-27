@@ -124,7 +124,7 @@ def test_gemini_account_manager_init():
     mgr = GeminiAccountManager(keys)
     accounts = mgr.get_accounts()
     assert len(accounts) == 1
-    assert accounts[0].source == "env"
+    assert accounts[0].source == "test"
     assert accounts[0].masked_key.startswith("AIzaSy")
     assert accounts[0].masked_key.endswith("7890")
     assert mgr.get_next_key() == "AIzaSyPrimaryEnvKey12345678901234567890"
@@ -210,6 +210,9 @@ def test_gemini_prompt_token_compaction_guard():
 
 
 def test_settings_add_and_delete_manual_key():
+    from app.services import gemini_account_service as _gas
+
+    _gas._account_manager = None
     db = MemoryDb()
     client = _http_client(user=_admin_user(), db=db)
 
@@ -217,11 +220,17 @@ def test_settings_add_and_delete_manual_key():
     bad_res = client.post("/settings/gemini/keys", json={"key": "invalid_short_key"})
     assert bad_res.status_code == 400
 
-    # 2. Add valid key
-    valid_key = "AIzaSyManualAccount2TestKey123456789012"
+    # 2. Add two DB-managed keys (no .env keys exist anymore)
+    key1 = "AIzaSyManualAccount1TestKey123456789011"
+    key2 = "AIzaSyManualAccount2TestKey123456789012"
+    res1 = client.post(
+        "/settings/gemini/keys",
+        json={"key": key1, "label": "Account 1 Test", "workload_scope": "copilot_only"},
+    )
+    assert res1.status_code == 200
     res = client.post(
         "/settings/gemini/keys",
-        json={"key": valid_key, "label": "Account 2 Test"},
+        json={"key": key2, "label": "Account 2 Test"},
     )
     assert res.status_code == 200
     data = res.json()
@@ -229,11 +238,11 @@ def test_settings_add_and_delete_manual_key():
     assert "Account added to pool" in data["message"]
     key_id = data["account"]["id"]
 
-    # Verify key is saved in AppSetting in DB
+    # Verify both keys are saved in AppSetting in DB
     setting = db.get(AppSetting, "gemini_manual_api_keys")
     assert setting is not None
-    assert len(setting.value["keys"]) == 1
-    assert setting.value["keys"][0]["key"] == valid_key
+    assert len(setting.value["keys"]) == 2
+    assert setting.value["keys"][1]["key"] == key2
 
     # 3. Check /settings/limits reflects 2 accounts
     limits_res = client.get("/settings/limits")
@@ -246,11 +255,11 @@ def test_settings_add_and_delete_manual_key():
     assert switch_res.status_code == 200
     assert switch_res.json()["active_account_index"] == 1
 
-    # 5. Delete manual key
+    # 5. Delete second DB-managed key
     del_res = client.delete(f"/settings/gemini/keys/{key_id}")
     assert del_res.status_code == 200
     assert del_res.json()["ok"] is True
-    assert len(db.get(AppSetting, "gemini_manual_api_keys").value["keys"]) == 0
+    assert len(db.get(AppSetting, "gemini_manual_api_keys").value["keys"]) == 1
 
 
 def test_settings_add_aq_prefix_manual_key():

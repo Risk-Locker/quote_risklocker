@@ -107,7 +107,7 @@ def test_historical_analytics_grouping_and_metrics(db_session: Session):
     assert acc1_lite31["peak_rpm"] >= 3
     assert acc1_lite31["peak_tpm"] >= 33_000
     assert acc1_lite31["rpm_limit"] == 13
-    assert acc1_lite31["tpm_limit"] == 200_000
+    assert acc1_lite31["tpm_limit"] == 220_000
     assert acc1_lite31["rpd_limit"] == 480
 
 

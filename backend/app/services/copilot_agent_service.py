@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import re
 import threading
 import time
@@ -16,11 +17,16 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.models.tables import (
+    ClientRecord,
     CopilotArtifact,
     CopilotMessage,
     CopilotThread,
+    CustomerAccount,
     GeminiApiCallLog,
+    InsuranceTenure,
+    TrackedVehicle,
     User,
+    VehiclePlateHistory,
     new_id,
 )
 from app.services.ai_fleet_gateway import (
@@ -29,6 +35,7 @@ from app.services.ai_fleet_gateway import (
     get_fleet_gateway,
 )
 from app.services.copilot_excel_service import export_sql_to_excel
+from app.services.copilot_orchestrator import get_copilot_orchestrator
 from app.services.copilot_sql_guard import SQLGuardError, execute_readonly_sql
 from app.services.gemini_account_service import get_current_pt_cycle_date, get_key_pool
 
@@ -57,8 +64,12 @@ You have full live awareness of the agency's entire PostgreSQL database through 
    Columns: `company_name`, `catalog_name`, `engine_type`, `concept_key`, `concept_label`, `offering_kind`, `role`, `display_value`, `description_override`, `concept_description`.
 
 ### 2. DOMAIN RULES & BEHAVIOUR
-- **Plate matching**: Always normalize spaces/case with `REPLACE(UPPER(vehicle_no), ' ', '') ILIKE '%88%'` (or `LIKE` in SQLite).
+- **Bulk plate existence checks**: Whenever the user pastes 3 or more vehicle plates to check existence, ALWAYS call `bulk_check_plates` ONCE with all plates instead of writing multi-hop `VALUES` SQL queries. It checks current plates, plate history, ledger tenures, and client records in a single zero-bloat pass.
+- **Plate matching in SQL**: Always normalize spaces/case with `REPLACE(UPPER(vehicle_no), ' ', '') ILIKE '%88%'` (or `LIKE` in SQLite).
+- **Accurate counts & active ledger defaults**: On `ai_v_motor_ledger`, ALWAYS filter `is_projected = FALSE AND is_hidden = FALSE` unless the user explicitly asks for projected or hidden records. On `ai_v_vehicles_plates`, ALWAYS use `COUNT(DISTINCT tracked_vehicle_id)` because historical plate joins produce multiple rows per vehicle.
+- **Deterministic IDs & sorting**: Always include `tenure_id`, `entry_id`, `session_id`, `customer_id`, `policy_year`, and an explicit `ORDER BY` in SQL queries so clickable navigation links and counts are exact.
 - **Multi-year ambiguity**: If the user asks about a car/plate without specifying a year and multiple `policy_year` tenures exist, briefly analyze ALL years on record (e.g., 2025 vs 2026) using `get_comparison_matrix_detail` or SQL, highlight the key YoY difference, and naturally ask which year they want to inspect further or act on.
+- **Malaysian Motor Domain Rules**: Cover Notes and Quotations are strictly isolated; never calculate totals or road tax mentally — use `calculate_road_tax_tool` (ICE CC vs 2026 EV kW) and `get_comparison_matrix_detail` (authoritative Decimal totals and 10-year betterment caps).
 - **Zero-Token Excel**: When the user asks for an Excel report, workbook, or full list export, write ONE clean SQL query and call `export_sql_to_excel`. Never attempt to print hundreds of rows in chat text.
 - **Zero Invented Facts/Links**: Only state exact numbers, plates, customer names, and RM values observed in tool results. Do NOT fabricate UUIDs or URLs; verified clickable navigation buttons are automatically attached from your tool results, so mention entities cleanly by plate/name/year in prose and tables.
 - **Formatting**: Respond naturally like Gemini — concise, structured GitHub Markdown with bold RM amounts, crisp comparison tables when helpful, and proactive next-step suggestions.
@@ -82,11 +93,12 @@ def _clear_user_stream(user_id: str, ev: threading.Event) -> None:
 
 
 def get_user_copilot_quota(db: Session, user: User) -> dict[str, Any]:
-    """Return current user's today Copilot turn/token usage and fleet availability."""
+    """Return current user's today Copilot turn/token usage, policy caps, and live barrel availability."""
     policy = get_copilot_quota_policy(db)
     is_admin = user.role in ("super_admin", "admin", "dev")
     turns_limit = policy["admin_daily_turns"] if is_admin else policy["staff_daily_turns"]
     tokens_limit = policy["admin_daily_tokens"] if is_admin else policy["staff_daily_tokens"]
+    max_tokens_per_turn = policy["max_tokens_per_turn"] if is_admin else policy["staff_max_tokens_per_turn"]
 
     now_utc = datetime.now(timezone.utc)
     start_of_day = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -115,6 +127,10 @@ def get_user_copilot_quota(db: Session, user: User) -> dict[str, Any]:
         or 0
     )
 
+    gw = get_fleet_gateway()
+    barrels = gw.get_copilot_barrel_snapshot(db)
+    dedicated_keys = len({b["account_id"] for b in barrels if b.get("scope") == "copilot_only"})
+
     is_exhausted = (not policy["enabled"]) or (turns_used >= turns_limit) or (tokens_used >= tokens_limit)
     return {
         "enabled": policy["enabled"],
@@ -126,6 +142,11 @@ def get_user_copilot_quota(db: Session, user: User) -> dict[str, Any]:
         "tokens_remaining": max(0, tokens_limit - tokens_used),
         "is_exhausted": is_exhausted,
         "pt_cycle_date": today_pt,
+        "warn_turn_tokens": int(policy.get("warn_turn_tokens", 15_000)),
+        "max_tokens_per_turn": int(max_tokens_per_turn),
+        "max_input_tokens_per_turn": int(policy.get("max_input_tokens_per_turn", 200_000)),
+        "barrels": barrels,
+        "dedicated_copilot_keys_count": dedicated_keys,
     }
 
 
@@ -147,9 +168,13 @@ def _derive_thread_title(query: str, links: list[dict[str, Any]] | None = None) 
     return title[:100] or "New Chat"
 
 
-def serialize_thread(t: CopilotThread) -> dict[str, Any]:
+def serialize_thread(t: CopilotThread, owner: User | None = None) -> dict[str, Any]:
     return {
         "id": str(t.id),
+        "user_id": str(t.user_id),
+        "owner_name": (owner.name or owner.email) if owner else None,
+        "owner_email": owner.email if owner else None,
+        "owner_role": owner.role if owner else None,
         "title": t.title,
         "is_pinned": bool(t.is_pinned),
         "anchor_type": t.anchor_type,
@@ -199,8 +224,236 @@ def serialize_message(m: CopilotMessage, artifacts: list[CopilotArtifact] | None
     }
 
 
-def _collect_verified_links(rows: list[dict[str, Any]], max_links: int = 8) -> list[dict[str, str]]:
-    """Build verified UI navigation chips strictly from real IDs observed in SQL/tool outputs."""
+def _norm_plate(raw: str | None) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (raw or "").upper())
+
+
+def _execute_bulk_check_plates(db: Session, raw_plates: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Cross-check up to 2,000 vehicle plates across TrackedVehicle, VehiclePlateHistory, InsuranceTenure, and ClientRecord."""
+    candidates: list[str] = []
+    if isinstance(raw_plates, list):
+        candidates = [str(p or "").strip() for p in raw_plates]
+    elif isinstance(raw_plates, str):
+        candidates = [p.strip() for p in re.split(r"[\n,;]+", raw_plates)]
+
+    seen_norm: dict[str, str] = {}
+    for p in candidates:
+        np = _norm_plate(p)
+        if np and np not in seen_norm:
+            seen_norm[np] = p.strip().upper()
+            if len(seen_norm) >= 2000:
+                break
+
+    if not seen_norm:
+        return {
+            "total_checked": 0,
+            "found_count": 0,
+            "missing_count": 0,
+            "missing_plates": [],
+            "matched_via_history": [],
+            "matched_tenure_ids": [],
+            "sample_matches": [],
+        }, []
+
+    target_set = set(seen_norm.keys())
+
+    # 1. TrackedVehicle current plates + CustomerAccount
+    tv_map: dict[str, dict[str, Any]] = {}
+    tv_by_id: dict[str, dict[str, Any]] = {}
+    tv_rows = db.execute(
+        select(
+            TrackedVehicle.id,
+            TrackedVehicle.vehicle_no,
+            TrackedVehicle.customer_id,
+            CustomerAccount.canonical_name,
+        ).outerjoin(CustomerAccount, CustomerAccount.id == TrackedVehicle.customer_id)
+    ).all()
+    for tv_id, vno, cid, cname in tv_rows:
+        info = {
+            "tracked_vehicle_id": str(tv_id),
+            "vehicle_no": vno or "",
+            "customer_id": str(cid) if cid else None,
+            "customer_name": cname or None,
+        }
+        tv_by_id[str(tv_id)] = info
+        np = _norm_plate(vno)
+        if np in target_set and np not in tv_map:
+            tv_map[np] = info
+
+    # 2. VehiclePlateHistory historical plates
+    hist_map: dict[str, dict[str, Any]] = {}
+    hist_rows = db.execute(
+        select(VehiclePlateHistory.plate_no, VehiclePlateHistory.tracked_vehicle_id)
+    ).all()
+    for h_plate, tv_id in hist_rows:
+        np = _norm_plate(h_plate)
+        if np in target_set and np not in hist_map:
+            tv_info = tv_by_id.get(str(tv_id), {})
+            hist_map[np] = {
+                "historical_plate_no": h_plate,
+                "current_plate_no": tv_info.get("vehicle_no"),
+                "tracked_vehicle_id": str(tv_id),
+                "customer_id": tv_info.get("customer_id"),
+                "customer_name": tv_info.get("customer_name"),
+            }
+
+    # 3. Active / non-discarded InsuranceTenure rows (prefer non-projected latest tenure)
+    tenure_map: dict[str, dict[str, Any]] = {}
+    t_rows = db.execute(
+        select(
+            InsuranceTenure.id,
+            InsuranceTenure.vehicle_no,
+            InsuranceTenure.customer_name,
+            InsuranceTenure.stage,
+            InsuranceTenure.coverage_start_date,
+            InsuranceTenure.is_projected,
+            InsuranceTenure.tracked_vehicle_id,
+        )
+        .where(
+            InsuranceTenure.deleted_at.is_(None),
+            InsuranceTenure.is_discarded == False,
+        )
+        .order_by(InsuranceTenure.is_projected.asc(), InsuranceTenure.coverage_start_date.desc())
+    ).all()
+    for tid, vno, cname, stage, start_dt, _is_proj, tv_id in t_rows:
+        np = _norm_plate(vno)
+        if np in target_set and np not in tenure_map:
+            tenure_map[np] = {
+                "tenure_id": str(tid),
+                "vehicle_no": vno or "",
+                "customer_name": cname or None,
+                "stage": stage,
+                "policy_year": start_dt.year if start_dt else None,
+                "tracked_vehicle_id": str(tv_id) if tv_id else None,
+            }
+
+    # 4. Non-deleted ClientRecord rows
+    client_rec_map: dict[str, dict[str, Any]] = {}
+    cr_rows = db.execute(
+        select(
+            ClientRecord.id,
+            ClientRecord.vehicle_no,
+            ClientRecord.customer_name,
+            ClientRecord.insurance_company,
+            ClientRecord.session_id,
+        ).where(ClientRecord.deleted_at.is_(None))
+    ).all()
+    for cr_id, vno, cname, comp, sid in cr_rows:
+        np = _norm_plate(vno)
+        if np in target_set and np not in client_rec_map:
+            client_rec_map[np] = {
+                "client_record_id": str(cr_id),
+                "vehicle_no": vno or "",
+                "customer_name": cname or None,
+                "insurance_company": comp,
+                "session_id": str(sid) if sid else None,
+            }
+
+    missing_plates: list[str] = []
+    matched_via_history: list[dict[str, Any]] = []
+    matched_tenure_ids: list[str] = []
+    sample_matches: list[dict[str, Any]] = []
+    matched_observed_rows: list[dict[str, Any]] = []
+    found_count = 0
+
+    for np, orig_label in seen_norm.items():
+        tv_hit = tv_map.get(np)
+        hist_hit = hist_map.get(np)
+        ten_hit = tenure_map.get(np)
+        cr_hit = client_rec_map.get(np)
+        if not (tv_hit or hist_hit or ten_hit or cr_hit):
+            missing_plates.append(orig_label)
+            continue
+
+        found_count += 1
+        sources = []
+        if tv_hit:
+            sources.append("tracked_vehicles")
+        if hist_hit:
+            sources.append("plate_history")
+            matched_via_history.append(
+                {
+                    "queried_plate": orig_label,
+                    "current_plate": hist_hit.get("current_plate_no"),
+                    "customer_name": hist_hit.get("customer_name"),
+                }
+            )
+        if ten_hit:
+            sources.append("motor_ledger")
+            matched_tenure_ids.append(ten_hit["tenure_id"])
+        if cr_hit:
+            sources.append("client_records")
+
+        best_plate = (
+            (ten_hit or {}).get("vehicle_no")
+            or (tv_hit or {}).get("vehicle_no")
+            or (cr_hit or {}).get("vehicle_no")
+            or (hist_hit or {}).get("current_plate_no")
+            or orig_label
+        )
+        best_cust = (
+            (ten_hit or {}).get("customer_name")
+            or (tv_hit or {}).get("customer_name")
+            or (cr_hit or {}).get("customer_name")
+            or (hist_hit or {}).get("customer_name")
+        )
+        row_summary = {
+            "queried_plate": orig_label,
+            "vehicle_no": best_plate,
+            "customer_name": best_cust,
+            "tenure_id": (ten_hit or {}).get("tenure_id"),
+            "policy_year": (ten_hit or {}).get("policy_year"),
+            "session_id": (cr_hit or {}).get("session_id"),
+            "customer_id": (tv_hit or {}).get("customer_id") or (hist_hit or {}).get("customer_id"),
+            "sources": sources,
+        }
+        matched_observed_rows.append(row_summary)
+        if len(sample_matches) < 30:
+            sample_matches.append(row_summary)
+
+    return (
+        {
+            "total_checked": len(seen_norm),
+            "found_count": found_count,
+            "missing_count": len(missing_plates),
+            "missing_plates": missing_plates,
+            "matched_via_history": matched_via_history[:50],
+            "matched_tenure_ids": matched_tenure_ids[:100],
+            "sample_matches": sample_matches,
+        },
+        matched_observed_rows,
+    )
+
+
+def _collect_verified_links(
+    rows: list[dict[str, Any]],
+    final_markdown: str = "",
+    max_links: int = 8,
+) -> list[dict[str, str]]:
+    """Build verified UI navigation chips strictly from real IDs relevant to the final answer."""
+    if not rows:
+        return []
+
+    norm_answer = re.sub(r"[^A-Z0-9]", "", (final_markdown or "").upper())
+    low_answer = (final_markdown or "").lower()
+
+    # Filter to rows mentioned in the final answer when possible so missing-only reports don't attach random vehicles
+    relevant_rows: list[dict[str, Any]] = []
+    if final_markdown.strip():
+        for r in rows:
+            vno = _norm_plate(str(r.get("vehicle_no") or ""))
+            qno = _norm_plate(str(r.get("queried_plate") or ""))
+            cname = str(r.get("customer_name") or r.get("canonical_name") or "").strip().lower()
+            plate_hit = (len(vno) >= 3 and vno in norm_answer) or (len(qno) >= 3 and qno in norm_answer)
+            cust_hit = len(cname) >= 4 and cname in low_answer
+            if plate_hit or cust_hit:
+                relevant_rows.append(r)
+    else:
+        relevant_rows = rows
+
+    if not relevant_rows:
+        return []
+
     links: list[dict[str, str]] = []
     seen_hrefs: set[str] = set()
 
@@ -208,12 +461,28 @@ def _collect_verified_links(rows: list[dict[str, Any]], max_links: int = 8) -> l
         if len(links) >= max_links or href in seen_hrefs:
             return
         seen_hrefs.add(href)
-        links.append({"kind": kind, "label": label[:64], "href": href})
+        links.append({"kind": kind, "label": label[:72], "href": href})
 
-    for row in rows:
-        tenure_id = row.get("tenure_id")
-        session_id = row.get("session_id")
-        covernote_sid = row.get("covernote_session_id")
+    # Emit primary batch selection link when 2+ distinct tenures are relevant
+    distinct_tids: list[str] = []
+    for r in relevant_rows:
+        tid = str(r.get("tenure_id") or "").strip()
+        if tid and tid not in distinct_tids:
+            distinct_tids.append(tid)
+    if len(distinct_tids) >= 2:
+        joined = ",".join(distinct_tids[:30])
+        _add(
+            "ledger_batch",
+            f"Select & Highlight {len(distinct_tids)} Vehicles in Ledger",
+            f"/ledger?tenure_ids={joined}&select=true&highlight={joined}&year=all&category=all",
+        )
+
+    for row in relevant_rows:
+        tenure_id = str(row.get("tenure_id") or "").strip()
+        entry_id = str(row.get("entry_id") or "").strip()
+        session_id = str(row.get("session_id") or "").strip()
+        covernote_sid = str(row.get("covernote_session_id") or "").strip()
+        customer_id = str(row.get("customer_id") or "").strip()
         plate = str(row.get("vehicle_no") or "").strip()
         year = row.get("policy_year")
         customer = str(row.get("customer_name") or row.get("canonical_name") or "").strip()
@@ -223,27 +492,54 @@ def _collect_verified_links(rows: list[dict[str, Any]], max_links: int = 8) -> l
 
         if tenure_id:
             comp_href = f"/comparison?tenure_id={tenure_id}"
+            if entry_id:
+                comp_href += f"&highlight_entry={entry_id}"
             _add("comparison", f"Compare {tag}{yr_suffix}", comp_href)
+
+            yr_param = str(year) if year else "all"
             if plate:
-                ledger_href = f"/ledger?search={quote(plate)}&highlight={tenure_id}"
+                ledger_href = f"/ledger?tenure_ids={tenure_id}&select=true&highlight_tenure={tenure_id}&year={yr_param}&category=all&search={quote(plate)}"
             else:
-                ledger_href = f"/ledger?highlight={tenure_id}"
+                ledger_href = f"/ledger?tenure_ids={tenure_id}&select=true&highlight_tenure={tenure_id}&year={yr_param}&category=all"
             _add("ledger", f"Ledger: {tag}{yr_suffix}", ledger_href)
         elif plate:
-            _add("ledger", f"Ledger: {plate}", f"/ledger?search={quote(plate)}")
+            _add("ledger", f"Ledger: {plate}", f"/ledger?search={quote(plate)}&year=all&category=all")
 
         eff_sid = session_id or covernote_sid
         if eff_sid:
-            _add("session", f"Workspace: {tag}{yr_suffix}", f"/sessions/{eff_sid}/review")
+            _add("session", f"Workspace: {tag}{yr_suffix}", f"/sessions/{eff_sid}")
 
         if customer and not tenure_id and not eff_sid:
-            _add("client", f"Client: {customer}", f"/client-records?search={quote(customer)}")
+            c_href = f"/client-records?search={quote(customer)}"
+            if customer_id:
+                c_href += f"&highlight_client={customer_id}"
+            _add("client", f"Client: {customer}", c_href)
 
     return links
 
 
 def _tool_declarations(*, include_web_research: bool) -> list[dict[str, Any]]:
     decls: list[dict[str, Any]] = [
+        {
+            "name": "bulk_check_plates",
+            "description": (
+                "Check existence of 3 to 2,000 vehicle registration plates in ONE fast pass across "
+                "tracked_vehicles, vehicle_plate_history, motor_ledger, and client_records. "
+                "Use this ALWAYS when the user pastes a list of plates to check if they exist."
+            ),
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "plates": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                        "description": "List of vehicle registration plates to check.",
+                    },
+                    "reason": {"type": "STRING", "description": "Short 4-8 word summary of this bulk check."},
+                },
+                "required": ["plates", "reason"],
+            },
+        },
         {
             "name": "run_readonly_sql",
             "description": (
@@ -593,7 +889,7 @@ def stream_agent_turn(
                     thread.anchor_label = str(page_context.get("anchor_label") or "")[:255] or None
             db.commit()
 
-            yield {"type": "thread", "thread": serialize_thread(thread)}
+            yield {"type": "thread", "thread": serialize_thread(thread, owner=user)}
 
             # Build conversation contents from compacted summary + recent messages
             contents: list[dict[str, Any]] = []
@@ -636,6 +932,12 @@ def stream_agent_turn(
 
             max_hops = int(policy["max_tool_hops"])
             max_input_tok = int(policy["max_input_tokens_per_turn"])
+            is_admin_user = user.role in ("super_admin", "admin", "dev")
+            turn_token_cap = int(
+                policy.get("max_tokens_per_turn", 150_000)
+                if is_admin_user
+                else policy.get("staff_max_tokens_per_turn", 60_000)
+            )
 
         # Step 2: Autonomous ReAct Loop (outside long DB transaction!)
         pool = get_key_pool()
@@ -643,6 +945,8 @@ def stream_agent_turn(
         tools_spec = _tool_declarations(include_web_research=enable_web_research)
         final_markdown = ""
         model_reply_telemetry: list[dict[str, Any]] = []
+        orchestrator = get_copilot_orchestrator()
+        token_cap_reached = False
 
         if has_keys:
             for hop in range(max_hops + 1):
@@ -650,43 +954,96 @@ def stream_agent_turn(
                     yield {"type": "error", "code": "cancelled", "message": "Request stopped."}
                     return
 
+                if total_tokens_turn >= turn_token_cap:
+                    token_cap_reached = True
+                    break
+
                 # Allow final synthesis hop without tools if we already hit max_hops
                 use_tools = hop < max_hops
                 payload: dict[str, Any] = {
                     "system_instruction": {"parts": [{"text": _SCHEMA_SYSTEM_PROMPT}]},
                     "contents": contents,
-                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200},
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1800},
                 }
                 if use_tools:
                     payload["tools"] = tools_spec
 
-                est_tok = min(max_input_tok, max(400, len(json.dumps(payload, default=str)) // 4))
-                if est_tok > max_input_tok:
+                raw_est_tok = max(400, len(json.dumps(payload, default=str)) // 4)
+                if raw_est_tok > max_input_tok or raw_est_tok > 220_000:
+                    token_cap_reached = True
                     break
+                est_tok = raw_est_tok
 
                 hop_telemetry: list[dict[str, Any]] = []
-                try:
-                    raw_resp = gw.execute_gemini_request(
-                        payload=payload,
-                        estimated_tokens=est_tok,
-                        timeout_seconds=22.0,
-                        max_attempts=2,
-                        max_wait_seconds=12.0,
-                        purpose="copilot_agent",
-                        actor_user_id=user_id,
-                        priority=10,
-                        telemetry_log=hop_telemetry,
-                        allow_quota_raise=True,
-                        parse_fn=lambda d: d if (d.get("candidates") or []) else None,
-                    )
-                except QuotaExhaustedError as qerr:
-                    logger.info("Copilot quota exhausted/paused: %s", qerr)
-                    raw_resp = None
-                    if not final_markdown:
-                        final_markdown, _ = _deterministic_offline_fallback_with_session(
-                            session_factory, cleaned_query, observed_rows
-                        )
-                    break
+                status_q: queue.Queue[dict[str, Any]] = queue.Queue()
+                worker_result: dict[str, Any] = {}
+
+                def _run_orchestrated_hop() -> None:
+                    try:
+                        with orchestrator.acquire_turn_slot(
+                            user_id=user_id,
+                            estimated_tokens=est_tok,
+                            cancel_event=cancel_event,
+                            on_status=lambda st: status_q.put({"type": "queue_status", **st}),
+                            max_wait_seconds=95.0,
+                        ):
+                            resp = gw.execute_gemini_request(
+                                payload=payload,
+                                estimated_tokens=est_tok,
+                                timeout_seconds=28.0,
+                                max_attempts=2,
+                                max_wait_seconds=95.0,
+                                purpose="copilot_agent",
+                                actor_user_id=user_id,
+                                priority=10,
+                                telemetry_log=hop_telemetry,
+                                allow_quota_raise=True,
+                                on_wait_cb=lambda st: status_q.put({"type": "queue_status", **st}),
+                                parse_fn=lambda d: d if (d.get("candidates") or []) else None,
+                            )
+                            worker_result["resp"] = resp
+                    except BaseException as exc:
+                        worker_result["exc"] = exc
+                    finally:
+                        status_q.put({"type": "_worker_done"})
+
+                t_hop = threading.Thread(target=_run_orchestrated_hop, daemon=True)
+                t_hop.start()
+                while True:
+                    if cancel_event.is_set():
+                        yield {"type": "error", "code": "cancelled", "message": "Request stopped."}
+                        return
+                    try:
+                        evt = status_q.get(timeout=0.25)
+                    except queue.Empty:
+                        if not t_hop.is_alive():
+                            break
+                        continue
+                    if evt.get("type") == "_worker_done":
+                        break
+                    yield evt
+                t_hop.join(timeout=1.0)
+
+                if "exc" in worker_result:
+                    exc = worker_result["exc"]
+                    if isinstance(exc, InterruptedError):
+                        yield {"type": "error", "code": "cancelled", "message": "Request stopped."}
+                        return
+                    if isinstance(exc, QuotaExhaustedError):
+                        logger.info("Copilot quota exhausted/paused: %s", exc)
+                        raw_resp = None
+                        if not final_markdown:
+                            final_markdown, _ = _deterministic_offline_fallback_with_session(
+                                session_factory, cleaned_query, observed_rows
+                            )
+                        break
+                    if isinstance(exc, TimeoutError):
+                        raw_resp = None
+                        if not final_markdown:
+                            final_markdown = f"⚠️ **Queue wait timeout:** {exc}"
+                        break
+                    raise exc
+                raw_resp = worker_result.get("resp")
 
                 if hop_telemetry:
                     model_reply_telemetry.extend(hop_telemetry)
@@ -741,7 +1098,18 @@ def stream_agent_turn(
 
                     with session_factory() as tool_db:
                         tool_user = tool_db.get(User, user_id)
-                        if fn_name == "run_readonly_sql":
+                        if fn_name == "bulk_check_plates":
+                            raw_plates = fn_args.get("plates")
+                            try:
+                                bulk_out, matched_rows = _execute_bulk_check_plates(tool_db, raw_plates)
+                                observed_rows.extend(matched_rows)
+                                step_rows = int(bulk_out.get("total_checked") or 0)
+                                tool_out = bulk_out
+                            except Exception as exc:
+                                step_status = "error"
+                                tool_out = {"error": str(exc)}
+
+                        elif fn_name == "run_readonly_sql":
                             raw_sql = str(fn_args.get("sql") or "")
                             step_sql = raw_sql
                             try:
@@ -922,10 +1290,21 @@ def stream_agent_turn(
                 contents.append({"role": "user", "parts": function_response_parts})
 
         if not final_markdown:
-            with session_factory() as fb_db:
-                final_markdown, _ = _deterministic_offline_fallback(fb_db, cleaned_query, observed_rows)
+            if token_cap_reached and observed_rows:
+                final_markdown = (
+                    f"⚠️ **Per-turn token safety cap reached ({total_tokens_turn:,} / {turn_token_cap:,} tok).** "
+                    "Showing verified records retrieved before the cap."
+                )
+            else:
+                with session_factory() as fb_db:
+                    final_markdown, _ = _deterministic_offline_fallback(fb_db, cleaned_query, observed_rows)
+        elif token_cap_reached:
+            final_markdown += (
+                f"\n\n> **Note:** Stopped additional tool steps at per-turn token cap "
+                f"({total_tokens_turn:,} / {turn_token_cap:,} tok)."
+            )
 
-        verified_links = _collect_verified_links(observed_rows)
+        verified_links = _collect_verified_links(observed_rows, final_markdown=final_markdown)
         if verified_links:
             yield {"type": "links", "links": verified_links}
         if action_cards:
@@ -982,7 +1361,7 @@ def stream_agent_turn(
 
             yield {
                 "type": "done",
-                "thread": serialize_thread(thread),
+                "thread": serialize_thread(thread, owner=user_obj),
                 "message": serialize_message(a_msg, attached_artifacts),
                 "quota": updated_quota,
             }

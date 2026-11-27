@@ -378,3 +378,51 @@ def test_phase1_model_lock_8slot_pool_and_accounting_proof_gate():
         assert draft.fields["total_payable"]["value"] == "8942.45"
 
 
+def test_db_only_gemini_keys_ignore_env_and_fast_probe(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.core.config import get_settings
+    from app.models.tables import AppSetting, Base
+    from app.services.gemini_account_service import GeminiAccountManager
+
+    # Even if GEMINI_API_KEY / GEMINI_API_KEYS is set in environment, get_settings() ignores it completely
+    monkeypatch.delenv("GEMINI_MAX_TPM_PER_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaSyShouldNeverBeLoadedFromEnv12345")
+    monkeypatch.setenv("GEMINI_API_KEYS", "AIzaSyShouldNeverBeLoadedFromEnv12345")
+    settings = get_settings()
+    assert settings.gemini_api_keys == ()
+    assert settings.gemini_max_tpm_per_key == 220_000
+
+    # DB-only keys load cleanly from AppSetting('gemini_manual_api_keys')
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with SessionLocal() as db:
+        db.add(
+            AppSetting(
+                key="gemini_manual_api_keys",
+                value={
+                    "keys": [
+                        {"id": "k1", "key": "AIzaSyDbManagedKeyOne111111111111", "label": "Chat Key", "workload_scope": "copilot_only", "last_status": "ready"},
+                        {"id": "k2", "key": "AIzaSyDbManagedKeyTwo222222222222", "label": "System Key", "workload_scope": "all", "last_status": "ready"},
+                    ]
+                },
+            )
+        )
+        db.commit()
+
+        mgr = GeminiAccountManager()
+        mgr.sync_accounts(db=db)
+        accs = mgr.get_accounts()
+        assert len(accs) == 2
+        assert all(a.source == "manual" for a in accs)
+        assert accs[0].workload_scope == "copilot_only"
+
+        probe_ok = mgr.probe_single_key("AIzaSyDbManagedKeyOne111111111111")
+        assert probe_ok["ok"] is True and probe_ok["status_code"] == 200
+        probe_bad = mgr.probe_single_key("AIzaSyInvalidKey0000000000000000")
+        assert probe_bad["ok"] is False and probe_bad["status_code"] == 400
+
+

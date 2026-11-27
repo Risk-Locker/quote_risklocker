@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { Suspense, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -81,8 +81,9 @@ interface PicItem {
   clients_count: number;
 }
 
-export default function ClientRecordsPage() {
+function ClientRecordsContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"clients" | "pics">("clients");
 
@@ -91,6 +92,7 @@ export default function ClientRecordsPage() {
   const [clientSearch, setClientSearch] = useState("");
   const [clients, setClients] = useState<ClientDossierItem[]>([]);
   const [loadingClients, setLoadingClients] = useState(false);
+  const [highlightedClientId, setHighlightedClientId] = useState<string | null>(null);
 
   // PICs Tab State
   const [picFilter, setPicFilter] = useState<string>("all");
@@ -158,6 +160,31 @@ export default function ClientRecordsPage() {
       setLoadingPics(false);
     }
   }, [picFilter, picSearch]);
+
+  useEffect(() => {
+    const q = searchParams.get("search");
+    const hc = searchParams.get("highlight_client");
+    if (q) {
+      setActiveTab("clients");
+      setClientSearch(q);
+    }
+    if (hc) {
+      setActiveTab("clients");
+      setHighlightedClientId(hc);
+      const t = setTimeout(() => setHighlightedClientId(null), 4500);
+      return () => clearTimeout(t);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!highlightedClientId || loadingClients || clients.length === 0) return;
+    const target = clients.find((c) => c.client_id === highlightedClientId);
+    if (target) {
+      setTimeout(() => {
+        document.getElementById(`client-row-${target.client_id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 100);
+    }
+  }, [highlightedClientId, loadingClients, clients]);
 
   useEffect(() => {
     if (activeTab === "clients") {
@@ -433,10 +460,17 @@ export default function ClientRecordsPage() {
               </Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {clients.map((c) => (
+                {clients.map((c) => {
+                  const isSpot = highlightedClientId === c.client_id;
+                  return (
                   <Card
+                    id={`client-row-${c.client_id}`}
                     key={c.client_id}
-                    className="p-4 border border-[var(--rl-border)] bg-white hover:border-black/40 hover:shadow-md transition-all flex flex-col justify-between gap-3"
+                    className={`p-4 border bg-white hover:border-black/40 hover:shadow-md transition-all flex flex-col justify-between gap-3 ${
+                      isSpot
+                        ? "border-emerald-600 ring-4 ring-emerald-500/30 shadow-lg"
+                        : "border-[var(--rl-border)]"
+                    }`}
                   >
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-2">
@@ -501,7 +535,8 @@ export default function ClientRecordsPage() {
                       )}
                     </div>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -976,5 +1011,13 @@ export default function ClientRecordsPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+export default function ClientRecordsPage() {
+  return (
+    <Suspense fallback={<AppShell><div className="p-12 text-center text-xs text-neutral-400">Loading client records...</div></AppShell>}>
+      <ClientRecordsContent />
+    </Suspense>
   );
 }

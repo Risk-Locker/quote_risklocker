@@ -203,14 +203,16 @@ _POOL_LOCK = threading.Lock()
 
 
 def get_sharded_ai_pool() -> AIShardedPool:
-    """Retrieve or initialize the global shared AI slot pool."""
+    """Retrieve or initialize the global shared AI slot pool from DB-managed keys."""
     global _GLOBAL_POOL
     if _GLOBAL_POOL is None:
         with _POOL_LOCK:
             if _GLOBAL_POOL is None:
-                from app.core.config import get_settings
-                settings = get_settings()
-                keys = list(settings.gemini_api_keys)
+                from app.services.gemini_account_service import get_key_pool
+
+                pool = get_key_pool()
+                pool.sync_accounts()
+                keys = list(pool.get_all_keys())
                 _GLOBAL_POOL = AIShardedPool(api_keys=keys)
     return _GLOBAL_POOL
 

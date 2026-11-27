@@ -349,7 +349,7 @@ def run_multi_zoom_vision_pipeline(
     pool = gemini_extractor.get_key_pool()
     has_mock_gemini = hasattr(gemini_extractor.extract_with_gemini_sync, "assert_called")
     if not pool.get_all_keys() and not has_mock_gemini:
-        raise AppError("No GEMINI_API_KEY configured. Please check your environment.", 400)
+        raise AppError("No Gemini API key configured. Please add an API key in Settings -> AI Engine.", 400)
 
     brand_verdict: dict[str, Any] | None = None
     passes_used = 1

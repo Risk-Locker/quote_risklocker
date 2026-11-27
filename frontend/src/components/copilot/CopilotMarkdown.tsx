@@ -27,7 +27,7 @@ function renderInline(text: string): React.ReactNode[] {
       tokens.push(
         <code
           key={`c-${keyIdx++}`}
-          className="rounded bg-neutral-100 px-1 py-0.5 font-mono text-[11px] text-[var(--rl-text-strong)] border border-neutral-200"
+          className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-[12px] text-[var(--rl-text-strong)] border border-neutral-200"
         >
           {raw.slice(1, -1)}
         </code>
@@ -77,26 +77,26 @@ function MarkdownTable({ rows }: { rows: string[][] }) {
   }
 
   return (
-    <div className="my-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white overflow-hidden">
-      <div className="flex items-center justify-between px-2.5 py-1 bg-neutral-50 border-b border-[var(--rl-border)]">
+    <div className="my-2.5 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-neutral-50 border-b border-[var(--rl-border)]">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--rl-text-muted)]">
           Table ({body.length} row{body.length === 1 ? "" : "s"})
         </span>
         <button
           type="button"
           onClick={handleCopyTable}
-          className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] cursor-pointer"
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)] cursor-pointer"
         >
-          {copied ? <Check size={11} className="text-emerald-600" /> : <Copy size={11} />}
+          {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse text-[11px]">
+        <table className="w-full text-left border-collapse text-xs">
           <thead className="bg-neutral-50/70 border-b border-[var(--rl-border)]">
             <tr>
               {header.map((cell, idx) => (
-                <th key={idx} className="px-2.5 py-1.5 font-semibold text-[var(--rl-text-strong)] whitespace-nowrap">
+                <th key={idx} className="px-3 py-2 font-semibold text-[var(--rl-text-strong)] whitespace-nowrap">
                   {renderInline(cell)}
                 </th>
               ))}
@@ -106,7 +106,7 @@ function MarkdownTable({ rows }: { rows: string[][] }) {
             {body.map((r, rIdx) => (
               <tr key={rIdx} className="hover:bg-neutral-50/60">
                 {r.map((cell, cIdx) => (
-                  <td key={cIdx} className="px-2.5 py-1.5 text-[var(--rl-text)] whitespace-nowrap">
+                  <td key={cIdx} className="px-3 py-1.5 text-[var(--rl-text)] whitespace-nowrap">
                     {renderInline(cell)}
                   </td>
                 ))}
@@ -139,7 +139,7 @@ export function CopilotMarkdown({ content }: { content: string }) {
       blocks.push(
         <pre
           key={`pre-${i}`}
-          className="my-2 overflow-x-auto rounded-[var(--rl-radius-sm)] bg-neutral-900 p-2.5 font-mono text-[11px] text-neutral-100"
+          className="my-2 overflow-x-auto rounded-[var(--rl-radius-sm)] bg-neutral-900 p-3 font-mono text-xs text-neutral-100"
         >
           {codeLines.join("\n")}
         </pre>
@@ -174,10 +174,10 @@ export function CopilotMarkdown({ content }: { content: string }) {
       const level = hMatch[1].length;
       const cls =
         level === 1
-          ? "text-sm font-bold text-[var(--rl-text-strong)] mt-2 mb-1"
+          ? "text-base font-bold text-[var(--rl-text-strong)] mt-3 mb-1"
           : level === 2
-          ? "text-xs font-bold text-[var(--rl-text-strong)] mt-2 mb-1"
-          : "text-xs font-semibold text-[var(--rl-text-strong)] mt-1.5 mb-0.5";
+          ? "text-sm font-bold text-[var(--rl-text-strong)] mt-2.5 mb-1"
+          : "text-sm font-semibold text-[var(--rl-text-strong)] mt-2 mb-0.5";
       blocks.push(
         <div key={`h-${i}`} className={cls}>
           {renderInline(hMatch[2])}
@@ -195,7 +195,7 @@ export function CopilotMarkdown({ content }: { content: string }) {
         i += 1;
       }
       blocks.push(
-        <ul key={`ul-${i}`} className="my-1.5 ml-4 list-disc space-y-1 text-xs text-[var(--rl-text)]">
+        <ul key={`ul-${i}`} className="my-1.5 ml-4 list-disc flex flex-col gap-1 text-sm leading-relaxed text-[var(--rl-text)]">
           {items.map((it, idx) => (
             <li key={idx}>{renderInline(it)}</li>
           ))}
@@ -212,7 +212,7 @@ export function CopilotMarkdown({ content }: { content: string }) {
         i += 1;
       }
       blocks.push(
-        <ol key={`ol-${i}`} className="my-1.5 ml-4 list-decimal space-y-1 text-xs text-[var(--rl-text)]">
+        <ol key={`ol-${i}`} className="my-1.5 ml-4 list-decimal flex flex-col gap-1 text-sm leading-relaxed text-[var(--rl-text)]">
           {items.map((it, idx) => (
             <li key={idx}>{renderInline(it)}</li>
           ))}
@@ -226,7 +226,7 @@ export function CopilotMarkdown({ content }: { content: string }) {
       blocks.push(
         <blockquote
           key={`bq-${i}`}
-          className="my-1.5 border-l-2 border-neutral-300 pl-2.5 text-xs text-[var(--rl-text-muted)] italic"
+          className="my-1.5 border-l-2 border-neutral-300 pl-3 text-sm text-[var(--rl-text-muted)] italic"
         >
           {renderInline(line.trim().slice(2))}
         </blockquote>
@@ -242,12 +242,12 @@ export function CopilotMarkdown({ content }: { content: string }) {
     }
 
     blocks.push(
-      <p key={`p-${i}`} className="text-xs leading-relaxed text-[var(--rl-text)]">
+      <p key={`p-${i}`} className="text-sm leading-relaxed text-[var(--rl-text)]">
         {renderInline(line)}
       </p>
     );
     i += 1;
   }
 
-  return <div className="space-y-0.5">{blocks}</div>;
+  return <div className="flex flex-col gap-1">{blocks}</div>;
 }
