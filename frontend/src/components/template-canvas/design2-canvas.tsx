@@ -775,6 +775,7 @@ export function Design2CanvasView({
                                 color: "#0F172A",
                                 lineHeight: 1.15,
                                 wordBreak: "break-word",
+                                whiteSpace: "pre-line",
                               }}
                             >
                               {card.title}
@@ -798,7 +799,7 @@ export function Design2CanvasView({
                                 marginTop: "1.5px",
                                 letterSpacing: "-0.25px",
                                 wordBreak: "break-word",
-                                whiteSpace: "normal",
+                                whiteSpace: "pre-line",
                               }}
                             >
                               {card.description}

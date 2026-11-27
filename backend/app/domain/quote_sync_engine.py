@@ -215,10 +215,15 @@ def _activate_bundle_selection(
     ]
     target = next((s for s in matching if s.state == "current"), None) or (matching[0] if matching else None)
     tier_label = str(getattr(tier, "label", "") or "").strip()
+    tier_disp_title = str(getattr(tier, "display_title", "") or "").strip()
     tier_display = (
-        f"{bundle.name} ({tier_label})"
-        if getattr(bundle, "has_plan_tiers", False) and tier_label and tier_label.lower() != "default"
-        else str(bundle.name)
+        tier_disp_title
+        if tier_disp_title
+        else (
+            f"{bundle.name} ({tier_label})"
+            if getattr(bundle, "has_plan_tiers", False) and tier_label and tier_label.lower() != "default"
+            else str(bundle.name)
+        )
     )
     ev_patch = {
         "source": "comparison_sync",
@@ -237,8 +242,10 @@ def _activate_bundle_selection(
         target.state = "current"
         target.superseded_by_id = None
         target.bundle_tier_id = getattr(tier, "id", None)
-        if target.item_kind == "custom" or tier_label:
+        if target.item_kind == "custom":
             target.label_override = tier_display
+        elif tier_label:
+            target.label_override = None
         prev_ev = dict(target.evidence_snapshot or {})
         prev_ev.pop("deactivated_by_comparison_sync", None)
         target.evidence_snapshot = {**prev_ev, **ev_patch}
@@ -283,8 +290,10 @@ def _activate_bundle_selection(
         existing_by_key.state = "current"
         existing_by_key.superseded_by_id = None
         existing_by_key.bundle_tier_id = getattr(tier, "id", None)
-        if existing_by_key.item_kind == "custom" or tier_label:
+        if existing_by_key.item_kind == "custom":
             existing_by_key.label_override = tier_display
+        elif tier_label:
+            existing_by_key.label_override = None
         prev_ev_k = dict(existing_by_key.evidence_snapshot or {})
         prev_ev_k.pop("deactivated_by_comparison_sync", None)
         existing_by_key.evidence_snapshot = {**prev_ev_k, **ev_patch}
@@ -309,7 +318,7 @@ def _activate_bundle_selection(
         item_kind=item_kind,
         state="current",
         cost_status="paid" if getattr(bundle, "force_box2", True) else "included",
-        label_override=tier_display if (item_kind == "custom" or tier_label) else None,
+        label_override=tier_display if item_kind == "custom" else None,
         typed_value_override=None,
         evidence_snapshot={**ev_patch, "applied_to_premium": "0.00"},
         sort_order=int(offering.sort_order or 0) if offering is not None else 55,

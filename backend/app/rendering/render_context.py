@@ -789,12 +789,25 @@ def _card(
 
     effective_asset_id = (visual_profile_assets.get(str(concept.id)) if visual_profile_assets and concept else None) or asset_id or getattr(concept, "default_asset_id", None)
 
+    has_manual_label_edit = bool(
+        getattr(selection, "label_override", None)
+        and (
+            is_manual_target_edit
+            or (
+                ev_source != "comparison_sync"
+                and not (bundle_meta and bundle_meta.get("selected_bundle_tier_display_title"))
+            )
+        )
+    )
     resolved_label = (
         getattr(selection, "label_override", None)
-        or (active_conditional_titles or {}).get(concept_id_key)
-        or label
-        or getattr(offering, "label_override", None)
-        or concept.label
+        if has_manual_label_edit
+        else (
+            (active_conditional_titles or {}).get(concept_id_key)
+            or label
+            or getattr(offering, "label_override", None)
+            or concept.label
+        )
     )
     resolved_value = card_val
     resolved_desc = final_desc
@@ -806,13 +819,17 @@ def _card(
         else None
     )
 
-    if bundle_meta and bundle_meta.get("has_plan_tiers") and bundle_meta.get("selected_bundle_tier_label"):
-        tier_lbl = str(bundle_meta["selected_bundle_tier_label"]).strip()
-        resolved_label = _format_bundle_title_with_tier(resolved_label, tier_lbl)
-        if _is_redundant_tier_value(resolved_value, tier_lbl, resolved_label):
-            resolved_value = ""
-    elif bundle_meta and not bundle_meta.get("has_plan_tiers"):
+    if bundle_meta:
         tier_lbl = str(bundle_meta.get("selected_bundle_tier_label") or "").strip()
+        tier_disp_title = str(bundle_meta.get("selected_bundle_tier_display_title") or "").strip()
+        tier_disp_desc = str(bundle_meta.get("selected_bundle_tier_display_description") or "").strip()
+        if not has_manual_label_edit and tier_disp_title:
+            resolved_label = tier_disp_title
+        elif bundle_meta.get("has_plan_tiers") and tier_lbl:
+            resolved_label = _format_bundle_title_with_tier(resolved_label, tier_lbl)
+        if not (sel_desc and str(sel_desc).strip()) and tier_disp_desc:
+            resolved_desc = tier_disp_desc
+            is_custom_desc = True
         if _is_redundant_tier_value(resolved_value, tier_lbl, resolved_label):
             resolved_value = ""
 
@@ -1059,6 +1076,8 @@ def resolve_benefit_cards(
                     "id": str(t.id),
                     "tier_key": str(t.tier_key),
                     "label": str(t.label),
+                    "display_title": getattr(t, "display_title", None),
+                    "display_description": getattr(t, "display_description", None),
                     "is_default_fallback": bool(getattr(t, "is_default_fallback", False)),
                 }
                 for t in sorted_tiers
@@ -1077,6 +1096,8 @@ def resolve_benefit_cards(
                     "bundle_name": str(matched_bundle.name),
                     "selected_bundle_tier_id": str(tier.id) if tier else None,
                     "selected_bundle_tier_label": str(tier.label) if tier else None,
+                    "selected_bundle_tier_display_title": getattr(tier, "display_title", None) if tier else None,
+                    "selected_bundle_tier_display_description": getattr(tier, "display_description", None) if tier else None,
                     "plan_tier_uncertain": bool(is_uncertain),
                     "needs_review_reason": ev_snap.get("needs_review_reason")
                     or (

@@ -511,7 +511,7 @@ def format_canonical_perils(combined_text: str, tokens: list[str] | None = None)
         add("EV CHARGE")
 
     # 6. PA (Personal Accident to Driver / Endorsement N4)
-    if any(k in text for k in ("personal accident", "pa to driver", "driver & passenger pa", "driver pa", "oto 360", "motor pa plus", "dpa", "dpp", "sdpa", "autobuddy")) or (re.search(r"\bpa\b", text) and "driver" in text) or ("n4" in end_tokens):
+    if any(k in text for k in ("personal accident", "pa to driver", "driver & passenger pa", "driver passenger protection", "driver and passenger protection", "driver passenger protector", "driver pa", "oto 360", "motor pa plus", "dpa", "dpp", "sdpa", "autobuddy")) or (re.search(r"\bpa\b", text) and "driver" in text) or ("n4" in end_tokens):
         add("PA")
 
     # 7. Compassionate Benefit

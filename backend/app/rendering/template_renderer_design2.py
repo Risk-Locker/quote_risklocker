@@ -270,11 +270,11 @@ def render_design2_html(
             <div style="flex: 1; min-width: 0; padding: 3.5px 4px 3px 1.5px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div style="min-height: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2px;">
-                        <div style="font-size: 11.8px; font-weight: 700; color: #0F172A; line-height: 1.15; word-break: break-word;">{title}</div>
+                        <div style="font-size: 11.8px; font-weight: 700; color: #0F172A; line-height: 1.15; word-break: break-word; white-space: pre-line;">{title}</div>
                         <div style="font-size: 9.4px; font-weight: 700; color: #475569; flex-shrink: 0; line-height: 1; padding-top: 1px;">{escape(serial)}</div>
                     </div>
                     {f'<div style="font-size: 11.0px; font-weight: 700; color: #15803D; margin-top: 1px; line-height: 1.15; word-break: break-word;">{val}</div>' if val else ''}
-                    {f'<div style="font-size: 10.0px; font-weight: 500; color: #1E293B; line-height: 1.17; margin-top: 1.5px; letter-spacing: -0.25px; word-break: break-word; white-space: normal;">{desc}</div>' if desc else ''}
+                    {f'<div style="font-size: 10.0px; font-weight: 500; color: #1E293B; line-height: 1.17; margin-top: 1.5px; letter-spacing: -0.25px; word-break: break-word; white-space: pre-line;">{desc}</div>' if desc else ''}
                 </div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: auto; padding-top: 1px; flex-shrink: 0;">
                     {indicator_html}

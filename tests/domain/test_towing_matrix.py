@@ -3,7 +3,7 @@
 Validates exact entitlements for:
   - QBE (RM500 standard vs Unlimited - Plan 1 with Passenger Protector N4)
   - STMB / Takaful Malaysia (50km base; Motor PA Plus P1=100km, P2=200km, P3=300km, P4=Unlimited)
-  - Etiqa (200km base vs Unlimited - Driver Plan 1 with OTO 360)
+  - Etiqa (200km base vs Unlimited with Driver Passenger Protection (Plans 1-3) / OTO 360)
   - Lonpac (RM400 base; E-Assist Smart Driver P1=RM600, P2/EV=Unlimited)
   - Berjaya Sompo (Unlimited by default — no upgrade required)
   - Tune Protect (RM300 base vs Unlimited with Motor Easy Bundle / AutoBuddy / Motor Shield)
@@ -37,8 +37,10 @@ from app.domain.motor.towing_matrix import resolve_towing_entitlement, TowingEnt
 
         # Etiqa
         ("Etiqa", None, None, "", "200km"),
-        ("Etiqa General Insurance", "Motor", "OTO 360", "", "Unlimited - Driver Plan 1"),
-        ("Etiqa", None, None, "Includes OTO 360 personal accident", "Unlimited - Driver Plan 1"),
+        ("Etiqa General Insurance", "Motor", "OTO 360", "", "Unlimited"),
+        ("Etiqa", None, None, "Includes OTO 360 personal accident", "Unlimited"),
+        ("Etiqa", "Motor", "Driver Passenger Protection Plan 1", "", "Unlimited"),
+        ("Etiqa", None, "DPP Plan 3", "", "Unlimited"),
 
         # Lonpac
         ("Lonpac", None, None, "", "RM400"),

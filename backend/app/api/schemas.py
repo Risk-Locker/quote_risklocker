@@ -403,6 +403,8 @@ class CompanyBenefitBundleTierRequest(StrictRequest):
     id: str | None = None
     tier_key: str | None = Field(default=None, max_length=80)
     label: str = Field(min_length=1, max_length=120)
+    display_title: str | None = Field(default=None, max_length=255)
+    display_description: str | None = Field(default=None, max_length=2000)
     match_tokens: list[str] = Field(default_factory=list, max_length=60)
     is_default_fallback: bool = False
     sort_order: int = Field(default=0, ge=0)

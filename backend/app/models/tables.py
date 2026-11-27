@@ -1453,6 +1453,8 @@ class CompanyBenefitBundleTier(Base, TimestampMixin):
     bundle_id: Mapped[str] = mapped_column(ForeignKey("company_benefit_bundles.id", ondelete="CASCADE"), nullable=False, index=True)
     tier_key: Mapped[str] = mapped_column(String(80), nullable=False)
     label: Mapped[str] = mapped_column(String(120), nullable=False)
+    display_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     match_tokens: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"), nullable=False)
     is_default_fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))

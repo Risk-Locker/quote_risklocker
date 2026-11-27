@@ -445,10 +445,10 @@ def render_design2_schedule_pages(
                 <div style="min-width:0;flex:1;">
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <span style="font-size:8px;font-weight:800;color:#94A3B8;">#{idx:02d}</span>
-                        <span style="font-size:9.8px;font-weight:800;color:#0F172A;">{escape(row['title'])}</span>
+                        <span style="font-size:9.8px;font-weight:800;color:#0F172A;white-space:pre-line;">{escape(row['title'])}</span>
                         {f'<span style="font-size:8.6px;font-weight:800;color:#15803D;background:#ECFDF5;padding:1px 5px;border-radius:4px;">{escape(val)}</span>' if val else ''}
                     </div>
-                    <div style="font-size:8.2px;color:#334155;line-height:1.28;margin-top:2px;">{escape(row.get('description') or 'Subject to master policy terms and endorsements.')}</div>
+                    <div style="font-size:8.2px;color:#334155;line-height:1.28;margin-top:2px;white-space:pre-line;">{escape(row.get('description') or 'Subject to master policy terms and endorsements.')}</div>
                 </div>
             </div>
             <div style="flex-shrink:0;">

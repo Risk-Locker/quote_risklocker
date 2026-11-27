@@ -206,6 +206,8 @@ export type CompanyBenefitBundleTier = {
   bundle_id?: string;
   tier_key?: string;
   label: string;
+  display_title?: string | null;
+  display_description?: string | null;
   match_tokens: string[];
   is_default_fallback: boolean;
   sort_order?: number;

@@ -66,6 +66,8 @@ def serialize_bundle(bundle: CompanyBenefitBundle) -> dict[str, Any]:
                 "bundle_id": t.bundle_id,
                 "tier_key": t.tier_key,
                 "label": t.label,
+                "display_title": getattr(t, "display_title", None),
+                "display_description": getattr(t, "display_description", None),
                 "match_tokens": list(t.match_tokens or []),
                 "is_default_fallback": bool(t.is_default_fallback),
                 "sort_order": int(t.sort_order or 0),
@@ -276,11 +278,15 @@ def save_company_bundle(
                     "sort_order": max(0, int(eff_raw.get("sort_order") if eff_raw.get("sort_order") is not None else eff_idx)),
                 }
             )
+        disp_t_title = str(t_raw.get("display_title") or "").strip() or None
+        disp_t_desc = str(t_raw.get("display_description") or "").strip() or None
         normalized_tiers.append(
             {
                 "id": str(t_raw.get("id") or "").strip() or None,
                 "tier_key": t_key,
                 "label": t_label,
+                "display_title": disp_t_title,
+                "display_description": disp_t_desc,
                 "match_tokens": _normalize_string_list(t_raw.get("match_tokens"), "Match tokens"),
                 "is_default_fallback": is_fb,
                 "sort_order": max(0, int(t_raw.get("sort_order") if t_raw.get("sort_order") is not None else idx)),
@@ -360,6 +366,8 @@ def save_company_bundle(
                 bundle_id=bundle.id,
                 tier_key=t_data["tier_key"],
                 label=t_data["label"],
+                display_title=t_data["display_title"],
+                display_description=t_data["display_description"],
                 match_tokens=t_data["match_tokens"],
                 is_default_fallback=t_data["is_default_fallback"],
                 sort_order=t_data["sort_order"],
@@ -371,6 +379,8 @@ def save_company_bundle(
         else:
             t_obj.tier_key = t_data["tier_key"]
             t_obj.label = t_data["label"]
+            t_obj.display_title = t_data["display_title"]
+            t_obj.display_description = t_data["display_description"]
             t_obj.match_tokens = t_data["match_tokens"]
             t_obj.is_default_fallback = t_data["is_default_fallback"]
             t_obj.sort_order = t_data["sort_order"]
