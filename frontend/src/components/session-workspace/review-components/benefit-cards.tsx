@@ -1548,7 +1548,7 @@ export function MatrixAddonCard({
             />
           ) : (
             <div className="group/title flex items-center gap-1.5 max-w-full">
-              <h4 className="text-[20px] font-bold text-[var(--rl-text-strong)] leading-snug break-words">
+              <h4 className="text-[20px] font-bold text-[var(--rl-text-strong)] leading-snug break-words whitespace-pre-line">
                 {card.label}
               </h4>
               <button
@@ -1796,7 +1796,7 @@ export function MatrixAddonCard({
           />
         ) : card.description ? (
           <div className="group/desc flex items-start gap-1.5">
-            <p className="text-[17px] text-[var(--rl-text-muted)] leading-relaxed break-words whitespace-normal flex-1">
+            <p className="text-[17px] text-[var(--rl-text-muted)] leading-relaxed break-words whitespace-pre-line flex-1">
               {card.description}
             </p>
             <button

@@ -48,7 +48,7 @@ def extract_plan_tier_token(raw: str | None) -> str | None:
         return f"Plan {tok}"
 
     m_named = re.search(
-        r"\b(?:motor\s*pa(?:\s*plus|\+)?|private\s*car\s*365|pc\s*365|365|smart\s*driver|e-?assist(?:\s*smart\s*driver)?|sdpa)\s*[-:]?\s*(?:plan|pelan)?\s*([1-9]|[a-d])\b",
+        r"\b(?:motor\s*pa(?:\s*plus|\+)?|private\s*car\s*365|pc\s*365|365|smart\s*driver|e-?assist(?:\s*smart\s*driver)?|sdpa|driver\s*(?:&|and)?\s*passenger\s*(?:protection|protector|pa)|dpp)\s*[-:]?\s*(?:plan|pelan)?\s*([1-9]|[a-d])\b",
         low,
     )
     if m_named:

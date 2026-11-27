@@ -43,11 +43,11 @@
 
 | Insurer (`slug`) | Published Catalogs | Private Car Comp Towing & Betterment | Active Bundled Benefits (`company_benefit_bundles`) |
 | :--- | :---: | :--- | :--- |
-| **AmAssurance** (`amassurance`) | `22` | `auto365` Lite `50 km` / Plus `100 km` / Premier `365 km` (ICE & EV); Betterment `Up to 15 Years` (Box 2) | `Private Car 365` (4 plan tiers) |
-| **Kurnia** (`kurnia`) | `22` | 1:1 clone of cleaned AmAssurance (ICE & EV tiers, commercial, motorcycle); Betterment `Up to 15 Years` (Box 2) | `Private Car 365` (4 plan tiers) |
-| **Liberty** (`liberty`) | `22` | 1:1 clone of cleaned AmAssurance (ICE & EV tiers, commercial, motorcycle); Betterment `Up to 15 Years` (Box 2) | `Private Car 365` (4 plan tiers) |
+| **AmAssurance** (`amassurance`) | `22` | `auto365` Lite `50 km` / Plus `100 km` / Premier `365 km` (ICE & EV); Betterment `Up to 10 Years` (Box 2); 6 non-offered add-ons excluded (`migrations/100_etiqa_dpp_bundles_and_amgen_box2_exclusions.sql`) | `Private Car 365` (4 plan tiers) |
+| **Kurnia** (`kurnia`) | `22` | 1:1 clone of cleaned AmAssurance (ICE & EV tiers, commercial, motorcycle); Betterment `Up to 10 Years` (Box 2); 6 non-offered add-ons excluded (`migrations/100_etiqa_dpp_bundles_and_amgen_box2_exclusions.sql`) | `Private Car 365` (4 plan tiers) |
+| **Liberty** (`liberty`) | `22` | 1:1 clone of cleaned AmAssurance (ICE & EV tiers, commercial, motorcycle); Betterment `Up to 10 Years` (Box 2); 6 non-offered add-ons excluded (`migrations/100_etiqa_dpp_bundles_and_amgen_box2_exclusions.sql`) | `Private Car 365` (4 plan tiers) |
 | **Berjaya Sompo** (`berjaya-sompo`) | `18` | `Unlimited` towing + `Special Perils` in Box 1; Betterment `Up to 15 Years` (Box 2) | `SOMPO Motor N-hancer` (Pack 1–2) |
-| **Etiqa** (`etiqa`) | `18` | `200 km` towing in Box 1; Betterment `Up to 15 Years` (Box 2) | `OTO 360` (1 tier) |
+| **Etiqa** (`etiqa`) | `18` | `200 km` towing in Box 1; Betterment `Up to 10 Years` (Box 2) | `Driver Passenger Protection` (Plans 1–3 bilingual EN/ZH, Unlimited Towing; replaced `OTO 360` in `migrations/100_etiqa_dpp_bundles_and_amgen_box2_exclusions.sql`) |
 | **Lonpac Insurance** (`lonpac`) | `18` | `RM 200` towing in Box 1; `Windscreen`/`Special Perils`/`CART` moved cleanly to Box 2; Betterment `Up to 10 Years` (Box 2) | `E-Assist Smart Driver` (3 plan tiers) |
 | **QBE** (`qbe`) | `18` | `RM 500` towing + Betterment `Up to 10 Years` in Box 1 (`0% betterment deduction`); Lorry LLOP moved to Box 2 | `Driver & Passenger Protector (N4)` (1 tier) |
 | **Takaful Malaysia** (`takaful-malaysia`) | `18` | `50 km` towing in Box 1; Betterment `Up to 10 Years` (Box 2) | `Motor PA Plus` (Plan 1–4) |

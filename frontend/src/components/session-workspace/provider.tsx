@@ -502,16 +502,27 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
           ? item.available_bundle_tiers.find((t) => t.id === nextTierId)
           : null;
         let nextLbl = !labelVal && (hideCov || hasTyped) ? (stripTrailingMetric(baseLbl) || baseLbl) : baseLbl;
-        if (!labelVal && matchedTierOpt && item.has_plan_tiers) {
-          nextLbl = formatBundleTitleWithTier(nextLbl, matchedTierOpt.label);
+        if (!labelVal && matchedTierOpt) {
+          if (matchedTierOpt.display_title) {
+            nextLbl = matchedTierOpt.display_title;
+          } else if (item.has_plan_tiers) {
+            nextLbl = formatBundleTitleWithTier(nextLbl, matchedTierOpt.label);
+          }
         }
+        const tierDescOverride = descVal === undefined && matchedTierOpt?.display_description
+          ? matchedTierOpt.display_description
+          : undefined;
         const clearDupVal = Boolean(!hasTyped && matchedTierOpt && isRedundantTierValue(item.value, matchedTierOpt.label));
         return {
           ...item,
           ...(costStatus ? { cost_status: costStatus } : {}),
           label: nextLbl,
           ...(clearDupVal ? { value: "" } : {}),
-          ...(descVal !== undefined ? { description: descVal } : {}),
+          ...(descVal !== undefined
+            ? { description: descVal }
+            : tierDescOverride !== undefined
+              ? { description: tierDescOverride }
+              : {}),
           ...(nextTierId !== undefined
             ? {
                 selected_bundle_tier_id: nextTierId,

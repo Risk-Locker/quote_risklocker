@@ -48,6 +48,8 @@ export type BenefitCardSummary = {
     id: string;
     tier_key: string;
     label: string;
+    display_title?: string | null;
+    display_description?: string | null;
     is_default_fallback?: boolean;
   }>;
   plan_tier_uncertain?: boolean;

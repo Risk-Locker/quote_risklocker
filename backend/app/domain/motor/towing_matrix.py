@@ -84,8 +84,23 @@ def resolve_towing_entitlement(
 
     # 3. Etiqa
     if "ETIQA" in comp:
-        if any(k in combined for k in ("oto 360", "oto360", "oto-360", "driver plan", "unlimited")):
-            return TowingEntitlement.unlimited("Unlimited - Driver Plan 1")
+        if any(
+            k in combined
+            for k in (
+                "driver passenger protection",
+                "driver & passenger protection",
+                "driver and passenger protection",
+                "driver passenger protector",
+                "driver & passenger pa",
+                "dpp",
+                "driver plan",
+                "oto 360",
+                "oto360",
+                "oto-360",
+                "unlimited",
+            )
+        ):
+            return TowingEntitlement.unlimited("Unlimited")
         return TowingEntitlement.from_km(200)
 
     # 4. Lonpac

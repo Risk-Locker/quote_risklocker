@@ -633,7 +633,6 @@ def standardize_catalogs_and_rules(db) -> dict:
             ("e-hailing-extension", None, None),
             ("private-car-365", None, None),
             ("driver-passenger-protector", None, None),
-            ("vehicle-accessories", None, None),
         ]
         am_ev_box2 = am_ice_box2 + [
             ("ev-wall-charger", None, "Covers accidental damage, fire, or theft of home EV wallbox charger."),
@@ -819,7 +818,7 @@ def standardize_catalogs_and_rules(db) -> dict:
                 ("child-car-seat", None, None),
                 ("key-replacement", None, None),
                 ("repaint-spray-paint", None, None),
-                ("oto-360", None, None),
+                ("driver-passenger-protector", None, None),
             ],
             "ev_extras": [
                 ("ev-wall-charger", None, "Covers accidental damage, fire, or theft of home EV wallbox charger."),

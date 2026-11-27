@@ -861,6 +861,13 @@ def _apply_bundle_tier_fields(
         if tier is None:
             raise AppError("Bundle plan tier was not found.", 404)
         selection.bundle_tier_id = tier.id
+        if not ev.get("manually_edited") and ev.get("source") != "manual":
+            if selection.item_kind == "catalog":
+                selection.label_override = None
+            else:
+                bundle_obj = getattr(tier, "bundle", None)
+                b_name = getattr(bundle_obj, "name", None) or selection.label_override or "Bundle"
+                selection.label_override = (getattr(tier, "display_title", None) or f"{b_name} ({tier.label})").strip()
         ev["bundle_id"] = tier.bundle_id
         ev["plan_tier"] = tier.label
         ev["plan_tier_uncertain"] = False

@@ -150,6 +150,8 @@ export function BundleEditorDialog({
         tiers: tiers.map((t, idx) => ({
           ...t,
           label: t.label.trim() || (hasPlanTiers ? `Plan ${idx + 1}` : "Default"),
+          display_title: t.display_title?.trim() || null,
+          display_description: t.display_description?.trim() || null,
           sort_order: idx,
           effects: (t.effects || []).map((e, eIdx) => ({
             ...e,
@@ -317,6 +319,41 @@ export function BundleEditorDialog({
                     <Trash size={14} />
                   </button>
                 )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 rounded border border-[var(--rl-border)] bg-[var(--rl-bg)] p-2.5">
+                <div>
+                  <label className="block text-[10px] font-semibold text-[var(--rl-text-muted)] mb-1">
+                    Parent Card Title Override (Optional, multi-line supported)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={tier.display_title || ""}
+                    onChange={(e) =>
+                      setTiers((prev) =>
+                        prev.map((row, i) => (i === tIdx ? { ...row, display_title: e.target.value } : row))
+                      )
+                    }
+                    placeholder="Optional per-tier title (e.g. Driver Passenger Protection Plan 1\n意外保险-计划1)"
+                    className="w-full rounded border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2 py-1 text-xs focus:outline-none focus:border-[var(--rl-black)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-[var(--rl-text-muted)] mb-1">
+                    Parent Card Description Override (Optional, multi-line supported)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={tier.display_description || ""}
+                    onChange={(e) =>
+                      setTiers((prev) =>
+                        prev.map((row, i) => (i === tIdx ? { ...row, display_description: e.target.value } : row))
+                      )
+                    }
+                    placeholder="Optional per-tier description shown when this plan tier is active"
+                    className="w-full rounded border border-[var(--rl-border)] bg-[var(--rl-surface)] px-2 py-1 text-xs focus:outline-none focus:border-[var(--rl-black)]"
+                  />
+                </div>
               </div>
 
               <div className="pl-2 border-l-2 border-emerald-200 space-y-2">

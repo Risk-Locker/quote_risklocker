@@ -541,3 +541,159 @@ def test_workspace_manual_edit_discrepancy_and_brn_guards():
         db.commit()
 
 
+def test_tiered_bundle_display_title_and_description_switch_and_promote_unlimited_towing():
+    """Verify universal per-tier display_title/display_description persistence, tier switching, and Box 1 -> Box 2 towing promotion."""
+    from types import SimpleNamespace
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.models.enums import Role
+    from app.models.tables import (
+        Base,
+        Batch,
+        BenefitCatalog,
+        BenefitCatalogRevision,
+        BenefitConcept,
+        BenefitProfile,
+        CatalogOffering,
+        CompanyBenefitBundle,
+        DraftBenefitSelection,
+        InsuranceCompany,
+        QuotationDraft,
+        UploadedFile,
+        new_id,
+    )
+    from app.services.company_benefit_bundle_service import load_active_company_bundles, save_company_bundle
+    from app.services.workspace_patch_service import _apply_bundle_tier_fields
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    u_id = new_id()
+    user = SimpleNamespace(id=u_id, role=Role.ADMIN.value)
+
+    with Session(engine) as db:
+        prof = BenefitProfile(id=new_id(), name="Active Profile", is_active=True, status="active")
+        comp = InsuranceCompany(id=new_id(), name="Etiqa", slug="etiqa", status="active")
+        c_tow = BenefitConcept(id=new_id(), concept_key="towing", label="Emergency Towing Assistance", sort_order=10, status="active")
+        c_dpp = BenefitConcept(id=new_id(), concept_key="driver-passenger-protector", label="Driver Passenger Protector", sort_order=20, status="active")
+        cat = BenefitCatalog(id=new_id(), company_id=comp.id, name="Comprehensive Private Car Insurance / Takaful", revision=1, status="published")
+        rev = BenefitCatalogRevision(id=new_id(), catalog_id=cat.id, revision_number=1, state="published", source_document_ids=[], content_hash="")
+        o_tow = CatalogOffering(id=new_id(), catalog_revision_id=rev.id, offering_key="towing", concept_id=c_tow.id, offering_kind="base", role="included", display_value="200 km", description_override="200 km towing.", sort_order=10, status="active")
+        o_dpp = CatalogOffering(id=new_id(), catalog_revision_id=rev.id, offering_key="driver-passenger-protector", concept_id=c_dpp.id, offering_kind="optional", role="addon_option", sort_order=20, status="active")
+        batch = Batch(id=new_id(), owner_id=u_id, name="B", status="ready")
+        uf = UploadedFile(id=new_id(), batch_id=batch.id, owner_id=u_id, original_filename="etiqa.pdf", content_type="application/pdf", storage_path="p", storage_provider="local", storage_status="available", storage_sha256="s", size_bytes=1, status="ready")
+        draft = QuotationDraft(id=new_id(), revision=1, uploaded_file_id=uf.id, owner_id=u_id, company_id=comp.id, catalog_revision_id=rev.id, status="ready", fields={}, scalar_decisions={}, warnings=[])
+        db.add_all([prof, comp, c_tow, c_dpp, cat, rev, o_tow, o_dpp, batch, uf, draft])
+        db.commit()
+
+        saved = save_company_bundle(
+            db,
+            user,
+            comp.id,
+            {
+                "bundle_key": "etiqa-driver-passenger-protection",
+                "name": "Driver Passenger Protection",
+                "primary_concept_id": c_dpp.id,
+                "trigger_concept_ids": [c_dpp.id],
+                "match_aliases": ["driver passenger protection", "dpp"],
+                "force_box2": True,
+                "has_plan_tiers": True,
+                "is_active": True,
+                "tiers": [
+                    {
+                        "tier_key": "plan_1",
+                        "label": "Plan 1",
+                        "display_title": "Driver Passenger Protection Plan 1\n意外保险-计划1",
+                        "display_description": "Death and Disability - RM 15,000 / Passenger\n死亡/永久性残疾-RM 15,000/每位乘客",
+                        "match_tokens": ["plan 1", "p1"],
+                        "is_default_fallback": True,
+                        "effects": [
+                            {
+                                "target_concept_id": c_tow.id,
+                                "effect_type": "upgrade_to_box2",
+                                "display_title": "Unlimited Towing Assistance",
+                                "display_value": "",
+                                "display_description": "24/7 emergency unlimited towing assistance.",
+                                "icon_hint": "unlimited_towing",
+                                "comparison_value": "Unlimited",
+                            }
+                        ],
+                    },
+                    {
+                        "tier_key": "plan_2",
+                        "label": "Plan 2",
+                        "display_title": "Driver Passenger Protection Plan 2\n意外保险-计划2",
+                        "display_description": "Death and Disability - RM 30,000 / Passenger\n死亡/永久性残疾-RM 30,000/每位乘客",
+                        "match_tokens": ["plan 2", "p2"],
+                        "is_default_fallback": False,
+                        "effects": [
+                            {
+                                "target_concept_id": c_tow.id,
+                                "effect_type": "upgrade_to_box2",
+                                "display_title": "Unlimited Towing Assistance",
+                                "display_value": "",
+                                "display_description": "24/7 emergency unlimited towing assistance.",
+                                "icon_hint": "unlimited_towing",
+                                "comparison_value": "Unlimited",
+                            }
+                        ],
+                    },
+                ],
+            },
+            profile_id=prof.id,
+        )
+        assert len(saved["tiers"]) == 2
+        assert saved["tiers"][0]["display_title"] == "Driver Passenger Protection Plan 1\n意外保险-计划1"
+        assert saved["tiers"][1]["display_description"] == "Death and Disability - RM 30,000 / Passenger\n死亡/永久性残疾-RM 30,000/每位乘客"
+
+        bundles = load_active_company_bundles(db, comp.id, profile_id=prof.id)
+        sel_tow = DraftBenefitSelection(
+            id=new_id(), draft_id=draft.id, selection_key="catalog:towing", catalog_offering_id=o_tow.id,
+            concept_id=c_tow.id, item_kind="catalog", state="current", cost_status="included", sort_order=10,
+        )
+        sel_dpp = DraftBenefitSelection(
+            id=new_id(), draft_id=draft.id, selection_key="catalog:dpp", catalog_offering_id=o_dpp.id,
+            concept_id=c_dpp.id, item_kind="catalog", state="current", cost_status="paid",
+            label_override="Driver Passenger Protection (Plan 1)",
+            evidence_snapshot={"source": "comparison_sync"},
+            bundle_tier_id=saved["tiers"][0]["id"], sort_order=20,
+        )
+        db.add_all([sel_tow, sel_dpp])
+        db.commit()
+
+        # Switch to Plan 2 via workspace_patch_service -> stale comparison_sync label_override must clear
+        changed = _apply_bundle_tier_fields(
+            db, draft, sel_dpp, {"op": "benefit_update", "selection_id": sel_dpp.id, "bundle_tier_id": saved["tiers"][1]["id"]}, offering=o_dpp,
+        )
+        assert changed is True
+        assert sel_dpp.label_override is None
+
+        resolved = resolve_benefit_cards(
+            selections=[sel_tow, sel_dpp],
+            offerings=[o_tow, o_dpp],
+            concepts=[c_tow, c_dpp],
+            relations=[],
+            facets=[],
+            company_bundles=bundles,
+            catalog_name=cat.name,
+        )
+        free_items = extract_free_coverage_items(resolved["current_benefits"], insurer_name="Etiqa")
+        matrix = build_unified_matrix_cards(resolved["current_benefits"], resolved["available_addons"], insurer_name="Etiqa")
+
+        assert not any("towing" in fi["title"].lower() for fi in free_items)
+        towing_card = next(c for c in matrix if c["id"] == "towing")
+        dpp_card = next(c for c in matrix if c["concept_key"] == "driver-passenger-protector")
+        assert towing_card["is_selected"] is True and towing_card["title"] == "Unlimited Towing Assistance"
+        assert dpp_card["is_selected"] is True
+        assert dpp_card["title"] == "Driver Passenger Protection Plan 2\n意外保险-计划2"
+        assert "RM 30,000" in dpp_card["description"]
+
+        html = render_design2_html(
+            draft_fields={"insurance_company": "ETIQA GENERAL INSURANCE BERHAD", "vehicle_type": "Car"},
+            template_config={},
+            render_context={"current_benefits": resolved["current_benefits"], "available_addons": resolved["available_addons"]},
+        )
+        assert "Driver Passenger Protection Plan 2\n意外保险-计划2" in html
+        assert "white-space: pre-line;" in html
+
+
+

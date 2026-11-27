@@ -84,11 +84,15 @@ def test_seven_insurer_towing_matrix_and_evaluator_authoritative():
     assert resolve_insurer_towing_limit("Takaful Malaysia", "Motor PA Plus Plan 3") == "300 km"
     assert resolve_insurer_towing_limit("Takaful Malaysia", "Motor PA Plus Plan 4") == "Unlimited"
 
-    # 3. Etiqa: 200 km standard; Unlimited - Driver Plan 1 with OTO 360
+    # 3. Etiqa: 200 km standard; Unlimited with Driver Passenger Protection (Plans 1-3) / OTO 360
     assert resolve_towing_entitlement("Etiqa").formatted == "200 km"
-    assert resolve_towing_entitlement("Etiqa", package_or_rider="OTO 360 Plan 1").formatted == "Unlimited - Driver Plan 1"
+    assert resolve_towing_entitlement("Etiqa", package_or_rider="OTO 360 Plan 1").formatted == "Unlimited"
+    assert resolve_towing_entitlement("Etiqa", package_or_rider="Driver Passenger Protection Plan 2").formatted == "Unlimited"
+    assert resolve_towing_entitlement("Etiqa", package_or_rider="DPP Plan 3").formatted == "Unlimited"
     assert resolve_insurer_towing_limit("Etiqa", "Private Car Comprehensive") == "200 km"
-    assert resolve_insurer_towing_limit("Etiqa", "OTO 360 Driver Plan 1") == "Unlimited - Driver Plan 1"
+    assert resolve_insurer_towing_limit("Etiqa", "OTO 360 Driver Plan 1") == "Unlimited"
+    assert resolve_insurer_towing_limit("Etiqa", "Driver Passenger Protection Plan 2") == "Unlimited"
+    assert resolve_insurer_towing_limit("Etiqa", "DPP Plan 3") == "Unlimited"
 
     # 4. Lonpac: RM 400 standard; E-Assist Smart Driver Plan 1 -> RM 600, Plan 2 / EV Plan -> Unlimited
     assert resolve_towing_entitlement("Lonpac").formatted == "RM 400"

@@ -1385,8 +1385,10 @@ def test_underwriter_towing_evaluator_rm_and_conditional_upgrades():
     # 5. Etiqa Underwriter Rules
     # Standard base -> 200 km
     assert resolve_insurer_towing_limit("Etiqa", "motor takaful comprehensive") == "200 km"
-    # Upgrade via OTO 360 -> Unlimited - Driver Plan 1
-    assert resolve_insurer_towing_limit("Etiqa", "comprehensive with oto 360") == "Unlimited - Driver Plan 1"
+    # Upgrade via DPP (Plans 1-3) / legacy OTO 360 -> Unlimited
+    assert resolve_insurer_towing_limit("Etiqa", "comprehensive with oto 360") == "Unlimited"
+    assert resolve_insurer_towing_limit("Etiqa", "comprehensive with driver passenger protection plan 1") == "Unlimited"
+    assert resolve_insurer_towing_limit("Etiqa", "dpp plan 3") == "Unlimited"
 
     # 6. STMB / Takaful Malaysia Underwriter Rules
     # Standard base -> 50 km
@@ -1575,9 +1577,10 @@ def test_underwriter_towing_rules_deterministic():
     assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy Bundle", "", None) == "Unlimited"
     assert resolve_insurer_towing_limit("Tune Protect", "Motor Easy with AutoBuddy", "", None) == "Unlimited"
 
-    # Etiqa (Base KM: default 200 km, OTO 360 -> Unlimited - Driver Plan 1)
+    # Etiqa (Base KM: default 200 km, DPP Plans 1-3 / OTO 360 -> Unlimited)
     assert resolve_insurer_towing_limit("Etiqa", "", "", None) == "200 km"
-    assert resolve_insurer_towing_limit("Etiqa", "OTO 360 PA rider", "", None) == "Unlimited - Driver Plan 1"
+    assert resolve_insurer_towing_limit("Etiqa", "OTO 360 PA rider", "", None) == "Unlimited"
+    assert resolve_insurer_towing_limit("Etiqa", "Driver Passenger Protection Plan 2", "", None) == "Unlimited"
 
     # Takaful Malaysia / STMB (Base KM: default 50 km, Motor PA Plus Plan 1-4)
     assert resolve_insurer_towing_limit("Takaful Malaysia", "", "", None) == "50 km"
