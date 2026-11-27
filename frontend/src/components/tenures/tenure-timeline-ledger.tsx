@@ -90,7 +90,7 @@ export function TenureTimelineLedger() {
           if (!parsedIds.includes(id)) parsedIds.push(id);
         });
     }
-    if (singleHighlight) {
+    if (singleHighlight && singleHighlight.toLowerCase() !== "all") {
       singleHighlight
         .split(",")
         .map((s) => s.trim())

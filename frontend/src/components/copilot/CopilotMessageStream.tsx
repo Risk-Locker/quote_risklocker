@@ -298,14 +298,14 @@ export function CopilotMessageStream({
             return (
               <div key={m.id} className="flex flex-col items-start w-full">
                 <div className="w-full flex flex-col gap-2.5 rounded-2xl bg-white border border-[var(--rl-border)] px-4 py-3.5 shadow-2xs text-[var(--rl-text-strong)]">
-                  {/* Live Queue / 80s Barrel Reload Banner */}
+                  {/* Live Queue / Busy Wait Banner */}
                   {m.isStreaming && queueStatus && (
                     <div className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                       <HourglassMedium size={14} weight="fill" className="text-amber-600 animate-pulse shrink-0" />
                       <span>
                         {queueStatus.reason === "barrel_reload"
-                          ? `AI model barrel reloading (80s window) · resuming in ~${queueStatus.wait_seconds ?? 5}s...`
-                          : `Fair-share queue position #${queueStatus.position ?? 1} (${queueStatus.active_users ?? 1} active user${(queueStatus.active_users ?? 1) === 1 ? "" : "s"})...`}
+                          ? `AI is momentarily busy — resuming in ~${queueStatus.wait_seconds ?? 5}s...`
+                          : `Waiting for your turn (#${queueStatus.position ?? 1} in queue)...`}
                       </span>
                     </div>
                   )}
@@ -382,7 +382,7 @@ export function CopilotMessageStream({
 
                   {/* Message Body */}
                   {m.content_markdown ? (
-                    <CopilotMarkdown content={m.content_markdown} />
+                    <CopilotMarkdown content={m.content_markdown} onNavigateDeepLink={onNavigateDeepLink} />
                   ) : m.isStreaming ? (
                     <div className="flex items-center gap-2 py-1 text-sm text-[var(--rl-text-muted)]">
                       <span className="inline-block size-2 rounded-full bg-emerald-500 animate-ping" />
@@ -549,11 +549,15 @@ export function CopilotMessageStream({
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        {typeof m.total_tokens === "number" && m.total_tokens > 0 && (
+                        {m.model_used === "direct-db-verified" ? (
+                          <span className="font-mono text-[11px] text-emerald-700 font-medium">
+                            0 tok · Direct DB Verified
+                          </span>
+                        ) : typeof m.total_tokens === "number" && m.total_tokens > 0 ? (
                           <span className="font-mono text-[11px] text-neutral-400">
                             {m.total_tokens.toLocaleString()} tok{m.model_used ? ` · ${m.model_used.replace("gemini-", "")}` : ""}
                           </span>
-                        )}
+                        ) : null}
                         {!readOnly && (
                           <>
                             <button
