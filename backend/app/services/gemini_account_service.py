@@ -56,6 +56,8 @@ def persist_call_log(
     total_tokens: int = 0,
     latency_ms: int = 0,
     error_message: str | None = None,
+    purpose: str = "extraction",
+    actor_user_id: str | None = None,
     db: Any = None,
 ) -> None:
     """Atomically record call metrics into gemini_api_call_logs table."""
@@ -72,6 +74,8 @@ def persist_call_log(
             api_key_masked=api_key_masked or None,
             model=model or "unknown",
             endpoint_slot=endpoint_slot or None,
+            purpose=(purpose or "extraction")[:40],
+            actor_user_id=actor_user_id or None,
             status_code=status_code,
             is_success=is_success,
             prompt_tokens=prompt_tokens or 0,
@@ -131,6 +135,7 @@ class GeminiAccount:
     successful_calls: int = 0
     failed_calls: int = 0
     is_paused: bool = False
+    workload_scope: str = "all"  # "all" | "extraction_only" | "copilot_only"
 
     @property
     def masked_key(self) -> str:
@@ -209,11 +214,27 @@ class GeminiAccountManager:
             env_keys = [k.strip() for k in settings.gemini_api_keys if k.strip()]
 
             manual_items: list[dict[str, Any]] = []
+            paused_ids: set[str] = set()
+            scope_map: dict[str, str] = {}
             if db is not None:
                 from app.models.tables import AppSetting
                 setting = db.get(AppSetting, "gemini_manual_api_keys")
                 if setting and isinstance(setting.value, dict):
                     manual_items = setting.value.get("keys", [])
+                p_set = db.get(AppSetting, "gemini_paused_keys")
+                if p_set and isinstance(p_set.value, dict):
+                    paused_ids = set(p_set.value.get("paused_ids", []))
+                s_set = db.get(AppSetting, "gemini_key_workload_scopes")
+                if s_set and isinstance(s_set.value, dict):
+                    scope_map = dict(s_set.value.get("scopes", {}) or {})
+                m_set = db.get(AppSetting, "gemini_model_config")
+                if m_set and isinstance(m_set.value, dict):
+                    par = m_set.value.get("parallel_models")
+                    if par:
+                        self._parallel_models = tuple(m for m in par if m in PARALLEL_MODELS)
+                    pri = m_set.value.get("primary_model")
+                    if pri and pri in PARALLEL_MODELS:
+                        self._primary_model = pri
             else:
                 import os
                 if os.getenv("APP_ENV") != "test":
@@ -224,37 +245,33 @@ class GeminiAccountManager:
                             setting = session.get(AppSetting, "gemini_manual_api_keys")
                             if setting and isinstance(setting.value, dict):
                                 manual_items = setting.value.get("keys", [])
+                            p_set = session.get(AppSetting, "gemini_paused_keys")
+                            if p_set and isinstance(p_set.value, dict):
+                                paused_ids = set(p_set.value.get("paused_ids", []))
+                            s_set = session.get(AppSetting, "gemini_key_workload_scopes")
+                            if s_set and isinstance(s_set.value, dict):
+                                scope_map = dict(s_set.value.get("scopes", {}) or {})
                     except Exception as exc:
                         logger.debug("Could not read manual keys from DB: %s", exc)
 
-            paused_ids: set[str] = set()
-            if db is not None:
-                from app.models.tables import AppSetting
-
-                p_set = db.get(AppSetting, "gemini_paused_keys")
-                if p_set and isinstance(p_set.value, dict):
-                    paused_ids = set(p_set.value.get("paused_ids", []))
-                m_set = db.get(AppSetting, "gemini_model_config")
-                if m_set and isinstance(m_set.value, dict):
-                    par = m_set.value.get("parallel_models")
-                    if par:
-                        self._parallel_models = tuple(m for m in par if m in PARALLEL_MODELS)
-                    pri = m_set.value.get("primary_model")
-                    if pri and pri in PARALLEL_MODELS:
-                        self._primary_model = pri
-
             existing_by_key = {acc.key: acc for acc in self._accounts}
             new_accounts: list[GeminiAccount] = []
+
+            def _norm_scope(val: Any) -> str:
+                s = str(val or "all").strip().lower()
+                return s if s in ("all", "extraction_only", "copilot_only") else "all"
 
             # 1. Primary .env key(s)
             for idx, k in enumerate(env_keys):
                 acc_id = f"env_{idx}"
                 is_p = acc_id in paused_ids
+                w_scope = _norm_scope(scope_map.get(acc_id, existing_by_key[k].workload_scope if k in existing_by_key else "all"))
                 if k in existing_by_key:
                     acc = existing_by_key[k]
                     acc.label = f"Account {idx + 1} (.env Primary)" if idx == 0 else f"Account {idx + 1} (.env)"
                     acc.source = "env"
                     acc.is_paused = is_p
+                    acc.workload_scope = w_scope
                     new_accounts.append(acc)
                 else:
                     new_accounts.append(
@@ -267,6 +284,7 @@ class GeminiAccountManager:
                             status_label="Ready · Configured",
                             status_color="green",
                             is_paused=is_p,
+                            workload_scope=w_scope,
                         )
                     )
 
@@ -278,12 +296,14 @@ class GeminiAccountManager:
                 acc_id = item.get("id") or f"manual_{idx}"
                 acc_label = item.get("label") or f"Account {len(new_accounts) + 1} (Manual)"
                 is_p = (acc_id in paused_ids) or bool(item.get("is_paused", False))
+                w_scope = _norm_scope(scope_map.get(acc_id) or item.get("workload_scope") or (existing_by_key[k].workload_scope if k in existing_by_key else "all"))
                 if k in existing_by_key:
                     acc = existing_by_key[k]
                     acc.id = acc_id
                     acc.label = acc_label
                     acc.source = "manual"
                     acc.is_paused = is_p
+                    acc.workload_scope = w_scope
                     new_accounts.append(acc)
                 else:
                     new_accounts.append(
@@ -297,6 +317,7 @@ class GeminiAccountManager:
                             status_color="green" if item.get("last_status") == "ready" else "gray",
                             last_probed_at=item.get("last_probed_at"),
                             is_paused=is_p,
+                            workload_scope=w_scope,
                         )
                     )
 
@@ -671,6 +692,19 @@ class GeminiAccountManager:
                 if acc.id == account_id:
                     acc.is_paused = paused
                     logger.info("Account %s (%s) paused state set to %s", acc.id, acc.label, paused)
+                    return True
+            return False
+
+    def set_account_workload_scope(self, account_id: str, scope: str) -> bool:
+        """Assign an account's workload scope ('all', 'extraction_only', or 'copilot_only')."""
+        norm = str(scope or "all").strip().lower()
+        if norm not in ("all", "extraction_only", "copilot_only"):
+            raise ValueError(f"Invalid workload scope: {scope}")
+        with self._lock:
+            for acc in self._accounts:
+                if acc.id == account_id:
+                    acc.workload_scope = norm
+                    logger.info("Account %s (%s) workload_scope set to %s", acc.id, acc.label, norm)
                     return True
             return False
 
@@ -1124,6 +1158,7 @@ class GeminiAccountManager:
                         "failed_calls": acc.failed_calls,
                         "is_active": acc_is_active,
                         "is_paused": acc.is_paused,
+                        "workload_scope": acc.workload_scope,
                     }
                 )
 
@@ -1570,8 +1605,15 @@ def get_fleet_timeline_data(db: Any) -> dict[str, Any]:
     timeline = []
     for log in raw_logs:
         slot_lower = (log.endpoint_slot or "").lower()
+        log_purpose = (getattr(log, "purpose", None) or "").lower()
         purpose = "Quotation Extraction"
-        if "probe" in slot_lower:
+        if log_purpose == "copilot_web":
+            purpose = "Copilot Web Research"
+        elif log_purpose == "copilot_compact":
+            purpose = "Copilot Context Compaction"
+        elif log_purpose.startswith("copilot"):
+            purpose = "Copilot Assistant"
+        elif "probe" in slot_lower:
             purpose = "Model Health Probe"
         elif "grounding" in slot_lower:
             purpose = "Vehicle Grounding Search"

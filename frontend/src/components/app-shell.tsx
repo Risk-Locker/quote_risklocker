@@ -23,11 +23,13 @@ import {
   CalendarBlank,
   Columns,
   ClockCounterClockwise,
+  Robot,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { useAuth, clearAuthCache } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { CopilotProvider } from "@/components/copilot/CopilotProvider";
 import { GlobalAiCopilot } from "@/components/global-ai-copilot";
 import { GeminiHeaderMeter } from "@/components/gemini-header-meter";
 
@@ -52,6 +54,7 @@ const navSections: NavSection[] = [
       { href: "/sessions" as Route, label: "Sessions", icon: ClockCounterClockwise },
       { href: "/upload/marketing-comparison" as Route, label: "Upload & Intake", icon: Upload },
       { href: "/client-records" as Route, label: "Client Records", icon: Users },
+      { href: "/copilot" as Route, label: "AI Copilot", icon: Robot },
     ],
   },
   {
@@ -234,6 +237,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isSessionWorkspace = /^\/sessions\/[^/]+/.test(pathname || "");
 
   return (
+    <CopilotProvider>
     <div className="min-h-screen bg-[var(--rl-bg)]">
       {/* Header */}
       <header className="sticky top-0 z-40 w-full border-b border-[var(--rl-border)] bg-[var(--rl-surface)]/95 backdrop-blur-sm">
@@ -570,5 +574,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Global AI Copilot */}
       <GlobalAiCopilot />
     </div>
+    </CopilotProvider>
   );
 }

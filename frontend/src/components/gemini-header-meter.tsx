@@ -49,6 +49,7 @@ export type GeminiAccountItem = {
   failed_calls: number;
   is_active: boolean;
   is_paused?: boolean;
+  workload_scope?: "all" | "extraction_only" | "copilot_only";
 };
 
 export type GeminiEndpointItem = {

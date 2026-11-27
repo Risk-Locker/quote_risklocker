@@ -416,7 +416,14 @@ export function UnderwriterQuoteCard({
                     RM {grossDisplay}
                   </span>
                   {pctLabel && (
-                    <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-1 py-0.5 rounded border border-emerald-300">
+                    <span
+                      title={
+                        Number(entry.motor_discount_amount ?? entry.effective_discount ?? 0) > 0
+                          ? `${pctVal % 1 === 0 ? pctVal.toFixed(0) : pctVal}% Motor Discount: -RM ${Number(entry.motor_discount_amount ?? entry.effective_discount ?? 0).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : undefined
+                      }
+                      className="cursor-help bg-emerald-50 text-emerald-800 text-[10px] font-bold px-1 py-0.5 rounded border border-emerald-300"
+                    >
                       {pctLabel}
                     </span>
                   )}

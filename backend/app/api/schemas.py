@@ -705,6 +705,44 @@ class ProfileCleanupRequest(BaseModel):
     profile_ids: list[str] = Field(min_length=1)
 
 
+class CopilotThreadCreateRequest(StrictRequest):
+    title: str | None = Field(default=None, max_length=255)
+    anchor_type: Literal["tenure", "session", "vehicle", "client"] | None = None
+    anchor_id: str | None = Field(default=None, max_length=120)
+    anchor_label: str | None = Field(default=None, max_length=255)
+
+
+class CopilotThreadUpdateRequest(StrictRequest):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    is_pinned: bool | None = None
+
+
+class CopilotStreamRequest(StrictRequest):
+    message: str = Field(min_length=1, max_length=4000)
+    enable_web_research: bool = False
+    page_context: dict[str, Any] | None = None
+
+
+class CopilotFeedbackRequest(StrictRequest):
+    feedback: Literal["up", "down"] | None = None
+
+
+class GeminiWorkloadScopeRequest(StrictRequest):
+    workload_scope: Literal["all", "extraction_only", "copilot_only"]
+
+
+class CopilotPolicyUpdateRequest(StrictRequest):
+    enabled: bool | None = None
+    shared_copilot_rpd_pct: int | None = Field(default=None, ge=5, le=80)
+    shared_interactive_reserve_pct: int | None = Field(default=None, ge=0, le=40)
+    staff_daily_turns: int | None = Field(default=None, ge=5, le=500)
+    staff_daily_tokens: int | None = Field(default=None, ge=5000, le=2000000)
+    admin_daily_turns: int | None = Field(default=None, ge=10, le=1000)
+    admin_daily_tokens: int | None = Field(default=None, ge=10000, le=5000000)
+    max_tool_hops: int | None = Field(default=None, ge=1, le=8)
+    max_input_tokens_per_turn: int | None = Field(default=None, ge=2000, le=40000)
+
+
 # --- Quotation Insights & Hit and Miss Tracking ---
 
 class QuotationActivityCreateRequest(BaseModel):

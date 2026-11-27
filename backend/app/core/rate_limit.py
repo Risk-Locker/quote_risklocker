@@ -47,6 +47,8 @@ def policy_for_request(method: str, path: str, settings) -> RateLimitPolicy | No
         return RateLimitPolicy("download", settings.rate_limit_download_attempts, settings.rate_limit_download_window_seconds)
     if method == "POST" and (path.endswith("/import") or "/imports" in path):
         return RateLimitPolicy("import", settings.rate_limit_import_attempts, settings.rate_limit_import_window_seconds)
+    if method == "POST" and (fullmatch(r"/api/copilot/threads/[^/]+/stream", path) or path == "/api/copilot/chat"):
+        return RateLimitPolicy("copilot_chat", settings.rate_limit_copilot_attempts, settings.rate_limit_copilot_window_seconds)
     return None
 
 
