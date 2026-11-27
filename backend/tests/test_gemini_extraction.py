@@ -268,7 +268,7 @@ def test_phase1_model_lock_8slot_pool_and_accounting_proof_gate():
     from app.services.gemini_account_service import GeminiAccountManager
     from app.services.session_rescan_service import apply_gemini_result
 
-    # 1. Strict 2-model lock + 8-slot pool default & exclusion
+    # 1. Strict 2-model lock + N-key (16-slot) pool default & exclusion
     assert ALLOWED_PRODUCTION_MODELS == frozenset({"gemini-3.1-flash-lite", "gemini-3.5-flash-lite"})
     ok_31, _, _ = evaluate_model_eligibility({"name": "models/gemini-3.1-flash-lite", "supportedGenerationMethods": ["generateContent"]})
     ok_35, _, _ = evaluate_model_eligibility({"name": "models/gemini-3.5-flash-lite", "supportedGenerationMethods": ["generateContent"]})
@@ -278,7 +278,7 @@ def test_phase1_model_lock_8slot_pool_and_accounting_proof_gate():
         assert bad_ok is False, f"{bad_id} must be rejected"
 
     mgr = GeminiAccountManager(tuple(f"AIzaSyTestKey0000000000000000000000{i}" for i in range(8)))
-    assert mgr._max_accounts == 8
+    assert mgr._max_accounts == 16
     assert len(mgr.get_accounts()) == 8
     slot1 = mgr.acquire_parallel_slot(requested_model="gemini-3.1-flash-lite")
     assert slot1 is not None

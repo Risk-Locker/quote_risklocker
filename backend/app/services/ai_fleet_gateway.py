@@ -77,6 +77,61 @@ def compute_next_pt_midnight_utc(now_utc: datetime | None = None) -> datetime:
     return next_midnight_pt.astimezone(timezone.utc)
 
 
+DEFAULT_COPILOT_QUOTA_POLICY: dict[str, Any] = {
+    "enabled": True,
+    "shared_copilot_rpd_pct": 20,
+    "shared_interactive_reserve_pct": 10,
+    "staff_daily_turns": 40,
+    "staff_daily_tokens": 80_000,
+    "admin_daily_turns": 150,
+    "admin_daily_tokens": 250_000,
+    "max_tool_hops": 4,
+    "max_input_tokens_per_turn": 12_000,
+}
+
+
+def normalize_copilot_quota_policy(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Clamp and normalize copilot quota governance policy with safe defaults."""
+    src = raw if isinstance(raw, dict) else {}
+    return {
+        "enabled": bool(src.get("enabled", True)),
+        "shared_copilot_rpd_pct": max(5, min(80, int(src.get("shared_copilot_rpd_pct", 20) or 20))),
+        "shared_interactive_reserve_pct": max(0, min(40, int(src.get("shared_interactive_reserve_pct", 10) or 10))),
+        "staff_daily_turns": max(5, min(500, int(src.get("staff_daily_turns", 40) or 40))),
+        "staff_daily_tokens": max(5_000, min(2_000_000, int(src.get("staff_daily_tokens", 80_000) or 80_000))),
+        "admin_daily_turns": max(10, min(1_000, int(src.get("admin_daily_turns", 150) or 150))),
+        "admin_daily_tokens": max(10_000, min(5_000_000, int(src.get("admin_daily_tokens", 250_000) or 250_000))),
+        "max_tool_hops": max(1, min(8, int(src.get("max_tool_hops", 4) or 4))),
+        "max_input_tokens_per_turn": max(2_000, min(40_000, int(src.get("max_input_tokens_per_turn", 12_000) or 12_000))),
+    }
+
+
+def get_copilot_quota_policy(db: Any = None) -> dict[str, Any]:
+    """Read copilot quota governance policy from AppSetting or return safe defaults."""
+    from app.models.tables import AppSetting
+
+    if db is not None:
+        try:
+            row = db.get(AppSetting, "copilot_quota_policy")
+            if row and isinstance(row.value, dict):
+                return normalize_copilot_quota_policy(row.value)
+        except Exception:
+            pass
+        return dict(DEFAULT_COPILOT_QUOTA_POLICY)
+    if _is_test_runtime():
+        return dict(DEFAULT_COPILOT_QUOTA_POLICY)
+    try:
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as sess:
+            row = sess.get(AppSetting, "copilot_quota_policy")
+            if row and isinstance(row.value, dict):
+                return normalize_copilot_quota_policy(row.value)
+    except Exception:
+        pass
+    return dict(DEFAULT_COPILOT_QUOTA_POLICY)
+
+
 @dataclass
 class LaneReservation:
     reservation_id: str
@@ -87,6 +142,8 @@ class LaneReservation:
     api_key: str
     model: str
     estimated_tokens: int
+    purpose: str = "extraction"
+    actor_user_id: str | None = None
 
 
 @dataclass
@@ -103,10 +160,12 @@ class _MemoryLaneState:
     recent_calls_json: list[float] = field(default_factory=list)
     recent_tokens_json: list[list[Any]] = field(default_factory=list)
     rpd_used: int = 0
+    copilot_rpd_used: int = 0
     pt_cycle_date: str = field(default_factory=get_current_pt_cycle_date)
     last_dispatched_at: float = 0.0
     cooling_until: float | None = None
     global_pause_until: float | None = None
+    interactive_yield_until: float | None = None
     status: str = "ready"
     last_error: str | None = None
     last_latency_ms: int = 0
@@ -167,6 +226,7 @@ class GeminiFleetGateway:
         self._mem_events: collections.deque[dict[str, Any]] = collections.deque(maxlen=500)
         self._last_prune_ts: float = 0.0
         self._last_pace_event_ts: float = 0.0
+        self._copilot_policy_override: dict[str, Any] | None = None
 
     def _use_db(self, db: Any = None) -> bool:
         if db is not None:
@@ -318,7 +378,9 @@ class GeminiFleetGateway:
                 if lane.pt_cycle_date != today_pt:
                     lane.pt_cycle_date = today_pt
                     lane.rpd_used = 0
+                    lane.copilot_rpd_used = 0
                     lane.cooling_until = None
+                    lane.interactive_yield_until = None
                     if lane.status in ("exhausted_rpd", "cooling_429", "cooling_err"):
                         lane.status = "ready"
                         lane.last_error = None
@@ -379,7 +441,9 @@ class GeminiFleetGateway:
                     if lane.pt_cycle_date != today_pt:
                         lane.pt_cycle_date = today_pt
                         lane.rpd_used = 0
+                        lane.copilot_rpd_used = 0
                         lane.cooling_until = None
+                        lane.interactive_yield_until = None
                         if lane.status in ("exhausted_rpd", "cooling_429", "cooling_err"):
                             lane.status = "ready"
                             lane.last_error = None
@@ -526,14 +590,42 @@ class GeminiFleetGateway:
         batch_item_index: int | None,
         priority: int,
         queued_count: int,
+        purpose: str = "extraction",
+        policy: dict[str, Any] | None = None,
     ) -> tuple[Any | None, float, bool]:
         """Pure scheduler over locked lane objects. Returns (chosen_lane, wait_seconds, is_daily_exhausted)."""
+        is_copilot = (purpose or "extraction").startswith("copilot")
+        eff_policy = normalize_copilot_quota_policy(policy if policy is not None else self._copilot_policy_override)
+        if is_copilot and not eff_policy["enabled"]:
+            return None, float("inf"), True
+
         candidates = list(lanes)
         if requested_model is not None:
             candidates = [l for l in candidates if l.model == requested_model]
         if exclude_lane_ids:
             filtered = [l for l in candidates if l.lane_id not in exclude_lane_ids]
             candidates = filtered
+
+        # Workload scope filtering + shared RPD ring-fencing across N accounts
+        shared_total_rpd = 0
+        shared_used_total = 0
+        shared_copilot_used = 0
+        has_dedicated_copilot = False
+        for l in lanes:
+            acc = acc_by_id.get(l.account_id)
+            if not acc or acc.is_paused or acc.status in ("denied", "invalid_key"):
+                continue
+            scope = getattr(acc, "workload_scope", "all") or "all"
+            if scope == "copilot_only":
+                has_dedicated_copilot = True
+            elif scope == "all":
+                shared_total_rpd += int(l.rpd_limit or SAFE_RPD_CEILING)
+                shared_used_total += int(l.rpd_used or 0) + int(l.in_flight_count or 0)
+                shared_copilot_used += int(getattr(l, "copilot_rpd_used", 0) or 0)
+
+        shared_copilot_cap = max(1, int(shared_total_rpd * eff_policy["shared_copilot_rpd_pct"] / 100)) if shared_total_rpd > 0 else 0
+        shared_reserve_floor = int(shared_total_rpd * eff_policy["shared_interactive_reserve_pct"] / 100) if (shared_total_rpd > 0 and not has_dedicated_copilot) else 0
+        shared_remaining_rpd = max(0, shared_total_rpd - shared_used_total)
 
         eligible_account_lanes: list[Any] = []
         for l in candidates:
@@ -542,52 +634,79 @@ class GeminiFleetGateway:
                 continue
             if l.status == "quarantined_auth" and l.cooling_until and now < l.cooling_until:
                 continue
+            scope = getattr(acc, "workload_scope", "all") or "all"
+            if is_copilot and scope == "extraction_only":
+                continue
+            if not is_copilot and scope == "copilot_only":
+                continue
             eligible_account_lanes.append(l)
 
         if not eligible_account_lanes:
             return None, float("inf"), True
 
-        rpd_available = [
-            l for l in eligible_account_lanes
-            if (int(l.rpd_used or 0) + int(l.in_flight_count or 0)) < int(l.rpd_limit or SAFE_RPD_CEILING)
-        ]
+        rpd_available: list[Any] = []
+        for l in eligible_account_lanes:
+            if (int(l.rpd_used or 0) + int(l.in_flight_count or 0)) >= int(l.rpd_limit or SAFE_RPD_CEILING):
+                continue
+            acc = acc_by_id.get(l.account_id)
+            scope = getattr(acc, "workload_scope", "all") if acc else "all"
+            if is_copilot and scope == "all" and shared_copilot_used >= shared_copilot_cap:
+                continue
+            if (not is_copilot) and priority >= 80 and scope == "all" and shared_reserve_floor > 0 and shared_remaining_rpd <= shared_reserve_floor:
+                continue
+            rpd_available.append(l)
+
         if not rpd_available:
             return None, float("inf"), True
 
-        # Order round-robin across RPD-capable lanes
+        # Order round-robin across RPD-capable lanes, preferring dedicated lanes first
         n = len(rpd_available)
         if batch_item_index is not None:
             start_idx = abs(int(batch_item_index)) % n
         else:
             start_idx = self._rr_seq % n
             self._rr_seq += 1
-        ordered = rpd_available[start_idx:] + rpd_available[:start_idx]
+        rr_ordered = rpd_available[start_idx:] + rpd_available[:start_idx]
+        if is_copilot:
+            ordered = [l for l in rr_ordered if (getattr(acc_by_id.get(l.account_id), "workload_scope", "all") == "copilot_only")] + [
+                l for l in rr_ordered if (getattr(acc_by_id.get(l.account_id), "workload_scope", "all") != "copilot_only")
+            ]
+        else:
+            ordered = [l for l in rr_ordered if (getattr(acc_by_id.get(l.account_id), "workload_scope", "all") == "extraction_only")] + [
+                l for l in rr_ordered if (getattr(acc_by_id.get(l.account_id), "workload_scope", "all") != "extraction_only")
+            ]
 
-        # Compute max last_dispatched_at per account (sibling model lanes share key spacing!)
+        # Compute max last_dispatched_at per account and per workload scope
         account_last_dispatch: dict[str, float] = {}
-        fleet_last_dispatch = 0.0
+        scope_last_dispatch: dict[str, float] = {}
         global_pause_until = 0.0
+        shared_interactive_yield = 0.0
         for l in lanes:
             ld = float(l.last_dispatched_at or 0.0)
-            if ld > fleet_last_dispatch:
-                fleet_last_dispatch = ld
+            l_acc = acc_by_id.get(l.account_id)
+            l_scope = getattr(l_acc, "workload_scope", "all") if l_acc else "all"
+            if ld > scope_last_dispatch.get(l_scope, 0.0):
+                scope_last_dispatch[l_scope] = ld
             prev_acc = account_last_dispatch.get(l.account_id, 0.0)
             if ld > prev_acc:
                 account_last_dispatch[l.account_id] = ld
             gp = float(l.global_pause_until or 0.0)
             if gp > global_pause_until:
                 global_pause_until = gp
+            iy = float(getattr(l, "interactive_yield_until", 0.0) or 0.0)
+            if iy > shared_interactive_yield:
+                shared_interactive_yield = iy
 
         cadence_sec = self._adaptive_cadence_seconds(priority=priority, queued_count=queued_count)
-        cadence_ready_at = fleet_last_dispatch + min(cadence_sec, 3.5 if queued_count > 20 else cadence_sec)
-        # If multiple healthy lanes exist in parallel, space fleet dispatches politely without blocking > 2s unless congestion
+        effective_cadence = min(cadence_sec, 3.5 if queued_count > 20 else cadence_sec)
         if len(rpd_available) >= 2 and cadence_sec <= 3.5:
-            fleet_gap = max(0.35, cadence_sec / max(1, min(len(rpd_available), 4)))
-            cadence_ready_at = fleet_last_dispatch + fleet_gap
+            effective_cadence = max(0.35, cadence_sec / max(1, min(len(rpd_available), 4)))
 
         min_wait = float("inf")
         for l in ordered:
             cfg = self._get_model_config(l.model)
+            acc = acc_by_id.get(l.account_id)
+            scope = getattr(acc, "workload_scope", "all") if acc else "all"
             wait_reasons: list[float] = []
 
             if global_pause_until > now:
@@ -596,6 +715,11 @@ class GeminiFleetGateway:
             if l.cooling_until and now < l.cooling_until:
                 wait_reasons.append(l.cooling_until - now)
 
+            # Bulk background batches yield politely on shared lanes when interactive Copilot is active
+            if (not is_copilot) and priority >= 80 and scope == "all" and shared_interactive_yield > now:
+                wait_reasons.append(min(2.5, shared_interactive_yield - now))
+
+            cadence_ready_at = scope_last_dispatch.get(scope, 0.0) + effective_cadence
             if cadence_ready_at > now:
                 wait_reasons.append(cadence_ready_at - now)
 
@@ -645,6 +769,7 @@ class GeminiFleetGateway:
         filename: str | None = None,
         job_id: str | None = None,
         upload_run_id: str | None = None,
+        actor_user_id: str | None = None,
         priority: int = 100,
         db: Any = None,
     ) -> tuple[LaneReservation | None, float, bool]:
@@ -653,6 +778,7 @@ class GeminiFleetGateway:
             raise ValueError(f"Forbidden model tier: {requested_model}. Allowed models: {sorted(ALLOWED_PRODUCTION_MODELS)}")
 
         now = time.time()
+        is_copilot = (purpose or "extraction").startswith("copilot")
         if self._use_db(db):
             owns_db = db is None
             sess = db if db is not None else self._open_db()
@@ -660,6 +786,7 @@ class GeminiFleetGateway:
                 with self._lock:
                     accounts, active_models, acc_by_id = self._active_accounts_and_models(sess)
                     lanes = self._sync_db_lanes_locked(sess, accounts, active_models, now)
+                    policy = get_copilot_quota_policy(sess)
                     queued_count = 1
                     try:
                         queued_count = int(
@@ -684,7 +811,14 @@ class GeminiFleetGateway:
                         batch_item_index=batch_item_index,
                         priority=priority,
                         queued_count=queued_count,
+                        purpose=purpose,
+                        policy=policy,
                     )
+                    if is_copilot and chosen is None and not is_daily:
+                        # Ask shared bulk workers to politely yield 2.5s so interactive chat gets priority next tick
+                        for fl in lanes:
+                            if getattr(acc_by_id.get(fl.account_id), "workload_scope", "all") == "all":
+                                fl.interactive_yield_until = max(float(fl.interactive_yield_until or 0.0), now + 2.5)
                     if chosen is None:
                         if owns_db:
                             sess.commit()
@@ -699,11 +833,14 @@ class GeminiFleetGateway:
                         "filename": filename,
                         "job_id": job_id,
                         "upload_run_id": upload_run_id,
+                        "actor_user_id": actor_user_id,
                         "estimated_tokens": estimated_tokens,
                     }
                     chosen.in_flight_meta = meta
                     chosen.in_flight_count = len(meta)
                     chosen.last_dispatched_at = now
+                    if is_copilot:
+                        chosen.interactive_yield_until = now + 2.5
                     chosen.status = "in_flight"
                     from sqlalchemy.orm.attributes import flag_modified
 
@@ -719,7 +856,7 @@ class GeminiFleetGateway:
                         upload_run_id=upload_run_id,
                         filename=filename,
                         message=f"Assigned {filename or purpose} to {chosen.lane_id} (~{estimated_tokens:,} tok)",
-                        detail={"reservation_id": res_id, "purpose": purpose, "estimated_tokens": estimated_tokens},
+                        detail={"reservation_id": res_id, "purpose": purpose, "estimated_tokens": estimated_tokens, "actor_user_id": actor_user_id},
                     )
                     if owns_db:
                         sess.commit()
@@ -733,6 +870,8 @@ class GeminiFleetGateway:
                             api_key=acc.key,
                             model=chosen.model,
                             estimated_tokens=estimated_tokens,
+                            purpose=purpose,
+                            actor_user_id=actor_user_id,
                         ),
                         0.0,
                         False,
@@ -758,7 +897,12 @@ class GeminiFleetGateway:
                     batch_item_index=batch_item_index,
                     priority=priority,
                     queued_count=1,
+                    purpose=purpose,
                 )
+                if is_copilot and chosen is None and not is_daily:
+                    for fl in lanes:
+                        if getattr(acc_by_id.get(fl.account_id), "workload_scope", "all") == "all":
+                            fl.interactive_yield_until = max(float(fl.interactive_yield_until or 0.0), now + 2.5)
                 if chosen is None:
                     return None, wait_sec, is_daily
                 acc = acc_by_id[chosen.account_id]
@@ -769,10 +913,13 @@ class GeminiFleetGateway:
                     "filename": filename,
                     "job_id": job_id,
                     "upload_run_id": upload_run_id,
+                    "actor_user_id": actor_user_id,
                     "estimated_tokens": estimated_tokens,
                 }
                 chosen.in_flight_count = len(chosen.in_flight_meta)
                 chosen.last_dispatched_at = now
+                if is_copilot:
+                    chosen.interactive_yield_until = now + 2.5
                 chosen.status = "in_flight"
                 self._mem_events.appendleft(
                     {
@@ -787,7 +934,7 @@ class GeminiFleetGateway:
                         "upload_run_id": upload_run_id,
                         "filename": filename,
                         "message": f"Assigned {filename or purpose} to {chosen.lane_id}",
-                        "detail": {"reservation_id": res_id, "purpose": purpose},
+                        "detail": {"reservation_id": res_id, "purpose": purpose, "actor_user_id": actor_user_id},
                     }
                 )
                 return (
@@ -800,6 +947,8 @@ class GeminiFleetGateway:
                         api_key=acc.key,
                         model=chosen.model,
                         estimated_tokens=estimated_tokens,
+                        purpose=purpose,
+                        actor_user_id=actor_user_id,
                     ),
                     0.0,
                     False,
@@ -817,10 +966,14 @@ class GeminiFleetGateway:
         filename: str | None = None,
         job_id: str | None = None,
         upload_run_id: str | None = None,
+        actor_user_id: str | None = None,
         endpoint_slot_override: str | None = None,
         db: Any = None,
     ) -> None:
         now = time.time()
+        eff_purpose = purpose or reservation.purpose or "extraction"
+        eff_actor = actor_user_id or reservation.actor_user_id
+        is_copilot = eff_purpose.startswith("copilot")
         tok_count = max(0, total_tokens if total_tokens > 0 else (prompt_tokens + candidate_tokens))
         if latency_ms > 0:
             self._recent_latencies.append(latency_ms / 1000.0)
@@ -845,6 +998,8 @@ class GeminiFleetGateway:
                         lane.recent_calls_json = calls
                         lane.recent_tokens_json = tokens
                         lane.rpd_used = int(lane.rpd_used or 0) + 1
+                        if is_copilot:
+                            lane.copilot_rpd_used = int(getattr(lane, "copilot_rpd_used", 0) or 0) + 1
                         lane.cooling_until = None
                         lane.last_error = None
                         lane.last_latency_ms = int(latency_ms or 0)
@@ -865,8 +1020,8 @@ class GeminiFleetGateway:
                         job_id=job_id,
                         upload_run_id=upload_run_id,
                         filename=filename,
-                        message=f"{reservation.lane_id} finished {filename or purpose} in {latency_ms}ms ({tok_count:,} tok)",
-                        detail={"latency_ms": latency_ms, "total_tokens": tok_count, "purpose": purpose},
+                        message=f"{reservation.lane_id} finished {filename or eff_purpose} in {latency_ms}ms ({tok_count:,} tok)",
+                        detail={"latency_ms": latency_ms, "total_tokens": tok_count, "purpose": eff_purpose},
                     )
                     if owns_db:
                         sess.commit()
@@ -889,6 +1044,8 @@ class GeminiFleetGateway:
                     lane.recent_calls_json = calls
                     lane.recent_tokens_json = tokens
                     lane.rpd_used += 1
+                    if is_copilot:
+                        lane.copilot_rpd_used += 1
                     lane.cooling_until = None
                     lane.last_error = None
                     lane.last_latency_ms = int(latency_ms or 0)
@@ -905,8 +1062,8 @@ class GeminiFleetGateway:
                         "job_id": job_id,
                         "upload_run_id": upload_run_id,
                         "filename": filename,
-                        "message": f"{reservation.lane_id} finished {filename or purpose} in {latency_ms}ms",
-                        "detail": {"latency_ms": latency_ms, "total_tokens": tok_count},
+                        "message": f"{reservation.lane_id} finished {filename or eff_purpose} in {latency_ms}ms",
+                        "detail": {"latency_ms": latency_ms, "total_tokens": tok_count, "purpose": eff_purpose},
                     }
                 )
 
@@ -921,6 +1078,8 @@ class GeminiFleetGateway:
             candidate_tokens=candidate_tokens,
             total_tokens=tok_count,
             latency_ms=latency_ms,
+            purpose=eff_purpose,
+            actor_user_id=eff_actor,
         )
 
     def release_lane(
@@ -934,11 +1093,14 @@ class GeminiFleetGateway:
         filename: str | None = None,
         job_id: str | None = None,
         upload_run_id: str | None = None,
+        actor_user_id: str | None = None,
         cool_slot: bool = True,
         endpoint_slot_override: str | None = None,
         db: Any = None,
     ) -> None:
         now = time.time()
+        eff_purpose = purpose or reservation.purpose or "extraction"
+        eff_actor = actor_user_id or reservation.actor_user_id
         clean_msg = str(error_message or f"HTTP {status_code}")
         is_auth_err = status_code in (401, 403) or "unauthenticated" in clean_msg.lower() or "permission_denied" in clean_msg.lower()
         is_429 = status_code == 429
@@ -1077,6 +1239,8 @@ class GeminiFleetGateway:
             is_success=False,
             latency_ms=latency_ms,
             error_message=clean_msg,
+            purpose=eff_purpose,
+            actor_user_id=eff_actor,
         )
 
     def execute_gemini_request(
@@ -1095,6 +1259,7 @@ class GeminiFleetGateway:
         filename: str | None = None,
         job_id: str | None = None,
         upload_run_id: str | None = None,
+        actor_user_id: str | None = None,
         priority: int = 100,
         telemetry_log: list[dict[str, Any]] | None = None,
         allow_quota_raise: bool = True,
@@ -1130,6 +1295,7 @@ class GeminiFleetGateway:
                     filename=filename,
                     job_id=job_id,
                     upload_run_id=upload_run_id,
+                    actor_user_id=actor_user_id,
                     priority=priority,
                 )
                 if res is not None:
@@ -1394,6 +1560,7 @@ class GeminiFleetGateway:
                         "lane_id": lane.lane_id,
                         "account_id": lane.account_id,
                         "account_label": acc.label if acc else lane.account_id,
+                        "workload_scope": getattr(acc, "workload_scope", "all") if acc else "all",
                         "api_key_masked": lane.api_key_masked,
                         "model": lane.model,
                         "status": eff_status,
@@ -1402,6 +1569,7 @@ class GeminiFleetGateway:
                         "tpm_used": tpm_used,
                         "tpm_limit": lane.tpm_limit,
                         "rpd_used": lane.rpd_used,
+                        "copilot_rpd_used": int(getattr(lane, "copilot_rpd_used", 0) or 0),
                         "rpd_limit": lane.rpd_limit,
                         "in_flight_count": active_inf,
                         "active_assignments": active_files,
@@ -1453,6 +1621,7 @@ class GeminiFleetGateway:
                             "lane_id": lane.lane_id,
                             "account_id": lane.account_id,
                             "account_label": acc.label if acc else lane.account_id,
+                            "workload_scope": getattr(acc, "workload_scope", "all") if acc else "all",
                             "api_key_masked": lane.api_key_masked,
                             "model": lane.model,
                             "status": lane.status,
@@ -1461,6 +1630,7 @@ class GeminiFleetGateway:
                             "tpm_used": sum(int(e[1] or 0) for e in tokens),
                             "tpm_limit": lane.tpm_limit,
                             "rpd_used": lane.rpd_used,
+                            "copilot_rpd_used": lane.copilot_rpd_used,
                             "rpd_limit": lane.rpd_limit,
                             "in_flight_count": active_inf,
                             "active_assignments": list(cleaned_meta.values()),
@@ -1494,6 +1664,153 @@ class GeminiFleetGateway:
             "next_pt_reset_utc": next_reset_utc.isoformat(),
             "seconds_until_pt_reset": seconds_until_reset,
             "events": events_data,
+            "governance": self.get_copilot_governance_summary(db) if db is not None else None,
+        }
+
+    def get_copilot_governance_summary(self, db: Any) -> dict[str, Any]:
+        """Compute dynamic N-key workload split, Copilot RPD ring-fence, and per-user daily usage."""
+        from app.models.tables import CopilotArtifact, CopilotMessage, CopilotThread, User
+
+        policy = get_copilot_quota_policy(db)
+        pool = get_key_pool()
+        pool.sync_accounts(db=db)
+        accounts = [a for a in pool.get_accounts() if not a.is_paused and a.status not in ("denied", "invalid_key")]
+        models_count = max(1, len(getattr(pool, "_parallel_models", PARALLEL_MODELS) or PARALLEL_MODELS))
+        rpd_per_lane = int(getattr(pool, "_max_rpd_per_key", SAFE_RPD_CEILING) or SAFE_RPD_CEILING)
+
+        shared_accounts = [a for a in accounts if (a.workload_scope or "all") == "all"]
+        ded_copilot_accounts = [a for a in accounts if a.workload_scope == "copilot_only"]
+        ded_extraction_accounts = [a for a in accounts if a.workload_scope == "extraction_only"]
+
+        shared_total_rpd = len(shared_accounts) * models_count * rpd_per_lane
+        dedicated_copilot_rpd = len(ded_copilot_accounts) * models_count * rpd_per_lane
+        dedicated_extraction_rpd = len(ded_extraction_accounts) * models_count * rpd_per_lane
+        total_fleet_rpd = shared_total_rpd + dedicated_copilot_rpd + dedicated_extraction_rpd
+
+        shared_copilot_cap = int(shared_total_rpd * policy["shared_copilot_rpd_pct"] / 100) if shared_total_rpd > 0 else 0
+        shared_reserve_rpd = (
+            int(shared_total_rpd * policy["shared_interactive_reserve_pct"] / 100)
+            if (shared_total_rpd > 0 and not ded_copilot_accounts)
+            else 0
+        )
+        copilot_rpd_limit = dedicated_copilot_rpd + shared_copilot_cap
+        extraction_rpd_limit = dedicated_extraction_rpd + max(0, shared_total_rpd - shared_copilot_cap)
+
+        today_pt = get_current_pt_cycle_date()
+        copilot_rpd_used = 0
+        extraction_rpd_used = 0
+        copilot_tokens_today = 0
+        extraction_tokens_today = 0
+
+        purpose_rows = db.execute(
+            select(
+                GeminiApiCallLog.purpose,
+                func.count(GeminiApiCallLog.id),
+                func.coalesce(func.sum(GeminiApiCallLog.total_tokens), 0),
+            )
+            .where(GeminiApiCallLog.local_date == today_pt)
+            .group_by(GeminiApiCallLog.purpose)
+        ).all()
+        for purp, cnt, tok in purpose_rows:
+            p_str = str(purp or "extraction")
+            if p_str.startswith("copilot"):
+                copilot_rpd_used += int(cnt or 0)
+                copilot_tokens_today += int(tok or 0)
+            else:
+                extraction_rpd_used += int(cnt or 0)
+                extraction_tokens_today += int(tok or 0)
+
+        # Per-user Copilot turns, LLM calls, tokens, and Excel exports today
+        call_rows = db.execute(
+            select(
+                GeminiApiCallLog.actor_user_id,
+                func.count(GeminiApiCallLog.id),
+                func.coalesce(func.sum(GeminiApiCallLog.total_tokens), 0),
+            )
+            .where(
+                GeminiApiCallLog.local_date == today_pt,
+                GeminiApiCallLog.actor_user_id.is_not(None),
+                GeminiApiCallLog.purpose.like("copilot%"),
+            )
+            .group_by(GeminiApiCallLog.actor_user_id)
+        ).all()
+        user_stats_map: dict[str, dict[str, int]] = {}
+        for uid, cnt, tok in call_rows:
+            user_stats_map[str(uid)] = {
+                "llm_calls_today": int(cnt or 0),
+                "tokens_today": int(tok or 0),
+                "turns_today": 0,
+                "excel_exports_today": 0,
+            }
+
+        now_utc = datetime.now(timezone.utc)
+        start_of_day = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        turn_rows = db.execute(
+            select(CopilotThread.user_id, func.count(CopilotMessage.id))
+            .join(CopilotThread, CopilotThread.id == CopilotMessage.thread_id)
+            .where(CopilotMessage.role == "user", CopilotMessage.created_at >= start_of_day)
+            .group_by(CopilotThread.user_id)
+        ).all()
+        for uid, cnt in turn_rows:
+            entry = user_stats_map.setdefault(
+                str(uid), {"llm_calls_today": 0, "tokens_today": 0, "turns_today": 0, "excel_exports_today": 0}
+            )
+            entry["turns_today"] = int(cnt or 0)
+
+        art_rows = db.execute(
+            select(CopilotArtifact.owner_id, func.count(CopilotArtifact.id))
+            .where(CopilotArtifact.kind == "xlsx", CopilotArtifact.created_at >= start_of_day)
+            .group_by(CopilotArtifact.owner_id)
+        ).all()
+        for uid, cnt in art_rows:
+            entry = user_stats_map.setdefault(
+                str(uid), {"llm_calls_today": 0, "tokens_today": 0, "turns_today": 0, "excel_exports_today": 0}
+            )
+            entry["excel_exports_today"] = int(cnt or 0)
+
+        users_by_id: dict[str, User] = {}
+        if user_stats_map:
+            for u in db.scalars(select(User).where(User.id.in_(list(user_stats_map.keys())))).all():
+                users_by_id[str(u.id)] = u
+
+        per_user_today: list[dict[str, Any]] = []
+        for uid, st in user_stats_map.items():
+            u = users_by_id.get(uid)
+            role = u.role if u else "staff"
+            is_admin = role in ("super_admin", "admin", "dev")
+            per_user_today.append(
+                {
+                    "user_id": uid,
+                    "name": (u.name or u.email) if u else uid[:8],
+                    "email": u.email if u else "",
+                    "role": role,
+                    "turns_today": st["turns_today"],
+                    "llm_calls_today": st["llm_calls_today"],
+                    "tokens_today": st["tokens_today"],
+                    "excel_exports_today": st["excel_exports_today"],
+                    "daily_turn_limit": policy["admin_daily_turns"] if is_admin else policy["staff_daily_turns"],
+                    "daily_token_limit": policy["admin_daily_tokens"] if is_admin else policy["staff_daily_tokens"],
+                }
+            )
+        per_user_today.sort(key=lambda item: (-item["tokens_today"], -item["turns_today"]))
+
+        return {
+            "policy": policy,
+            "pt_cycle_date": today_pt,
+            "active_keys_count": len(accounts),
+            "shared_keys_count": len(shared_accounts),
+            "dedicated_copilot_keys_count": len(ded_copilot_accounts),
+            "dedicated_extraction_keys_count": len(ded_extraction_accounts),
+            "total_fleet_rpd": total_fleet_rpd,
+            "copilot_rpd_limit": copilot_rpd_limit,
+            "copilot_rpd_used": copilot_rpd_used,
+            "copilot_rpd_remaining": max(0, copilot_rpd_limit - copilot_rpd_used),
+            "copilot_tokens_today": copilot_tokens_today,
+            "extraction_rpd_limit": extraction_rpd_limit,
+            "extraction_rpd_used": extraction_rpd_used,
+            "extraction_tokens_today": extraction_tokens_today,
+            "shared_reserve_rpd": shared_reserve_rpd,
+            "per_user_today": per_user_today,
         }
 
 

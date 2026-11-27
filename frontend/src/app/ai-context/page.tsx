@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowsClockwise,
   Brain,
@@ -8,7 +8,6 @@ import {
   CheckCircle,
   ChatCircleDots,
   Copy,
-  PaperPlaneTilt,
   Sparkle,
   Star,
   TerminalWindow,
@@ -85,23 +84,6 @@ type AIMemoryData = {
 
 type ActiveTab = "chat" | "learned" | "summary" | "companies" | "concepts" | "prompt";
 
-type ChatMessage = {
-  id: string;
-  sender: "user" | "assistant";
-  text: string;
-  sources?: string[];
-  tokens?: number;
-  timestamp: string;
-};
-
-const STARTER_PROMPTS = [
-  "How much info you gathered so far?",
-  "What insurance companies are active?",
-  "What package tiers does AmAssurance have?",
-  "Tell me about the towing benefit concept",
-  "List active field aliases",
-];
-
 export default function AIContextPage() {
   const [data, setData] = useState<AIContextData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -130,24 +112,6 @@ export default function AIContextPage() {
       item.insurance_company.toLowerCase().includes(q)
     );
   });
-
-  // Chatbot State
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      sender: "assistant",
-      text: "Hello! I am your lightweight AI Grounding Assistant. Ask me quick questions about active insurance companies, benefit concepts, quotation sessions, or search for a vehicle plate number with near-zero token cost.",
-      timestamp: "Just now",
-      sources: ["RiskLocker Grounding Engine"],
-    },
-  ]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, chatLoading]);
 
   async function loadData() {
     setLoading(true);
@@ -199,53 +163,6 @@ export default function AIContextPage() {
     loadCapabilities();
     loadMemory();
   }, []);
-
-  async function handleSendMessage(queryText?: string) {
-    const text = (queryText ?? chatInput).trim();
-    if (!text || chatLoading) return;
-
-    const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      sender: "user",
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    setChatInput("");
-    setChatLoading(true);
-
-    try {
-      const res = await api<{ reply: string; sources: string[]; tokens_used: number }>(
-        "/settings/ai-grounding-chat",
-        {
-          method: "POST",
-          body: JSON.stringify({ query: text }),
-        }
-      );
-
-      const botMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        sender: "assistant",
-        text: res.reply,
-        sources: res.sources,
-        tokens: res.tokens_used,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      };
-
-      setMessages((prev) => [...prev, botMsg]);
-    } catch (err) {
-      const errorMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        sender: "assistant",
-        text: err instanceof Error ? err.message : "Failed to query grounding assistant.",
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      };
-      setMessages((prev) => [...prev, errorMsg]);
-    } finally {
-      setChatLoading(false);
-    }
-  }
 
   async function savePrompt() {
     setPromptSaving(true);
@@ -434,124 +351,30 @@ export default function AIContextPage() {
           </button>
         </div>
 
-        {/* Tab 1: AI Grounding Assistant (Chatbot) */}
+        {/* Tab 1: Unified Agentic AI Copilot Link */}
         {tab === "chat" && (
           <div className="grid gap-4">
-            <Card className="border border-[var(--rl-border)] bg-white shadow-xs overflow-hidden flex flex-col h-[560px]">
-              {/* Chat Header */}
-              <div className="flex items-center justify-between border-b border-[var(--rl-border)] p-3.5 bg-gray-50/70">
-                <div className="flex items-center gap-2">
-                  <span className="grid size-7 place-items-center rounded bg-[var(--rl-black)] text-white text-xs">
-                    <Brain size={16} weight="fill" />
-                  </span>
-                  <div>
-                    <h2 className="text-xs font-bold text-[var(--rl-text-strong)]">
-                      RiskLocker Grounding Assistant
-                    </h2>
-                    <p className="text-[11px] text-[var(--rl-text-muted)]">
-                      Ultra-low token context (&lt;150 tokens) · Direct database retrieval
-                    </p>
-                  </div>
-                </div>
-                <Badge variant="success" className="text-[10px] gap-1">
-                  <Lightning size={12} weight="fill" />
-                  Fast &amp; Free Tier Safe
-                </Badge>
-              </div>
-
-              {/* Messages Thread */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-[var(--rl-bg)]/40">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-[var(--rl-radius-sm)] p-3 text-xs leading-relaxed ${
-                        msg.sender === "user"
-                          ? "bg-[var(--rl-black)] text-white shadow-xs"
-                          : "bg-white border border-[var(--rl-border)] text-[var(--rl-text-strong)] shadow-xs"
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
-
-                      {msg.sources && msg.sources.length > 0 ? (
-                        <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap items-center gap-1 text-[10px] text-[var(--rl-text-muted)]">
-                          <span className="font-semibold">Sources:</span>
-                          {msg.sources.map((src, sIdx) => (
-                            <span
-                              key={sIdx}
-                              className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-700 font-mono"
-                            >
-                              {src}
-                            </span>
-                          ))}
-                          {msg.tokens ? (
-                            <span className="ml-auto text-emerald-700 font-mono">
-                              ~{msg.tokens} tokens
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                    <span className="text-[10px] text-[var(--rl-text-muted)] px-1 mt-1">
-                      {msg.timestamp}
-                    </span>
-                  </div>
-                ))}
-
-                {chatLoading && (
-                  <div className="flex items-center gap-2 text-xs text-[var(--rl-text-muted)] p-2">
-                    <span className="inline-block size-2 rounded-full bg-[var(--rl-red)] animate-ping" />
-                    <span>Searching database and grounding facts...</span>
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* Starter Quick Prompt Pills */}
-              <div className="p-2.5 border-t border-[var(--rl-border)] bg-gray-50 flex items-center gap-1.5 overflow-x-auto">
-                <span className="text-[11px] font-semibold text-[var(--rl-text-muted)] shrink-0 px-1">
-                  Quick asks:
+            <Card className="border border-[var(--rl-border)] bg-white shadow-xs p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="grid size-10 place-items-center rounded-[var(--rl-radius-sm)] bg-[var(--rl-black)] text-white shrink-0">
+                  <Brain size={20} weight="fill" />
                 </span>
-                {STARTER_PROMPTS.map((prompt, pIdx) => (
-                  <button
-                    key={pIdx}
-                    type="button"
-                    onClick={() => handleSendMessage(prompt)}
-                    disabled={chatLoading}
-                    className="shrink-0 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white px-2.5 py-1 text-[11px] font-medium text-[var(--rl-text-strong)] hover:border-[var(--rl-black)] hover:bg-gray-50 transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    {prompt}
-                  </button>
-                ))}
+                <div className="space-y-1">
+                  <h2 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                    Unified RiskLocker AI Copilot
+                  </h2>
+                  <p className="text-xs text-[var(--rl-text-muted)] max-w-xl leading-relaxed">
+                    The grounding assistant has been upgraded into the full Agentic AI Copilot — with persistent Chat Inbox sessions, read-only SQL over all 6 semantic views, multi-year comparisons, and zero-token Excel exports.
+                  </p>
+                </div>
               </div>
-
-              {/* Chat Input Bar */}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleSendMessage();
-                }}
-                className="p-3 border-t border-[var(--rl-border)] bg-white flex items-center gap-2"
+              <a
+                href="/copilot"
+                className="inline-flex items-center gap-1.5 rounded-[var(--rl-radius-sm)] bg-[var(--rl-black)] px-4 py-2 text-xs font-semibold text-white hover:bg-neutral-800 shrink-0"
               >
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask a question or enter a vehicle plate (e.g. tell me about vehicle VG9XXX)..."
-                  className="flex-1 text-xs"
-                  disabled={chatLoading}
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={!chatInput.trim() || chatLoading}
-                  className="gap-1 px-3"
-                >
-                  <PaperPlaneTilt size={14} weight="bold" />
-                  <span>Send</span>
-                </Button>
-              </form>
+                <Sparkle size={14} weight="fill" />
+                Open AI Copilot Workspace
+              </a>
             </Card>
           </div>
         )}

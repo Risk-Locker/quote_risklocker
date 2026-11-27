@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, settings_dep
@@ -14,15 +17,20 @@ from app.api.schemas import (
     BenefitDescriptionPolishResponse,
     CopilotChatRequest,
     CopilotChatResponse,
+    CopilotFeedbackRequest,
+    CopilotStreamRequest,
+    CopilotThreadCreateRequest,
+    CopilotThreadUpdateRequest,
     GroundingChatRequest,
     ProfileCleanupRequest,
     SessionCleanupRequest,
 )
+from app.auth.rbac import require_role
 from app.core.config import Settings, resolve_active_gemini_model
 from app.core.errors import AppError
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.enums import Role
-from app.models.tables import AuditEvent, User
+from app.models.tables import AuditEvent, CopilotArtifact, CopilotMessage, CopilotThread, User
 
 logger = logging.getLogger(__name__)
 
@@ -305,3 +313,251 @@ def settings_ai_prompt_put(
     ))
     db.commit()
     return {"override": text, "is_override_active": bool(text)}
+
+
+# ---------------------------------------------------------------------------
+# Enterprise Agentic Copilot Threads, Streaming & Artifacts
+# ---------------------------------------------------------------------------
+
+
+@router.get("/copilot/quota")
+def copilot_quota_route(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return current user's Copilot turn/token quota and policy flags (read-only)."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.copilot_agent_service import get_user_copilot_quota
+
+    return get_user_copilot_quota(db, user)
+
+
+@router.get("/copilot/threads")
+def copilot_threads_list(
+    search: str | None = Query(default=None, max_length=120),
+    limit: int = Query(default=40, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """List current user's private Copilot inbox threads (read-only)."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.copilot_agent_service import serialize_thread
+
+    stmt = (
+        select(CopilotThread)
+        .where(CopilotThread.user_id == user.id, CopilotThread.deleted_at.is_(None))
+        .order_by(desc(CopilotThread.is_pinned), desc(CopilotThread.last_message_at))
+    )
+    if search and search.strip():
+        q = f"%{search.strip()}%"
+        stmt = stmt.where(or_(CopilotThread.title.ilike(q), CopilotThread.anchor_label.ilike(q)))
+    rows = list(db.scalars(stmt.offset(offset).limit(limit)).all())
+    return {"threads": [serialize_thread(t) for t in rows]}
+
+
+@router.post("/copilot/threads")
+def copilot_thread_create(
+    payload: CopilotThreadCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Create a new persistent Copilot thread."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.copilot_agent_service import serialize_thread
+
+    thread = CopilotThread(
+        user_id=user.id,
+        title=(payload.title or "New Chat").strip()[:255] or "New Chat",
+        anchor_type=payload.anchor_type,
+        anchor_id=payload.anchor_id,
+        anchor_label=payload.anchor_label,
+        last_message_at=datetime.now(timezone.utc),
+    )
+    db.add(thread)
+    db.commit()
+    db.refresh(thread)
+    return {"thread": serialize_thread(thread)}
+
+
+@router.get("/copilot/threads/{thread_id}")
+def copilot_thread_detail(
+    thread_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Fetch a single private thread, its messages, and attached artifacts (read-only)."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.copilot_agent_service import serialize_artifact, serialize_message, serialize_thread
+
+    thread = db.get(CopilotThread, thread_id)
+    if not thread or thread.deleted_at is not None or str(thread.user_id) != str(user.id):
+        raise AppError("Copilot thread not found.", 404)
+
+    msgs = list(
+        db.scalars(
+            select(CopilotMessage)
+            .where(CopilotMessage.thread_id == thread.id)
+            .order_by(CopilotMessage.created_at.asc())
+        ).all()
+    )
+    artifacts = list(
+        db.scalars(
+            select(CopilotArtifact)
+            .where(CopilotArtifact.thread_id == thread.id)
+            .order_by(CopilotArtifact.created_at.desc())
+        ).all()
+    )
+    art_by_msg: dict[str, list[CopilotArtifact]] = {}
+    orphan_arts: list[CopilotArtifact] = []
+    for art in artifacts:
+        if art.message_id:
+            art_by_msg.setdefault(str(art.message_id), []).append(art)
+        else:
+            orphan_arts.append(art)
+
+    return {
+        "thread": serialize_thread(thread),
+        "messages": [serialize_message(m, art_by_msg.get(str(m.id), [])) for m in msgs],
+        "artifacts": [serialize_artifact(a) for a in artifacts],
+        "unlinked_artifacts": [serialize_artifact(a) for a in orphan_arts],
+    }
+
+
+@router.patch("/copilot/threads/{thread_id}")
+def copilot_thread_update(
+    thread_id: str,
+    payload: CopilotThreadUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Rename or pin/unpin a Copilot thread."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.copilot_agent_service import serialize_thread
+
+    thread = db.get(CopilotThread, thread_id)
+    if not thread or thread.deleted_at is not None or str(thread.user_id) != str(user.id):
+        raise AppError("Copilot thread not found.", 404)
+
+    if payload.title is not None:
+        thread.title = payload.title.strip()[:255] or thread.title
+    if payload.is_pinned is not None:
+        thread.is_pinned = bool(payload.is_pinned)
+    db.commit()
+    db.refresh(thread)
+    return {"thread": serialize_thread(thread)}
+
+
+@router.delete("/copilot/threads/{thread_id}")
+def copilot_thread_delete(
+    thread_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Soft-delete a Copilot thread."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+
+    thread = db.get(CopilotThread, thread_id)
+    if not thread or thread.deleted_at is not None or str(thread.user_id) != str(user.id):
+        raise AppError("Copilot thread not found.", 404)
+
+    thread.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True, "thread_id": thread_id}
+
+
+@router.post("/copilot/threads/{thread_id}/stream")
+def copilot_thread_stream(
+    thread_id: str,
+    payload: CopilotStreamRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> StreamingResponse:
+    """Stream an autonomous ReAct Copilot turn over Server-Sent Events (SSE)."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.copilot_agent_service import stream_agent_turn
+
+    thread = db.get(CopilotThread, thread_id)
+    if not thread or thread.deleted_at is not None or str(thread.user_id) != str(user.id):
+        raise AppError("Copilot thread not found.", 404)
+
+    user_id = str(user.id)
+    bind = getattr(db, "bind", None) or (db.get_bind() if hasattr(db, "get_bind") else None)
+
+    def _session_factory():
+        if bind is not None:
+            from sqlalchemy.orm import sessionmaker
+
+            return sessionmaker(bind=bind, expire_on_commit=False)()
+        return SessionLocal()
+
+    def _event_generator():
+        for evt in stream_agent_turn(
+            session_factory=_session_factory,
+            user_id=user_id,
+            thread_id=thread_id,
+            message_text=payload.message,
+            page_context=payload.page_context,
+            enable_web_research=payload.enable_web_research,
+        ):
+            yield f"data: {json.dumps(evt, default=str)}\n\n"
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.post("/copilot/messages/{message_id}/feedback")
+def copilot_message_feedback(
+    message_id: str,
+    payload: CopilotFeedbackRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Record thumbs-up/down feedback on an assistant message."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+
+    msg = db.get(CopilotMessage, message_id)
+    if not msg:
+        raise AppError("Message not found.", 404)
+    thread = db.get(CopilotThread, msg.thread_id)
+    if not thread or thread.deleted_at is not None or str(thread.user_id) != str(user.id):
+        raise AppError("Message not found.", 404)
+
+    msg.feedback = payload.feedback
+    db.commit()
+    return {"ok": True, "message_id": message_id, "feedback": msg.feedback}
+
+
+@router.get("/copilot/artifacts/{artifact_id}/download")
+def copilot_artifact_download(
+    artifact_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Download a generated Excel/table artifact (owner or admin only)."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
+    from app.services.copilot_excel_service import resolve_artifact_file_path
+
+    artifact = db.get(CopilotArtifact, artifact_id)
+    if not artifact:
+        raise AppError("Artifact not found.", 404)
+    is_admin = user.role in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}
+    if str(artifact.owner_id) != str(user.id) and not is_admin:
+        raise AppError("You do not have permission to download this artifact.", 403)
+
+    file_path = resolve_artifact_file_path(artifact)
+    if not file_path:
+        raise AppError("Artifact file has expired or is no longer available.", 404)
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=artifact.mime_type,
+        filename=artifact.filename,
+    )

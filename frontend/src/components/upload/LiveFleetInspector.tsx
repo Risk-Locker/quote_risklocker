@@ -308,8 +308,19 @@ export function LiveFleetInspector({ uploadRunId, className = "" }: LiveFleetIns
                       <div>{lane.last_latency_ms ? `${lane.last_latency_ms}ms` : "—"}</div>
                     </div>
                     {active ? (
-                      <div className="mt-1.5 rounded bg-neutral-900 text-white px-2 py-1 text-[10px] font-mono truncate" title={active.filename || active.purpose || ""}>
-                        → {active.filename || active.purpose} ({active.elapsed_sec ?? 0}s)
+                      <div className="mt-1.5 rounded bg-neutral-900 text-white px-2 py-1 text-[10px] font-mono truncate flex items-center gap-1" title={active.filename || active.purpose || ""}>
+                        <span
+                          className={`px-1 rounded text-[9px] font-bold shrink-0 ${
+                            String(active.purpose || "").startsWith("copilot")
+                              ? "bg-blue-500 text-white"
+                              : "bg-emerald-500 text-white"
+                          }`}
+                        >
+                          {String(active.purpose || "").startsWith("copilot") ? "CHAT" : "PDF"}
+                        </span>
+                        <span className="truncate">
+                          {active.filename || active.purpose} ({active.elapsed_sec ?? 0}s)
+                        </span>
                       </div>
                     ) : lane.last_error ? (
                       <div className="mt-1.5 text-[10px] text-red-700 truncate" title={lane.last_error}>

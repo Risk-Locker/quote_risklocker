@@ -44,5 +44,6 @@ export const config = {
     "/ledger/:path*",
     "/insights/:path*",
     "/ai-context/:path*",
+    "/copilot/:path*",
   ],
 };

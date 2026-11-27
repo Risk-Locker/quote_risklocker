@@ -1557,6 +1557,8 @@ class GeminiApiCallLog(Base):
     api_key_masked: Mapped[str | None] = mapped_column(String(50), nullable=True)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     endpoint_slot: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    purpose: Mapped[str] = mapped_column(String(40), nullable=False, default="extraction", server_default=text("'extraction'"))
+    actor_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     status_code: Mapped[int] = mapped_column(Integer, nullable=False)
     is_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1674,14 +1676,94 @@ class AIFleetLane(Base):
     recent_calls_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     recent_tokens_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     rpd_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    copilot_rpd_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     pt_cycle_date: Mapped[str] = mapped_column(String(10), nullable=False)
     last_dispatched_at: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
     cooling_until: Mapped[float | None] = mapped_column(Float, nullable=True)
     global_pause_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interactive_yield_until: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="ready", server_default=text("'ready'"))
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class CopilotThread(Base, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "copilot_threads"
+    __table_args__ = (
+        Index("ix_copilot_threads_user_inbox", "user_id", "deleted_at", "is_pinned", "last_message_at"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="New Chat", server_default=text("'New Chat'"))
+    is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    anchor_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    anchor_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    anchor_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    compacted_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compacted_up_to_message_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    last_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    messages: Mapped[list["CopilotMessage"]] = relationship(
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="CopilotMessage.created_at.asc()",
+    )
+    artifacts: Mapped[list["CopilotArtifact"]] = relationship(
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="CopilotArtifact.created_at.desc()",
+    )
+
+
+class CopilotMessage(Base, TimestampMixin):
+    __tablename__ = "copilot_messages"
+    __table_args__ = (Index("ix_copilot_messages_thread_created", "thread_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("copilot_threads.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content_markdown: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tool_trace_json: Mapped[list[dict]] = mapped_column(JSON, default=list, server_default=text("'[]'"), nullable=False)
+    verified_links_json: Mapped[list[dict]] = mapped_column(JSON, default=list, server_default=text("'[]'"), nullable=False)
+    action_cards_json: Mapped[list[dict]] = mapped_column(JSON, default=list, server_default=text("'[]'"), nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    candidate_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    feedback: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    thread: Mapped["CopilotThread"] = relationship(back_populates="messages")
+    artifacts: Mapped[list["CopilotArtifact"]] = relationship(back_populates="message")
+
+
+class CopilotArtifact(Base, TimestampMixin):
+    __tablename__ = "copilot_artifacts"
+    __table_args__ = (
+        Index("ix_copilot_artifacts_thread_created", "thread_id", "created_at"),
+        Index("ix_copilot_artifacts_owner_created", "owner_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_id)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("copilot_threads.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id: Mapped[str | None] = mapped_column(ForeignKey("copilot_messages.id", ondelete="SET NULL"), nullable=True, index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, default="xlsx", server_default=text("'xlsx'"))
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    storage_path: Mapped[str | None] = mapped_column(String(800), nullable=True)
+    preview_json: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"), nullable=False)
+    sql_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    thread: Mapped["CopilotThread"] = relationship(back_populates="artifacts")
+    message: Mapped["CopilotMessage | None"] = relationship(back_populates="artifacts")
+    owner: Mapped["User"] = relationship(foreign_keys=[owner_id])
 
 
 class AIFleetEvent(Base):

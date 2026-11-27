@@ -56,6 +56,8 @@ class Settings:
     rate_limit_download_window_seconds: int
     rate_limit_import_attempts: int
     rate_limit_import_window_seconds: int
+    rate_limit_copilot_attempts: int
+    rate_limit_copilot_window_seconds: int
     auth_hash_secret: str
     session_idle_hours: int
     session_max_days: int
@@ -70,7 +72,8 @@ class Settings:
     gemini_max_rpm_per_key: int = 13
     gemini_max_tpm_per_key: int = 200_000
     gemini_max_prompt_tokens: int = 60_000
-    gemini_max_accounts: int = 8
+    gemini_max_accounts: int = 16
+    ai_readonly_database_url: str = ""
 
     @property
     def max_upload_bytes(self) -> int:
@@ -312,6 +315,8 @@ def get_settings() -> Settings:
         rate_limit_download_window_seconds=_bounded_int("RATE_LIMIT_DOWNLOAD_WINDOW_SECONDS", 60, 1, 86_400),
         rate_limit_import_attempts=_bounded_int("RATE_LIMIT_IMPORT_ATTEMPTS", 50, 1, 10_000),
         rate_limit_import_window_seconds=_bounded_int("RATE_LIMIT_IMPORT_WINDOW_SECONDS", 3_600, 1, 86_400),
+        rate_limit_copilot_attempts=_bounded_int("RATE_LIMIT_COPILOT_ATTEMPTS", 6, 1, 120),
+        rate_limit_copilot_window_seconds=_bounded_int("RATE_LIMIT_COPILOT_WINDOW_SECONDS", 60, 1, 3_600),
         auth_hash_secret=_auth_hash_secret(app_env),
         session_idle_hours=session_idle_hours,
         session_max_days=session_max_days,
@@ -328,7 +333,8 @@ def get_settings() -> Settings:
         gemini_max_rpm_per_key=_bounded_int("GEMINI_MAX_RPM_PER_KEY", 13, 1, 13),
         gemini_max_tpm_per_key=_bounded_int("GEMINI_MAX_TPM_PER_KEY", 200_000, 1000, 200_000),
         gemini_max_prompt_tokens=_bounded_int("GEMINI_MAX_PROMPT_TOKENS", 60_000, 1000, 1_000_000),
-        gemini_max_accounts=_bounded_int("GEMINI_MAX_ACCOUNTS", 8, 1, 20),
+        gemini_max_accounts=_bounded_int("GEMINI_MAX_ACCOUNTS", 16, 1, 32),
+        ai_readonly_database_url=os.getenv("AI_READONLY_DATABASE_URL", "").strip(),
     )
 
 

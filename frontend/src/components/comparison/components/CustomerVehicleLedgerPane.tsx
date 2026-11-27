@@ -13,7 +13,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { fileUrl, api } from "@/lib/api";
-import type { TenureSpec } from "../types";
+import type { ComparisonEntry, TenureSpec } from "../types";
 
 interface CustomerVehicleLedgerPaneProps {
   tenure: TenureSpec;
@@ -67,10 +67,9 @@ interface CustomerVehicleLedgerPaneProps {
   savingFixedCosts: boolean;
   onSaveFixedCosts: () => void;
   onPopulateEditInputs: () => void;
-  quotationDiscountInput: string;
-  setQuotationDiscountInput: (v: string) => void;
   motorDiscountPctInput: string;
   setMotorDiscountPctInput: (v: string) => void;
+  entries?: ComparisonEntry[];
 }
 
 export function CustomerVehicleLedgerPane({
@@ -120,11 +119,28 @@ export function CustomerVehicleLedgerPane({
   savingFixedCosts,
   onSaveFixedCosts,
   onPopulateEditInputs,
-  quotationDiscountInput,
-  setQuotationDiscountInput,
   motorDiscountPctInput,
   setMotorDiscountPctInput,
+  entries,
 }: CustomerVehicleLedgerPaneProps) {
+  const activeDiscountEntries = (entries || []).filter(
+    (e) => !e.is_hidden && Number(e.motor_discount_amount ?? e.effective_discount ?? 0) > 0
+  );
+  const pctNum = Number(tenure.motor_discount_pct || 0);
+  const pctFormatted = pctNum % 1 === 0 ? pctNum.toFixed(0) : String(pctNum);
+  const motorDiscountTooltipText =
+    pctNum > 0 && activeDiscountEntries.length > 0
+      ? `${pctFormatted}% off Motor Premium:\n` +
+        activeDiscountEntries
+          .map((e) => {
+            const amt = Number(e.motor_discount_amount ?? e.effective_discount ?? 0);
+            return `${e.company_name}: -RM ${amt.toLocaleString("en-MY", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`;
+          })
+          .join("\n")
+      : "Applies a % discount strictly to Motor Insurance (excludes Road Tax & Runner Fee)";
   // Engine Capacity & Unit reactive parser
   const parseCapacity = (raw: string) => {
     const s = (raw || "").trim().toLowerCase();
@@ -649,21 +665,7 @@ export function CustomerVehicleLedgerPane({
                     className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-[#e5e5ea] bg-white text-[#1b1717] focus:outline-none focus:ring-1 focus:ring-[#1b1717]"
                   />
                 </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-emerald-900 block mb-1">
-                    Quotation Discount (RM)
-                  </label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    value={quotationDiscountInput}
-                    onChange={(e) => setQuotationDiscountInput(e.target.value)}
-                    placeholder="e.g. 50"
-                    className="w-full rounded px-2.5 py-1.5 text-xs font-mono border border-emerald-300 bg-emerald-50/40 text-emerald-900 font-bold focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                  />
-                </div>
-                <div>
+                <div title={motorDiscountTooltipText}>
                   <label className="text-[11px] font-semibold text-emerald-900 block mb-1">
                     Motor Discount (%)
                   </label>
@@ -804,21 +806,43 @@ export function CustomerVehicleLedgerPane({
               <div className="flex justify-between items-center">
                 <span className="text-[#6e6e73]">Motor Discount (%):</span>
                 {tenure.motor_discount_pct && tenure.motor_discount_pct > 0 ? (
-                  <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 text-[11px]">
-                    -{tenure.motor_discount_pct % 1 === 0 ? tenure.motor_discount_pct.toFixed(0) : tenure.motor_discount_pct}% (Motor Only)
-                  </span>
+                  <div className="relative group inline-flex items-center">
+                    <span
+                      title={motorDiscountTooltipText}
+                      className="cursor-help font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 text-[11px]"
+                    >
+                      -{pctFormatted}% (Motor Only)
+                    </span>
+                    <div className="invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity pointer-events-none absolute right-0 bottom-full mb-1.5 z-30 w-56 rounded-lg border border-emerald-200 bg-white p-2.5 shadow-lg text-[11px] text-[#1b1717]">
+                      <p className="font-bold text-emerald-800 mb-1.5">
+                        {pctFormatted}% off Motor Premium
+                      </p>
+                      {activeDiscountEntries.length > 0 ? (
+                        <div className="space-y-1">
+                          {activeDiscountEntries.map((e) => {
+                            const amt = Number(e.motor_discount_amount ?? e.effective_discount ?? 0);
+                            return (
+                              <div key={e.id} className="flex items-center justify-between gap-2">
+                                <span className="text-[#6e6e73] truncate">{e.company_name}</span>
+                                <span className="font-mono font-bold text-emerald-700 shrink-0">
+                                  -RM {amt.toLocaleString("en-MY", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[#6e6e73]">
+                          Applied to Motor Premium only (excludes Road Tax &amp; Runner Fee)
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 ) : (
                   <span className="font-mono text-[#6e6e73]">0%</span>
-                )}
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[#6e6e73]">Quotation Discount:</span>
-                {tenure.quotation_discount && tenure.quotation_discount > 0 ? (
-                  <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 text-[11px]">
-                    - RM {tenure.quotation_discount.toLocaleString("en-MY", { minimumFractionDigits: 2 })}
-                  </span>
-                ) : (
-                  <span className="font-mono text-[#6e6e73]">None (RM 0.00)</span>
                 )}
               </div>
               <div className="flex justify-between">

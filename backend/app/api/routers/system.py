@@ -92,6 +92,8 @@ from app.api.schemas import (
     CatalogOperationsApplyRequest,
     CopilotChatRequest,
     CopilotChatResponse,
+    CopilotPolicyUpdateRequest,
+    GeminiWorkloadScopeRequest,
     SessionCleanupRequest,
     ProfileCleanupRequest,
     QuotationActivityCreateRequest,
@@ -992,6 +994,8 @@ def settings_gemini_add_key(
 
     raw_key = (payload.get("key") or "").strip()
     label = (payload.get("label") or "").strip()
+    raw_scope = str(payload.get("workload_scope") or "all").strip().lower()
+    workload_scope = raw_scope if raw_scope in ("all", "extraction_only", "copilot_only") else "all"
 
     if not raw_key:
         raise AppError("API key is required.", 400)
@@ -1037,6 +1041,7 @@ def settings_gemini_add_key(
         "id": new_id,
         "key": raw_key,
         "label": label or f"Account {account_num} (Manual)",
+        "workload_scope": workload_scope,
         "added_at": datetime.now(timezone.utc).isoformat(),
         "last_status": "ready",
         "last_probed_at": datetime.now(timezone.utc).isoformat(),
@@ -1044,6 +1049,16 @@ def settings_gemini_add_key(
     keys_list.append(new_account)
     current_val["keys"] = keys_list
     setting.value = current_val
+
+    scope_setting = db.get(AppSetting, "gemini_key_workload_scopes")
+    if not scope_setting:
+        scope_setting = AppSetting(key="gemini_key_workload_scopes", value={"scopes": {}})
+        db.add(scope_setting)
+    scopes_val = dict(scope_setting.value) if isinstance(scope_setting.value, dict) else {}
+    scopes_map = dict(scopes_val.get("scopes", {}) or {})
+    scopes_map[new_id] = workload_scope
+    scopes_val["scopes"] = scopes_map
+    scope_setting.value = scopes_val
 
     db.commit()
     db.refresh(setting)
@@ -1217,6 +1232,114 @@ def settings_gemini_toggle_pause(
         "resumed_jobs_count": resumed_count,
         "gemini": pool.get_quota_stats(),
     }
+
+
+@router.post("/settings/gemini/keys/{key_id}/workload-scope")
+def settings_gemini_set_workload_scope(
+    key_id: str,
+    payload: GeminiWorkloadScopeRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Assign an API key's workload scope: 'all', 'extraction_only', or 'copilot_only'."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.extraction.gemini_extractor import get_key_pool
+    from sqlalchemy.orm.attributes import flag_modified
+
+    scope = payload.workload_scope
+
+    pool = get_key_pool()
+    pool.sync_accounts(db=db)
+    if not any(acc.id == key_id for acc in pool.get_accounts()):
+        raise AppError("Gemini API account not found.", 404)
+
+    scope_setting = db.get(AppSetting, "gemini_key_workload_scopes")
+    if not scope_setting:
+        scope_setting = AppSetting(key="gemini_key_workload_scopes", value={"scopes": {}})
+        db.add(scope_setting)
+    scopes_val = dict(scope_setting.value) if isinstance(scope_setting.value, dict) else {}
+    scopes_map = dict(scopes_val.get("scopes", {}) or {})
+    scopes_map[key_id] = scope
+    scopes_val["scopes"] = scopes_map
+    scope_setting.value = scopes_val
+    flag_modified(scope_setting, "value")
+
+    manual_setting = db.get(AppSetting, "gemini_manual_api_keys")
+    if manual_setting and isinstance(manual_setting.value, dict):
+        m_val = dict(manual_setting.value)
+        m_keys = [dict(k) for k in m_val.get("keys", [])]
+        for k in m_keys:
+            if k.get("id") == key_id:
+                k["workload_scope"] = scope
+                break
+        m_val["keys"] = m_keys
+        manual_setting.value = m_val
+        flag_modified(manual_setting, "value")
+
+    db.add(AuditEvent(
+        actor_id=user.id,
+        action="settings.gemini.workload_scope",
+        entity_type="app_settings",
+        entity_id="gemini_key_workload_scopes",
+        details={"key_id": key_id, "workload_scope": scope},
+    ))
+    db.commit()
+
+    pool.set_account_workload_scope(key_id, scope)
+    pool.sync_accounts(db=db)
+    return {
+        "ok": True,
+        "key_id": key_id,
+        "workload_scope": scope,
+        "gemini": pool.get_quota_stats(),
+    }
+
+
+@router.get("/settings/copilot-policy")
+def settings_copilot_policy_get(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Return Copilot governance policy, dynamic N-key RPD split, and per-user today usage."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.ai_fleet_gateway import get_fleet_gateway
+
+    return get_fleet_gateway().get_copilot_governance_summary(db)
+
+
+@router.put("/settings/copilot-policy")
+def settings_copilot_policy_put(
+    payload: CopilotPolicyUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Update Copilot governance policy (enabled kill-switch, shared RPD %, per-role user caps)."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.ai_fleet_gateway import get_copilot_quota_policy, get_fleet_gateway, normalize_copilot_quota_policy
+    from sqlalchemy.orm.attributes import flag_modified
+
+    current = get_copilot_quota_policy(db)
+    updates = payload.model_dump(exclude_none=True)
+    merged = {**current, **updates}
+    normalized = normalize_copilot_quota_policy(merged)
+
+    setting = db.get(AppSetting, "copilot_quota_policy")
+    if not setting:
+        setting = AppSetting(key="copilot_quota_policy", value=normalized)
+        db.add(setting)
+    else:
+        setting.value = normalized
+        flag_modified(setting, "value")
+
+    db.add(AuditEvent(
+        actor_id=user.id,
+        action="settings.copilot_policy.update",
+        entity_type="app_settings",
+        entity_id="copilot_quota_policy",
+        details=normalized,
+    ))
+    db.commit()
+    return get_fleet_gateway().get_copilot_governance_summary(db)
 
 
 @router.get("/settings/gemini/model-config")

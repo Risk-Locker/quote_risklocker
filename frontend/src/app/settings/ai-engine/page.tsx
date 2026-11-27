@@ -12,6 +12,7 @@ import {
   Pause,
   Play,
   Plus,
+  Robot,
   ShieldCheck,
   Sparkle,
   Trash,
@@ -25,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import type { GeminiAccountItem, GeminiQuotaStats } from "@/components/gemini-header-meter";
@@ -42,9 +44,52 @@ interface NotificationItem {
   created_at: string;
 }
 
+interface CopilotGovernanceSummary {
+  policy: {
+    enabled: boolean;
+    shared_copilot_rpd_pct: number;
+    shared_interactive_reserve_pct: number;
+    staff_daily_turns: number;
+    staff_daily_tokens: number;
+    admin_daily_turns: number;
+    admin_daily_tokens: number;
+    max_tool_hops: number;
+    max_input_tokens_per_turn: number;
+  };
+  pt_cycle_date: string;
+  active_keys_count: number;
+  shared_keys_count: number;
+  dedicated_copilot_keys_count: number;
+  dedicated_extraction_keys_count: number;
+  total_fleet_rpd: number;
+  copilot_rpd_limit: number;
+  copilot_rpd_used: number;
+  copilot_rpd_remaining: number;
+  copilot_tokens_today: number;
+  extraction_rpd_limit: number;
+  extraction_rpd_used: number;
+  extraction_tokens_today: number;
+  shared_reserve_rpd: number;
+  per_user_today: Array<{
+    user_id: string;
+    name: string;
+    email: string;
+    role: string;
+    turns_today: number;
+    llm_calls_today: number;
+    tokens_today: number;
+    excel_exports_today: number;
+    daily_turn_limit: number;
+    daily_token_limit: number;
+  }>;
+}
+
 export default function SettingsAiEnginePage() {
   const [stats, setStats] = useState<GeminiQuotaStats | null>(null);
   const [modelAlerts, setModelAlerts] = useState<NotificationItem[]>([]);
+  const [copilotGov, setCopilotGov] = useState<CopilotGovernanceSummary | null>(null);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  const [scopingId, setScopingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { toast } = useToast();
@@ -52,6 +97,7 @@ export default function SettingsAiEnginePage() {
   // Add Key Form State
   const [newKey, setNewKey] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [newScope, setNewScope] = useState<"all" | "extraction_only" | "copilot_only">("all");
   const [showKey, setShowKey] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validationError, setValidationError] = useState("");
@@ -125,6 +171,50 @@ export default function SettingsAiEnginePage() {
     } catch {
       // Ignore notification fetch errors
     }
+
+    try {
+      const govRes = await api<CopilotGovernanceSummary>("/settings/copilot-policy");
+      if (govRes?.policy) {
+        setCopilotGov(govRes);
+      }
+    } catch {
+      // Non-admin or unavailable
+    }
+  }
+
+  async function handleSaveCopilotPolicy(patch: Partial<CopilotGovernanceSummary["policy"]>) {
+    if (!copilotGov) return;
+    setSavingPolicy(true);
+    try {
+      const updated = await api<CopilotGovernanceSummary>("/settings/copilot-policy", {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      });
+      setCopilotGov(updated);
+      toast("Copilot workload governance policy saved.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to save Copilot policy.", "error");
+    } finally {
+      setSavingPolicy(false);
+    }
+  }
+
+  async function handleChangeWorkloadScope(keyId: string, workload_scope: "all" | "extraction_only" | "copilot_only") {
+    setScopingId(keyId);
+    try {
+      const res = await api<{ ok: boolean; gemini: GeminiQuotaStats }>(`/settings/gemini/keys/${keyId}/workload-scope`, {
+        method: "POST",
+        body: JSON.stringify({ workload_scope }),
+      });
+      if (res?.gemini) setStats(res.gemini);
+      const govRes = await api<CopilotGovernanceSummary>("/settings/copilot-policy");
+      setCopilotGov(govRes);
+      toast("Key workload scope updated.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update key workload scope.", "error");
+    } finally {
+      setScopingId(null);
+    }
   }
 
   useEffect(() => {
@@ -151,6 +241,7 @@ export default function SettingsAiEnginePage() {
         body: JSON.stringify({
           key: trimmedKey,
           label: newLabel.trim() || undefined,
+          workload_scope: newScope,
         }),
       });
 
@@ -158,11 +249,11 @@ export default function SettingsAiEnginePage() {
         toast(res.message || "Key validated live with Google and added to pool!", "success");
         setNewKey("");
         setNewLabel("");
+        setNewScope("all");
         if (res.gemini) {
           setStats(res.gemini);
-        } else {
-          loadData();
         }
+        loadData();
       }
     } catch (err) {
       setValidationError(err instanceof Error ? err.message : "Validation failed. Google rejected this key.");
@@ -263,7 +354,7 @@ export default function SettingsAiEnginePage() {
             <div className="p-4">
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Configured Accounts</span>
               <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-gray-900">{accounts.length} / 6</span>
+                <span className="text-2xl font-bold text-gray-900">{accounts.length} / 16</span>
                 <span className="text-xs text-gray-500">accounts</span>
               </div>
               <span className="mt-2 text-[11px] text-gray-500 block">
@@ -443,6 +534,22 @@ export default function SettingsAiEnginePage() {
                 />
               </div>
 
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">
+                  Workload Isolation Scope
+                </label>
+                <Select
+                  value={newScope}
+                  onChange={(e) => setNewScope(e.target.value as "all" | "extraction_only" | "copilot_only")}
+                  disabled={validating}
+                  className="text-xs"
+                >
+                  <option value="all">Shared Fleet (PDF Extraction + Copilot Ring-Fenced)</option>
+                  <option value="extraction_only">Extraction Only (Reserved 100% for PDF Uploads)</option>
+                  <option value="copilot_only">Copilot Only (Dedicated 100% to AI Chat &amp; Excel)</option>
+                </Select>
+              </div>
+
               {validationError && (
                 <div className="rounded-lg bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-700 flex items-start gap-2">
                   <WarningOctagon size={16} weight="fill" className="shrink-0 text-rose-600 mt-0.5" />
@@ -490,6 +597,7 @@ export default function SettingsAiEnginePage() {
                   <tr className="border-b border-gray-200 bg-gray-50/50 text-gray-500 font-semibold">
                     <th className="py-2.5 px-3">Account</th>
                     <th className="py-2.5 px-3">Source</th>
+                    <th className="py-2.5 px-3">Workload Scope</th>
                     <th className="py-2.5 px-3">Masked Key</th>
                     <th className="py-2.5 px-3">Status</th>
                     <th className="py-2.5 px-3">Daily Usage (RPD)</th>
@@ -545,6 +653,24 @@ export default function SettingsAiEnginePage() {
                           >
                             {acc.source === "env" ? ".env (Primary)" : "Manual"}
                           </span>
+                        </td>
+
+                        <td className="py-3 px-3">
+                          <select
+                            value={acc.workload_scope || "all"}
+                            disabled={scopingId === acc.id}
+                            onChange={(e) =>
+                              handleChangeWorkloadScope(
+                                acc.id,
+                                e.target.value as "all" | "extraction_only" | "copilot_only"
+                              )
+                            }
+                            className="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-800 focus:outline-none focus:border-gray-900"
+                          >
+                            <option value="all">Shared (All)</option>
+                            <option value="extraction_only">Extraction Only</option>
+                            <option value="copilot_only">Copilot Only</option>
+                          </select>
                         </td>
 
                         <td className="py-3 px-3 font-mono text-[11px] text-gray-600">
@@ -660,6 +786,192 @@ export default function SettingsAiEnginePage() {
             </div>
           </div>
         </Card>
+
+        {/* Card: Copilot Workload Ring-Fence & Per-User Usage Governance */}
+        {copilotGov && (
+          <Card>
+            <div className="p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                <div>
+                  <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                    <Robot size={18} weight="fill" className="text-gray-900" />
+                    AI Copilot Workload Ring-Fence &amp; Per-User Quota Governance
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Dynamically scales across {copilotGov.active_keys_count} active key(s) ({copilotGov.total_fleet_rpd.toLocaleString()} total RPD). Dedicated Copilot keys bypass shared % caps; batch uploads yield politely to live chats.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={copilotGov.policy.enabled ? "secondary" : "primary"}
+                    loading={savingPolicy}
+                    onClick={() => handleSaveCopilotPolicy({ enabled: !copilotGov.policy.enabled })}
+                  >
+                    {copilotGov.policy.enabled ? "Pause Copilot (Extraction-Only)" : "Resume AI Copilot"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Dynamic N-Key Workload Split Bar */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                  <div className="text-[11px] font-semibold text-gray-500 uppercase">PDF Extraction Budget</div>
+                  <div className="mt-1 text-lg font-bold font-mono text-gray-900">
+                    {copilotGov.extraction_rpd_used.toLocaleString()} / {copilotGov.extraction_rpd_limit.toLocaleString()} RPD
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    {copilotGov.extraction_tokens_today.toLocaleString()} tokens today · {copilotGov.dedicated_extraction_keys_count} dedicated key(s)
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                  <div className="text-[11px] font-semibold text-blue-700 uppercase">Copilot Chat Budget</div>
+                  <div className="mt-1 text-lg font-bold font-mono text-gray-900">
+                    {copilotGov.copilot_rpd_used.toLocaleString()} / {copilotGov.copilot_rpd_limit.toLocaleString()} RPD
+                  </div>
+                  <div className="text-[11px] text-blue-800 mt-0.5">
+                    {copilotGov.copilot_tokens_today.toLocaleString()} tokens today · {copilotGov.dedicated_copilot_keys_count} dedicated key(s)
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                  <div className="text-[11px] font-semibold text-amber-800 uppercase">Interactive Reserve Floor</div>
+                  <div className="mt-1 text-lg font-bold font-mono text-gray-900">
+                    {copilotGov.shared_reserve_rpd.toLocaleString()} RPD
+                  </div>
+                  <div className="text-[11px] text-amber-900 mt-0.5">
+                    Bulk batches pause at floor on {copilotGov.shared_keys_count} shared key(s)
+                  </div>
+                </div>
+              </div>
+
+              {/* Editable Policy Controls */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">
+                    Shared Copilot Cap (%)
+                  </label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={80}
+                    value={copilotGov.policy.shared_copilot_rpd_pct}
+                    onChange={(e) =>
+                      setCopilotGov((prev) =>
+                        prev
+                          ? { ...prev, policy: { ...prev.policy, shared_copilot_rpd_pct: Number(e.target.value) } }
+                          : prev
+                      )
+                    }
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">
+                    Batch Reserve Floor (%)
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={40}
+                    value={copilotGov.policy.shared_interactive_reserve_pct}
+                    onChange={(e) =>
+                      setCopilotGov((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              policy: { ...prev.policy, shared_interactive_reserve_pct: Number(e.target.value) },
+                            }
+                          : prev
+                      )
+                    }
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">
+                    Staff Turns / Day
+                  </label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={500}
+                    value={copilotGov.policy.staff_daily_turns}
+                    onChange={(e) =>
+                      setCopilotGov((prev) =>
+                        prev ? { ...prev, policy: { ...prev.policy, staff_daily_turns: Number(e.target.value) } } : prev
+                      )
+                    }
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">
+                    Admin Turns / Day
+                  </label>
+                  <Input
+                    type="number"
+                    min={10}
+                    max={1000}
+                    value={copilotGov.policy.admin_daily_turns}
+                    onChange={(e) =>
+                      setCopilotGov((prev) =>
+                        prev ? { ...prev, policy: { ...prev.policy, admin_daily_turns: Number(e.target.value) } } : prev
+                      )
+                    }
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  loading={savingPolicy}
+                  onClick={() => handleSaveCopilotPolicy(copilotGov.policy)}
+                >
+                  Save Copilot Governance Policy
+                </Button>
+              </div>
+
+              {/* Per-User Today Table */}
+              {copilotGov.per_user_today.length > 0 && (
+                <div className="overflow-x-auto border border-gray-100 rounded-lg">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-gray-50 text-gray-500 font-semibold border-b border-gray-200">
+                      <tr>
+                        <th className="py-2 px-3">User</th>
+                        <th className="py-2 px-3">Role</th>
+                        <th className="py-2 px-3">Chats Today</th>
+                        <th className="py-2 px-3">LLM Hops</th>
+                        <th className="py-2 px-3">Tokens Used</th>
+                        <th className="py-2 px-3">Excel Exports</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {copilotGov.per_user_today.map((u) => (
+                        <tr key={u.user_id}>
+                          <td className="py-2 px-3 font-medium text-gray-900">{u.name}</td>
+                          <td className="py-2 px-3 font-mono text-[11px] text-gray-500">{u.role}</td>
+                          <td className="py-2 px-3 font-mono">
+                            {u.turns_today} / {u.daily_turn_limit}
+                          </td>
+                          <td className="py-2 px-3 font-mono">{u.llm_calls_today}</td>
+                          <td className="py-2 px-3 font-mono">
+                            {u.tokens_today.toLocaleString()} / {u.daily_token_limit.toLocaleString()}
+                          </td>
+                          <td className="py-2 px-3 font-mono">{u.excel_exports_today}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
 
         {/* Live Timeline, Pacific Time Cycle Countdown & Minute-Level Token Activity */}
         <GeminiTimelineCalendar refreshNonce={timelineRefreshNonce} />

@@ -618,7 +618,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
   const [runnerFeeInput, setRunnerFeeInput] = useState("50");
   const [includeRunnerFeeInput, setIncludeRunnerFeeInput] = useState(true);
   const [windscreenInput, setWindscreenInput] = useState("");
-  const [quotationDiscountInput, setQuotationDiscountInput] = useState<string>("0");
   const [motorDiscountPctInput, setMotorDiscountPctInput] = useState<string>("0");
   const [currentPolicyDiscount, setCurrentPolicyDiscount] = useState<number>(0);
   const [previousPolicyDiscount, setPreviousPolicyDiscount] = useState<number>(0);
@@ -693,7 +692,6 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
     setRunnerFeeInput(String(tenure.runner_fee));
     setIncludeRunnerFeeInput(tenure.include_runner_fee !== false);
     setWindscreenInput(tenure.windscreen_target ? String(tenure.windscreen_target) : "");
-    setQuotationDiscountInput(tenure.quotation_discount != null ? String(tenure.quotation_discount) : "0");
     setMotorDiscountPctInput(tenure.motor_discount_pct != null ? String(tenure.motor_discount_pct) : "0");
     setEngineCcInput(tenure.engine_cc || "");
     setEngineNoInput(tenure.engine_no || "");
@@ -888,7 +886,7 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
           include_road_tax: includeRoadTaxInput,
           include_runner_fee: includeRunnerFeeInput,
           windscreen_target: parseFloat(windscreenInput) || 0,
-          quotation_discount: parseFloat(quotationDiscountInput) || 0,
+          quotation_discount: 0,
           motor_discount_pct: Math.min(100, Math.max(0, parseFloat(motorDiscountPctInput) || 0)),
           coverage_start_date: startDateInput || undefined,
           coverage_end_date: endDateInput || undefined,
@@ -2212,11 +2210,29 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
                 {[0, 5, 10, 15].map((pctOpt) => {
                   const activePct = Number(tenure.motor_discount_pct || 0);
                   const isActive = Math.abs(activePct - pctOpt) < 0.001;
+                  const activePillTitle =
+                    isActive && pctOpt > 0
+                      ? (data.entries || [])
+                          .filter(
+                            (e) =>
+                              !e.is_hidden &&
+                              Number(e.motor_discount_amount ?? e.effective_discount ?? 0) > 0
+                          )
+                          .map((e) => {
+                            const amt = Number(e.motor_discount_amount ?? e.effective_discount ?? 0);
+                            return `${e.company_name}: -RM ${amt.toLocaleString("en-MY", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}`;
+                          })
+                          .join(" | ") || undefined
+                      : undefined;
                   return (
                     <button
                       key={pctOpt}
                       type="button"
                       disabled={savingDiscountPct}
+                      title={activePillTitle}
                       onClick={() => {
                         setMotorDiscountPctInput(String(pctOpt));
                         handleApplyMotorDiscountPct(pctOpt);
@@ -2375,10 +2391,9 @@ export function ComparisonMatrix({ tenureId }: ComparisonMatrixProps) {
             setIncludeRunnerFeeInput={setIncludeRunnerFeeInput}
             windscreenInput={windscreenInput}
             setWindscreenInput={setWindscreenInput}
-            quotationDiscountInput={quotationDiscountInput}
-            setQuotationDiscountInput={setQuotationDiscountInput}
             motorDiscountPctInput={motorDiscountPctInput}
             setMotorDiscountPctInput={setMotorDiscountPctInput}
+            entries={data.entries}
             engineCcInput={engineCcInput}
             setEngineCcInput={setEngineCcInput}
             engineNoInput={engineNoInput}
