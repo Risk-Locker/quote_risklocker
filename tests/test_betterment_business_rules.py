@@ -137,12 +137,12 @@ def test_condition_2_2_other_insurers_without_peril():
 
 
 def test_condition_2_2_tune_sompo_amassurance_etiqa_with_peril():
-    """For (TUNE, SOMPO, AMASSURANCE, ETIQA): if peril added and YOM + 14 > Current Year -> Waiver = YES."""
+    """For (TUNE, SOMPO, AMASSURANCE, ETIQA): universal 10-year inclusive cap when peril added."""
     curr_y = datetime.now().year
     for company in ["Tune Insurance", "Berjaya Sompo Insurance", "AmAssurance Berhad", "Etiqa Auto360"]:
-        # YOM curr_y - 12 -> (curr_y - 12) + 14 = curr_y + 2 > curr_y -> YES
+        # Completed age 9 (<= 10) -> Yes (0%)
         has_waiver, rate, display = evaluate_betterment_rules(
-            yom=curr_y - 12,
+            yom=curr_y - 9,
             quote_year=curr_y,
             company_name=company,
             has_betterment_peril=True,
@@ -151,9 +151,20 @@ def test_condition_2_2_tune_sompo_amassurance_etiqa_with_peril():
         assert rate == 0.0, f"Failed for {company}"
         assert display == "Yes (0%)", f"Failed for {company}"
 
-        # YOM curr_y - 15 -> (curr_y - 15) + 14 = curr_y - 1 <= curr_y -> NO (exceeds 15 years)
+        # Completed age 10 (inclusive <= 10) -> Yes (0%)
         has_waiver, rate, display = evaluate_betterment_rules(
-            yom=curr_y - 15,
+            yom=curr_y - 10,
+            quote_year=curr_y,
+            company_name=company,
+            has_betterment_peril=True,
+        )
+        assert has_waiver is True, f"Failed for {company}"
+        assert rate == 0.0, f"Failed for {company}"
+        assert display == "Yes (0%)", f"Failed for {company}"
+
+        # Completed age 11 (> 10, 11th year) -> No (40%)
+        has_waiver, rate, display = evaluate_betterment_rules(
+            yom=curr_y - 11,
             quote_year=curr_y,
             company_name=company,
             has_betterment_peril=True,
@@ -164,10 +175,10 @@ def test_condition_2_2_tune_sompo_amassurance_etiqa_with_peril():
 
 
 def test_condition_2_2_lonpac_stmb_with_peril():
-    """For (LONPAC, STMB): if peril added and YOM + 9 > Current Year -> Waiver = YES."""
+    """For (LONPAC, STMB): inclusive 10-year cap when peril added."""
     curr_y = datetime.now().year
     for company in ["Lonpac Insurance", "Syarikat Takaful Malaysia Berhad (STMB)"]:
-        # YOM curr_y - 8 -> (curr_y - 8) + 9 = curr_y + 1 > curr_y -> YES
+        # Completed age 8 (<= 10) -> Yes (0%)
         has_waiver, rate, display = evaluate_betterment_rules(
             yom=curr_y - 8,
             quote_year=curr_y,
@@ -178,9 +189,20 @@ def test_condition_2_2_lonpac_stmb_with_peril():
         assert rate == 0.0, f"Failed for {company}"
         assert display == "Yes (0%)", f"Failed for {company}"
 
-        # YOM curr_y - 10 -> (curr_y - 10) + 9 = curr_y - 1 <= curr_y -> NO (exceeds 10 years)
+        # Completed age 10 (inclusive <= 10) -> Yes (0%)
         has_waiver, rate, display = evaluate_betterment_rules(
             yom=curr_y - 10,
+            quote_year=curr_y,
+            company_name=company,
+            has_betterment_peril=True,
+        )
+        assert has_waiver is True, f"Failed for {company}"
+        assert rate == 0.0, f"Failed for {company}"
+        assert display == "Yes (0%)", f"Failed for {company}"
+
+        # Completed age 11 (> 10, 11th year) -> No (40%)
+        has_waiver, rate, display = evaluate_betterment_rules(
+            yom=curr_y - 11,
             quote_year=curr_y,
             company_name=company,
             has_betterment_peril=True,
