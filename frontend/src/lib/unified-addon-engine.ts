@@ -267,6 +267,13 @@ export const FALLBACK_ICE_PERKS_CATALOG: Array<{
       default_value: "RM 2,000.00",
       icon_hint: "legal_defense",
     },
+    {
+      id: "compassionate_cover",
+      title: "Compassionate Flood & Loss Relief",
+      description: "Additional compassionate relief payout upon total loss or severe flood event.",
+      default_value: "RM 1,000.00",
+      icon_hint: "flood",
+    },
   ];
 
 const CANONICAL_BY_ID: Record<string, (typeof CANONICAL_24_CATALOG)[number]> = Object.fromEntries(

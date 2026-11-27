@@ -41,7 +41,7 @@ def test_review_is_one_mouse_pass_with_inline_values_and_benefit_boxes():
     assert 'op: "select_catalog_offering"' in source
     assert 'op: "create_custom_benefit"' in source
     assert 'op: "pin_catalog"' in source
-    assert "/business/dictionaries/learn" in source
+    assert "/business/dictionaries/learn" not in source
     assert "/generate" not in source
     assert "Generate PDF" not in source
     assert "score" not in source

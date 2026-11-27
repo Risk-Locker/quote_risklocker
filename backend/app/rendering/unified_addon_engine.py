@@ -239,6 +239,13 @@ FALLBACK_ICE_PERKS_CATALOG: list[dict[str, Any]] = [
         "default_value": "RM 2,000.00",
         "icon_hint": "legal_defense",
     },
+    {
+        "id": "compassionate_cover",
+        "title": "Compassionate Flood & Loss Relief",
+        "description": "Additional compassionate relief payout upon total loss or severe flood event.",
+        "default_value": "RM 1,000.00",
+        "icon_hint": "flood",
+    },
 ]
 
 CANONICAL_BY_ID: dict[str, dict[str, Any]] = {c["id"]: c for c in CANONICAL_24_CATALOG}

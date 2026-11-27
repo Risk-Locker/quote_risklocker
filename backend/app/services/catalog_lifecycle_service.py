@@ -540,6 +540,14 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
         else:
             conflict_stmt = conflict_stmt.where(CatalogOffering.applies_to_id.is_(None))
         for conflict in db.scalars(conflict_stmt).all():
+            if (
+                conflict.id == offering.id
+                or conflict.catalog_revision_id != revision.id
+                or conflict.concept_id != offering.concept_id
+                or conflict.applies_to_id != offering.applies_to_id
+                or conflict.role not in {"included", "addon_option", None}
+            ):
+                continue
             db.execute(delete(BenefitPackagePlanItem).where(BenefitPackagePlanItem.offering_id == conflict.id))
             db.delete(conflict)
         db.flush()

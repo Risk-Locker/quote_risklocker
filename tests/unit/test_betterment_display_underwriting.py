@@ -12,15 +12,15 @@ from app.services.marketing_comparison.ncd_evaluator import evaluate_betterment_
 def test_canonical_betterment_default_value():
     betterment = next((item for item in CANONICAL_24_CATALOG if item["id"] == "betterment"), None)
     assert betterment is not None
-    assert betterment["default_value"] == "Up to 15 Years"
+    assert betterment["default_value"] == "Up to 10 Years"
     assert "RM" not in betterment["default_value"]
 
 
 def test_format_addon_value_suppresses_rm_for_betterment():
     # If raw OCR or user typed RM 120.00, it must be suppressed
-    assert format_addon_value("betterment", "RM 120.00") == "Up to 15 Years"
-    assert format_addon_value("betterment", "RM 150.00") == "Up to 15 Years"
-    assert format_addon_value("betterment", "") == "Up to 15 Years"
+    assert format_addon_value("betterment", "RM 120.00") == "Up to 10 Years"
+    assert format_addon_value("betterment", "RM 150.00") == "Up to 10 Years"
+    assert format_addon_value("betterment", "") == "Up to 10 Years"
     # Explicit year limits are preserved cleanly
     assert format_addon_value("betterment", "Up to 10 Years") == "Up to 10 Years"
     assert format_addon_value("betterment", "Up to 16 Years") == "Up to 16 Years"
@@ -37,21 +37,30 @@ def test_format_addon_value_suppresses_rm_for_betterment():
         ("Takaful Malaysia", "Up to 10 Years"),
         ("Lonpac", "Up to 10 Years"),
         ("Lonpac Insurance Bhd", "Up to 10 Years"),
-        ("Etiqa", "Up to 15 Years"),
-        ("Etiqa General Insurance Berhad", "Up to 15 Years"),
-        ("Allianz", "Up to 15 Years"),
-        ("Zurich", "Up to 15 Years"),
-        ("Berjaya Sompo", "Up to 15 Years"),
-        ("AmAssurance", "Up to 15 Years"),
-        ("Liberty Insurance", "Up to 15 Years"),
-        ("Kurnia", "Up to 15 Years"),
+        ("Etiqa", "Up to 10 Years"),
+        ("Etiqa General Insurance Berhad", "Up to 10 Years"),
+        ("Allianz", "Up to 10 Years"),
+        ("Zurich", "Up to 10 Years"),
+        ("Berjaya Sompo", "Up to 10 Years"),
+        ("AmAssurance", "Up to 10 Years"),
+        ("Liberty Insurance", "Up to 10 Years"),
+        ("Kurnia", "Up to 10 Years"),
     ],
 )
 def test_build_unified_matrix_cards_insurer_betterment_limits(insurer, expected_default_years):
-    # Case 1: Unselected / catalog default
-    cards = build_unified_matrix_cards(
+    # Empty inputs with fill_to_slots=24 must NOT inject betterment automatically
+    empty_cards = build_unified_matrix_cards(
         active_benefits=[],
         available_addons=[],
+        insurer_name=insurer,
+        fill_to_slots=24,
+    )
+    assert next((c for c in empty_cards if c["id"] == "betterment"), None) is None
+
+    # Case 1: Unselected / catalog default passed via available_addons
+    cards = build_unified_matrix_cards(
+        active_benefits=[],
+        available_addons=[{"id": "betterment", "title": "Waiver of Betterment", "value": "", "cost_status": "optional"}],
         insurer_name=insurer,
         fill_to_slots=24,
     )
@@ -124,12 +133,21 @@ def test_evaluate_betterment_rules_actuarial_stability():
     assert waived_stmb_old is False
     assert rate_stmb_old == 40.0  # 10+ years capped at 40% (percentage)
 
-    # 5. Etiqa / Sompo / AmAssurance: 12 years with peril added -> Waived up to 15 years
-    waived_etiqa, rate_etiqa, disp_etiqa = evaluate_betterment_rules(
+    # 5. Etiqa / Sompo / AmAssurance: 10 years inclusive with peril -> Waived (0%); 12 years -> No (40%)
+    waived_etiqa_10, rate_etiqa_10, _ = evaluate_betterment_rules(
+        quote_year=2026,
+        yom=2016,  # 10 years
+        company_name="Etiqa",
+        has_betterment_peril=True,
+    )
+    assert waived_etiqa_10 is True
+    assert rate_etiqa_10 == 0.0
+
+    waived_etiqa_12, rate_etiqa_12, _ = evaluate_betterment_rules(
         quote_year=2026,
         yom=2014,  # 12 years
         company_name="Etiqa",
         has_betterment_peril=True,
     )
-    assert waived_etiqa is True
-    assert rate_etiqa == 0.0
+    assert waived_etiqa_12 is False
+    assert rate_etiqa_12 == 40.0
