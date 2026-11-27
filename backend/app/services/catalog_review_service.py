@@ -653,6 +653,13 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
     # Map concept details for invariant checks
     concept_map = {str(c.id): c for c in db.scalars(select(BenefitConcept)).all()}
 
+    betterment_policy_ctx: dict[str, Any] | None = None
+    try:
+        from app.domain.betterment_engine import resolve_draft_betterment_policy_context
+        betterment_policy_ctx = resolve_draft_betterment_policy_context(db, draft)
+    except Exception:
+        betterment_policy_ctx = None
+
     for item in all_offerings:
         if str(item.concept_id) in disabled_concept_ids:
             continue
@@ -666,6 +673,10 @@ def seed_base_benefits(db, draft: QuotationDraft, revision: BenefitCatalogRevisi
         # Invariant 2: Motorcycles CANNOT have windscreen
         if is_bike and "windscreen" in (ckey + " " + clabel):
             continue
+        # Invariant 3: Betterment base seeding respects insurer/age policy (e.g. >10yo cars never auto-seed QBE free waiver)
+        if betterment_policy_ctx is not None and ("betterment" in ckey or "betterment" in clabel):
+            if betterment_policy_ctx.get("placement") != "box1_free":
+                continue
 
         is_included = item.role == "included" or (item.offering_kind == "base" and item.role is None)
         if not is_included:

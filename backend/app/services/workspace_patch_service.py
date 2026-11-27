@@ -655,6 +655,11 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         existing.typed_value_override = typed_value
         existing.price = price
         existing.selected_by = user.id
+        ev_snap = dict(existing.evidence_snapshot or {})
+        ev_snap["source"] = "manual"
+        ev_snap["manually_edited"] = True
+        existing.evidence_snapshot = ev_snap
+        flag_modified(existing, "evidence_snapshot")
         if concept_id:
             existing.concept_id = concept_id
         if source_line_id:
@@ -672,21 +677,25 @@ def _apply_custom_benefit(db, draft: QuotationDraft, user, operation: dict) -> t
         cost_status=cost_status,
         label_override=label,
         typed_value_override=typed_value,
-        evidence_snapshot={},
+        evidence_snapshot={"source": "manual", "manually_edited": True},
         sort_order=int(operation.get("sort_order") or 0),
         selected_by=user.id,
         price=price,
     )
     db.add(selection)
+    if hasattr(db, "flush"):
+        db.flush()
     return f"benefits.{selection.id}", selection
 
 
 
 def _draft_selections_with_pending(db, draft_id: str) -> list[DraftBenefitSelection]:
-    rows = _rows_for_draft(db, DraftBenefitSelection, draft_id)
-    for item in getattr(db, "added", []):
-        if isinstance(item, DraftBenefitSelection) and item.draft_id == draft_id and item not in rows:
-            rows.append(item)
+    deleted_set = set(getattr(db, "deleted", ()) or ())
+    rows = [item for item in _rows_for_draft(db, DraftBenefitSelection, draft_id) if item not in deleted_set]
+    for pool in (getattr(db, "added", ()), getattr(db, "new", ())):
+        for item in pool or ():
+            if isinstance(item, DraftBenefitSelection) and item.draft_id == draft_id and item not in deleted_set and item not in rows:
+                rows.append(item)
     return rows
 
 
@@ -986,6 +995,8 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             sort_order=int(offering.sort_order or 0),
         )
         db.add(selected)
+        if hasattr(db, "flush"):
+            db.flush()
     selected.state = desired_state
     if desired_state != ReviewedBenefitState.SUPERSEDED.value:
         selected.superseded_by_id = None
@@ -999,10 +1010,7 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             if "icon_hint" in prev_typed and "icon_hint" not in typed_override:
                 typed_override["icon_hint"] = prev_typed["icon_hint"]
         selected.typed_value_override = typed_override
-        if isinstance(typed_override, dict) and str(typed_override.get("display_text") or typed_override.get("value") or "").strip():
-            ev_snap = dict(selected.evidence_snapshot or {})
-            ev_snap["manually_edited"] = True
-            selected.evidence_snapshot = ev_snap
+        flag_modified(selected, "typed_value_override")
     if "price" in operation or selected.price is None:
         selected.price = price
     if "label" in operation or "label_override" in operation:
@@ -1011,13 +1019,25 @@ def _apply_select_catalog_offering(db, draft: QuotationDraft, user, operation: d
             selected.label_override = str(raw_lbl).strip()[:255]
     if "description" in operation or "description_override" in operation:
         raw_desc = operation.get("description") if "description" in operation else operation.get("description_override")
-        if raw_desc:
-            clean_desc = str(raw_desc).strip()
-            curr_typed = dict(selected.typed_value_override or {})
+        curr_typed = dict(selected.typed_value_override or {})
+        clean_desc = str(raw_desc).strip() if raw_desc is not None else ""
+        if clean_desc:
             curr_typed["description"] = clean_desc
             if "type" not in curr_typed:
                 curr_typed["type"] = "text"
             selected.typed_value_override = curr_typed
+        else:
+            curr_typed.pop("description", None)
+            selected.typed_value_override = curr_typed or None
+        flag_modified(selected, "typed_value_override")
+    if desired_state != ReviewedBenefitState.REMOVED.value and any(
+        k in operation for k in ("label", "label_override", "description", "description_override", "typed_value", "typed_value_override", "price", "cost_status", "state", "bundle_tier_id")
+    ):
+        ev_snap = dict(selected.evidence_snapshot or {})
+        ev_snap["source"] = "manual"
+        ev_snap["manually_edited"] = True
+        selected.evidence_snapshot = ev_snap
+        flag_modified(selected, "evidence_snapshot")
     if selected.state != ReviewedBenefitState.CURRENT.value:
         _clear_bundle_tier_metadata(selected)
         tier_changed = False
@@ -1146,6 +1166,13 @@ def _apply_benefit_update(db, draft: QuotationDraft, user, operation: dict) -> s
         tier_changed = False
     else:
         tier_changed = _apply_bundle_tier_fields(db, draft, selection, operation)
+    if selection.state != ReviewedBenefitState.REMOVED.value and any(
+        k in operation for k in ("label", "label_override", "description", "description_override", "typed_value", "typed_value_override", "price", "cost_status", "state", "bundle_tier_id")
+    ):
+        ev_snap = dict(selection.evidence_snapshot or {})
+        ev_snap["manually_edited"] = True
+        selection.evidence_snapshot = ev_snap
+        flag_modified(selection, "evidence_snapshot")
     selection.selected_by = user.id
     _ensure_selection_row_invariants(selection)
     if tier_changed or any(k in operation for k in ("state", "typed_value", "typed_value_override", "label", "label_override", "bundle_tier_id")):
@@ -1173,6 +1200,13 @@ def _apply_revert_benefit(db, draft: QuotationDraft, user, operation: dict) -> s
         raise AppError("This upgrade history is ambiguous and must be reviewed manually.", 409)
     selection.state = ReviewedBenefitState.REMOVED.value
     selection.superseded_by_id = None
+    if selection.state != ReviewedBenefitState.REMOVED.value and any(
+        k in operation for k in ("label", "label_override", "description", "description_override", "typed_value", "typed_value_override", "price", "cost_status", "state", "bundle_tier_id")
+    ):
+        ev_snap = dict(selection.evidence_snapshot or {})
+        ev_snap["manually_edited"] = True
+        selection.evidence_snapshot = ev_snap
+        flag_modified(selection, "evidence_snapshot")
     selection.selected_by = user.id
     if hasattr(db, "flush"):
         db.flush()
@@ -1210,6 +1244,13 @@ def _drop_plan_selection(db, selections: list[DraftBenefitSelection], selection:
     selection.state = ReviewedBenefitState.REMOVED.value
     selection.superseded_by_id = None
     selection.package_plan_id = None
+    if selection.state != ReviewedBenefitState.REMOVED.value and any(
+        k in operation for k in ("label", "label_override", "description", "description_override", "typed_value", "typed_value_override", "price", "cost_status", "state", "bundle_tier_id")
+    ):
+        ev_snap = dict(selection.evidence_snapshot or {})
+        ev_snap["manually_edited"] = True
+        selection.evidence_snapshot = ev_snap
+        flag_modified(selection, "evidence_snapshot")
     selection.selected_by = user.id
     if predecessors:
         predecessors[0].state = ReviewedBenefitState.CURRENT.value
@@ -1497,7 +1538,11 @@ def apply_workspace_patch(
             elif operation_name == "update_display_options":
                 options = operation.get("options")
                 if isinstance(options, dict):
-                    draft.display_options = {**(draft.display_options or {}), **options}
+                    next_opts = {**(draft.display_options or {}), **options}
+                    if "owner_change_alert" in options and options["owner_change_alert"] is None:
+                        next_opts.pop("owner_change_alert", None)
+                    draft.display_options = next_opts
+                    flag_modified(draft, "display_options")
                     changed_paths.append("display_options")
                     for fee_flag in ("include_road_tax", "include_runner_fee"):
                         if fee_flag in options:

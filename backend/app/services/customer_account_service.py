@@ -85,8 +85,8 @@ def resolve_or_create_customer(
                 aliases.append(raw_name_clean)
                 customer.name_aliases = aliases
 
-        # Name variation alert
-        if canonical_name and customer.canonical_name != canonical_name:
+        # Name variation alert (ignore punctuation/ampersand/whitespace differences via canonical normalization)
+        if canonical_name and normalize_canonical_name(customer.canonical_name) != canonical_name:
             discrepancies.append({
                 "field": "name",
                 "current": customer.canonical_name,

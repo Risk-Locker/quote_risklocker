@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import AuthContext, current_auth, current_auth_optional, current_user, ensure_trusted_origin, settings_dep
 from app.services.realtime_hub import build_session_sync_targets, publish_realtime_update
@@ -1659,20 +1660,22 @@ def post_resolve_customer_discrepancy(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.STAFF, Role.DEV)
     session = get_session(db, session_id)
     if not session or not can_view_owner_record(db, user, session.owner_id):
         raise AppError("Session not found.", 404)
-    if not session.customer:
-        raise AppError("No linked customer account.", 400)
 
     action = payload.get("action")
     field = payload.get("field")
     val = payload.get("value")
 
-    if action == "update_master" and field in ("phone", "email", "address", "name"):
-        target_attr = "canonical_name" if field == "name" else field
-        setattr(session.customer, target_attr, val)
-        db.flush()
+    if action == "update_master":
+        if not session.customer:
+            raise AppError("No linked customer account.", 400)
+        if field in ("phone", "email", "address", "name"):
+            target_attr = "canonical_name" if field == "name" else field
+            setattr(session.customer, target_attr, val)
+            db.flush()
 
     draft = db.get(QuotationDraft, session.draft_id)
     discrepancies_remaining = 0
@@ -1681,9 +1684,11 @@ def post_resolve_customer_discrepancy(
         discrepancies = [d for d in opts.get("customer_discrepancies", []) if d.get("field") != field]
         opts["customer_discrepancies"] = discrepancies
         draft.display_options = opts
+        flag_modified(draft, "display_options")
         discrepancies_remaining = len(discrepancies)
         db.flush()
 
+    db.commit()
     return {"resolved": True, "discrepancies_remaining": discrepancies_remaining}
 
 

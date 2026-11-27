@@ -444,6 +444,7 @@ class CatalogOfferingSaveRequest(StrictRequest):
     source_citation: dict = Field(default_factory=dict)
     source_aliases: list[str] = Field(default_factory=list, max_length=100)
     presentation_facet_ids: list[str] = Field(default_factory=list, max_length=100)
+    clear_value: bool = False
     sort_order: int = Field(default=0, ge=0)
     status: str = "active"
 
@@ -452,6 +453,15 @@ class CatalogOfferingSaveRequest(StrictRequest):
         if self.id is None and self.base_revision is None:
             raise ValueError("base_revision is required when creating a catalog offering.")
         return self
+
+
+class CompanyBettermentRuleUpdateRequest(StrictRequest):
+    auto_waive_without_peril: bool = False
+    allow_addon_purchase: bool = True
+    free_exemption_years: int = Field(default=5, ge=0, le=20)
+    max_waiver_years: int = Field(default=10, ge=0, le=20)
+    default_display: str | None = Field(default=None, max_length=120)
+    free_display: str | None = Field(default=None, max_length=120)
 
 
 class PackageSaveRequest(StrictRequest):

@@ -8,6 +8,9 @@ import { Design2BenefitIconSvg } from "@/components/template-canvas/design2-icon
 import { fileUrl } from "@/lib/api";
 import type { BenefitCardSummary } from "../types";
 
+const isRealOfferingId = (id?: string | null): boolean =>
+  Boolean(id && !/^(?:custom:|pending:|bundle_eff:)/.test(String(id)));
+
 export function IncludedCard({
   card,
   index,
@@ -35,13 +38,11 @@ export function IncludedCard({
 }) {
   const selectionId = selection && typeof selection === "object" && "id" in selection ? String(selection.id) : (card.selection_id || null);
   const pending = !selectionId || String(selectionId).startsWith("pending:");
-  const hasCatalogOffering = Boolean(card.offering_id && !String(card.offering_id).startsWith("custom:") && !String(card.offering_id).startsWith("pending:"));
+  const hasCatalogOffering = isRealOfferingId(card.offering_id);
 
   const isWindscreen = card.label.toLowerCase().includes("windscreen") || (card.concept_key || "").toLowerCase().includes("windscreen");
   const isBetterment = card.label.toLowerCase().includes("betterment") || (card.concept_key || "").toLowerCase().includes("betterment");
-  const insLower = (companyName || "").toLowerCase();
-  const isUnder10Insurer = insLower.includes("qbe") || insLower.includes("stmb") || insLower.includes("takaful malaysia") || insLower.includes("lonpac");
-  const defaultBetterment = isUnder10Insurer ? "Up to 10 Years" : "Up to 15 Years";
+  const defaultBetterment = "Up to 10 Years";
 
   const embeddedMetricMatch = !card.value
     ? card.label.match(/\(((?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|unlimited[^)]*)\)\s*$/i)
@@ -175,7 +176,7 @@ export function IncludedCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, description: clean }, `benefits.${selectionId}.description`);
     } else if (hasCatalogOffering) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", description: clean }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", description: clean }, `benefits.offer.${card.offering_id}.description`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, description: clean }, `benefits.${targetId}.description`);
@@ -205,7 +206,7 @@ export function IncludedCard({
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: "included" }, `benefits.${selectionId}.price`);
       } else if (hasCatalogOffering) {
-        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", price: null }, `benefits.offer.${card.offering_id}`);
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", price: null }, `benefits.offer.${card.offering_id}.price`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
         onQueue({ op: "benefit_update", selection_id: targetId, price: null, cost_status: "included" }, `benefits.${targetId}.price`);
@@ -219,7 +220,7 @@ export function IncludedCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: costStatus }, `benefits.${selectionId}.price`);
     } else if (hasCatalogOffering) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, price: newPrice }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: costStatus, price: newPrice }, `benefits.offer.${card.offering_id}.price`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, price: newPrice, cost_status: costStatus }, `benefits.${targetId}.price`);
@@ -235,7 +236,7 @@ export function IncludedCard({
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
       } else if (hasCatalogOffering) {
-        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}`);
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}.price`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
         onQueue({ op: "benefit_update", selection_id: targetId, price: resetPrice, cost_status: "paid" }, `benefits.${targetId}.price`);
@@ -265,10 +266,10 @@ export function IncludedCard({
         `benefits.${selectionId}.cost_status`,
         { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "paid", is_extra: true, ...(currentPriceNum ? { price: { amount: currentPriceNum, currency: "MYR" } } : {}) }
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", is_extra: false, price: null },
-        `benefits.offer.${card.offering_id}`,
+        `benefits.offer.${card.offering_id}.cost_status`,
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", is_extra: true }
       );
     } else if (card.concept_key || selectionId) {
@@ -290,10 +291,10 @@ export function IncludedCard({
         `benefits.${selectionId}.cost_status`,
         { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included", is_extra: false, price: null }
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", is_extra: true, ...(defaultPrice ? { price: defaultPrice } : {}) },
-        `benefits.offer.${card.offering_id}`,
+        `benefits.offer.${card.offering_id}.cost_status`,
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", is_extra: false, price: null }
       );
     } else if (card.concept_key || selectionId) {
@@ -314,10 +315,10 @@ export function IncludedCard({
         `benefits.${selectionId}.state`,
         { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: isPurchasedAddon ? "paid" : "included" }
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" },
-        `benefits.offer.${card.offering_id}`,
+        `benefits.offer.${card.offering_id}.state`,
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: isPurchasedAddon ? "paid" : "included" }
       );
     } else {
@@ -340,10 +341,10 @@ export function IncludedCard({
         `benefits.${selectionId}.state`,
         { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "included" }
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "included" },
-        `benefits.offer.${card.offering_id}`,
+        `benefits.offer.${card.offering_id}.state`,
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included" }
       );
     } else if (card.concept_key) {
@@ -644,9 +645,7 @@ export function AddonCard({
 
   const isWindscreen = card.label.toLowerCase().includes("windscreen") || (card.concept_key || "").toLowerCase().includes("windscreen");
   const isBetterment = card.label.toLowerCase().includes("betterment") || (card.concept_key || "").toLowerCase().includes("betterment");
-  const insLower = (companyName || "").toLowerCase();
-  const isUnder10Insurer = insLower.includes("qbe") || insLower.includes("stmb") || insLower.includes("takaful malaysia") || insLower.includes("lonpac");
-  const defaultBetterment = isUnder10Insurer ? "Up to 10 Years" : "Up to 15 Years";
+  const defaultBetterment = "Up to 10 Years";
 
   const displayLimitVal = isBetterment && (/^\s*rm\b/i.test(card.value || "") || !card.value)
     ? defaultBetterment
@@ -704,7 +703,7 @@ export function AddonCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, label: clean }, `benefits.${selectionId}.label`);
     } else if (hasAddonCatalogOffering) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", label: clean }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", label: clean }, `benefits.offer.${card.offering_id}.label`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, label: clean }, `benefits.${targetId}.label`);
@@ -724,7 +723,7 @@ export function AddonCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, typed_value: typed }, `benefits.${selectionId}.limit`);
     } else if (hasAddonCatalogOffering) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", typed_value: typed }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", typed_value: typed }, `benefits.offer.${card.offering_id}.limit`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, typed_value: typed }, `benefits.${targetId}.limit`);
@@ -738,7 +737,7 @@ export function AddonCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, description: clean }, `benefits.${selectionId}.description`);
     } else if (hasAddonCatalogOffering) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", description: clean }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", description: clean }, `benefits.offer.${card.offering_id}.description`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, description: clean }, `benefits.${targetId}.description`);
@@ -768,8 +767,8 @@ export function AddonCard({
       // Cleared to FOC / null
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: "foc" }, `benefits.${selectionId}.price`);
-      } else if (card.offering_id) {
-        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "foc", price: null }, `benefits.offer.${card.offering_id}`);
+      } else if (hasAddonCatalogOffering) {
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "foc", price: null }, `benefits.offer.${card.offering_id}.price`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
         onQueue({ op: "benefit_update", selection_id: targetId, price: null, cost_status: "foc" }, `benefits.${targetId}.price`);
@@ -782,8 +781,8 @@ export function AddonCard({
     const costStatus = cleanNum > 0 ? "paid" : "foc";
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: costStatus }, `benefits.${selectionId}.price`);
-    } else if (card.offering_id) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: costStatus, price: newPrice }, `benefits.offer.${card.offering_id}`);
+    } else if (hasAddonCatalogOffering) {
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: costStatus, price: newPrice }, `benefits.offer.${card.offering_id}.price`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, price: newPrice, cost_status: costStatus }, `benefits.${targetId}.price`);
@@ -798,8 +797,8 @@ export function AddonCard({
       flashSaved("price");
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
-      } else if (card.offering_id) {
-        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}`);
+      } else if (hasAddonCatalogOffering) {
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}.price`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
         onQueue({ op: "benefit_update", selection_id: targetId, price: resetPrice, cost_status: "paid" }, `benefits.${targetId}.price`);
@@ -837,7 +836,7 @@ export function AddonCard({
         `benefits.${selectionId}.state`,
         { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasAddonCatalogOffering) {
       onQueue(
         {
           op: "select_catalog_offering",
@@ -846,7 +845,7 @@ export function AddonCard({
           cost_status: "paid",
           ...(finalPrice ? { price: finalPrice } : {}),
         },
-        `benefits.offer.${card.offering_id}`,
+        `benefits.offer.${card.offering_id}.state`,
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }
       );
     } else {
@@ -876,10 +875,10 @@ export function AddonCard({
         `benefits.${selectionId}.state`,
         { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasAddonCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", is_extra: false, price: null },
-        `benefits.offer.${card.offering_id}`,
+        `benefits.offer.${card.offering_id}.state`,
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }
       );
     } else {
@@ -908,10 +907,10 @@ export function AddonCard({
         `benefits.${selectionId}.state`,
         { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid" }
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasAddonCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed", cost_status: "paid" },
-        `benefits.offer.${card.offering_id}`,
+        `benefits.offer.${card.offering_id}.state`,
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid" }
       );
     } else if (card.concept_key) {
@@ -1218,9 +1217,7 @@ export function MatrixAddonCard({
 
   const isWindscreen = card.label.toLowerCase().includes("windscreen") || (card.concept_key || "").toLowerCase().includes("windscreen");
   const isBetterment = card.label.toLowerCase().includes("betterment") || (card.concept_key || "").toLowerCase().includes("betterment");
-  const insLower = (companyName || "").toLowerCase();
-  const isUnder10Insurer = insLower.includes("qbe") || insLower.includes("stmb") || insLower.includes("takaful malaysia") || insLower.includes("lonpac");
-  const defaultBetterment = isUnder10Insurer ? "Up to 10 Years" : "Up to 15 Years";
+  const defaultBetterment = "Up to 10 Years";
 
   const embeddedMetricMatch = !card.value
     ? card.label.match(/\(((?:rm|myr)\s*[\d,]+(?:\.\d{1,2})?|\d+\s*km|unlimited[^)]*)\)\s*$/i)
@@ -1354,7 +1351,7 @@ export function MatrixAddonCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, description: clean }, `benefits.${selectionId}.description`);
     } else if (hasMatrixCatalogOffering) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", description: clean }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", description: clean }, `benefits.offer.${card.offering_id}.description`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, description: clean }, `benefits.${targetId}.description`);
@@ -1384,7 +1381,7 @@ export function MatrixAddonCard({
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: null, cost_status: "paid" }, `benefits.${selectionId}.price`);
       } else if (hasMatrixCatalogOffering) {
-        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: null }, `benefits.offer.${card.offering_id}`);
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: null }, `benefits.offer.${card.offering_id}.price`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
         onQueue({ op: "benefit_update", selection_id: targetId, price: null, cost_status: "paid" }, `benefits.${targetId}.price`);
@@ -1397,7 +1394,7 @@ export function MatrixAddonCard({
     if (selectionId && !pending) {
       onQueue({ op: "benefit_update", selection_id: selectionId, price: newPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
     } else if (hasMatrixCatalogOffering) {
-      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: newPrice }, `benefits.offer.${card.offering_id}`);
+      onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: newPrice }, `benefits.offer.${card.offering_id}.price`);
     } else if (selectionId || card.concept_key) {
       const targetId = selectionId || card.concept_key!;
       onQueue({ op: "benefit_update", selection_id: targetId, price: newPrice, cost_status: "paid" }, `benefits.${targetId}.price`);
@@ -1413,7 +1410,7 @@ export function MatrixAddonCard({
       if (selectionId && !pending) {
         onQueue({ op: "benefit_update", selection_id: selectionId, price: resetPrice, cost_status: "paid" }, `benefits.${selectionId}.price`);
       } else if (hasMatrixCatalogOffering) {
-        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}`);
+        onQueue({ op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", price: resetPrice }, `benefits.offer.${card.offering_id}.price`);
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
         onQueue({ op: "benefit_update", selection_id: targetId, price: resetPrice, cost_status: "paid" }, `benefits.${targetId}.price`);
@@ -1430,10 +1427,10 @@ export function MatrixAddonCard({
         `benefits.${selectionId}.cost_status`,
         { op: "benefit_update", selection_id: selectionId, state: isSelected ? "current" : "available_addon", cost_status: "paid", is_extra: true, ...(currentPriceNum ? { price: { amount: currentPriceNum, currency: "MYR" } } : {}) }
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasMatrixCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "included", is_extra: false, price: null },
-        `benefits.offer.${card.offering_id}`,
+        `benefits.offer.${card.offering_id}.cost_status`,
         { op: "select_catalog_offering", offering_id: card.offering_id, state: isSelected ? "current" : "available_addon", cost_status: "paid", is_extra: true }
       );
     } else if (card.concept_key || selectionId) {
@@ -1455,10 +1452,10 @@ export function MatrixAddonCard({
         { op: "benefit_update", selection_id: selectionId, state: "removed" },
         `benefits.${selectionId}.state`
       );
-    } else if (card.offering_id && !String(card.offering_id).startsWith("pending:") && !String(card.offering_id).startsWith("custom:")) {
+    } else if (hasMatrixCatalogOffering) {
       onQueue(
         { op: "select_catalog_offering", offering_id: card.offering_id, state: "removed" },
-        `benefits.offer.${card.offering_id}`
+        `benefits.offer.${card.offering_id}.state`
       );
     } else if (card.concept_key) {
       onQueue(

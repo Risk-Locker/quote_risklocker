@@ -74,6 +74,7 @@ from app.services.company_setup_service import (
     save_business_product,
     save_business_tier,
     save_company_alias,
+    update_company_betterment_rule,
 )
 from app.services.benefit_concept_service import (
     list_benefit_concepts,

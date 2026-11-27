@@ -133,16 +133,26 @@ export function BenefitsManagerPanel({
     );
   };
 
+  const findSelectionForCard = (card: BenefitCardSummary) =>
+    workspace.benefits.find((item) => {
+      if (card.selection_id && item.id === card.selection_id) return true;
+      if (card.offering_id && item.catalog_offering_id && item.catalog_offering_id === card.offering_id) return true;
+      if (card.card_key && item.selection_key && item.selection_key === card.card_key) return true;
+      return false;
+    }) || null;
+
+  const isRealOfferingId = (id?: string | null) =>
+    Boolean(id && !/^(?:custom:|pending:|bundle_eff:)/.test(String(id)));
+
   const handleToggleSelect = (card: BenefitCardSummary, willSelect: boolean) => {
-    const selection = workspace.benefits.find(
-      (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
-    );
+    const selection = findSelectionForCard(card);
     const selectionId =
       selection && typeof selection === "object" && "id" in selection
         ? String(selection.id)
         : card.selection_id || null;
     const pending = !selectionId || String(selectionId).startsWith("pending:");
     const defaultPrice = card.price || (card as any).optional_price || null;
+    const realOffer = isRealOfferingId(card.offering_id);
 
     if (willSelect) {
       if (selectionId && !pending) {
@@ -150,10 +160,10 @@ export function BenefitsManagerPanel({
           { op: "benefit_update", selection_id: selectionId, state: "current", cost_status: "paid", is_extra: true, ...(defaultPrice ? { price: defaultPrice } : {}) },
           `benefits.${selectionId}.state`
         );
-      } else if (card.offering_id && !String(card.offering_id).startsWith("custom:") && !String(card.offering_id).startsWith("pending:")) {
+      } else if (realOffer) {
         onQueue(
           { op: "select_catalog_offering", offering_id: card.offering_id, state: "current", cost_status: "paid", is_extra: true, ...(defaultPrice ? { price: defaultPrice } : {}) },
-          `benefits.offer.${card.offering_id}`
+          `benefits.offer.${card.offering_id}.state`
         );
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
@@ -168,10 +178,10 @@ export function BenefitsManagerPanel({
           { op: "benefit_update", selection_id: selectionId, state: "available_addon", cost_status: "paid", is_extra: false },
           `benefits.${selectionId}.state`
         );
-      } else if (card.offering_id && !String(card.offering_id).startsWith("custom:") && !String(card.offering_id).startsWith("pending:")) {
+      } else if (realOffer) {
         onQueue(
           { op: "select_catalog_offering", offering_id: card.offering_id, state: "available_addon", cost_status: "paid", is_extra: false },
-          `benefits.offer.${card.offering_id}`
+          `benefits.offer.${card.offering_id}.state`
         );
       } else if (selectionId || card.concept_key) {
         const targetId = selectionId || card.concept_key!;
@@ -408,9 +418,7 @@ export function BenefitsManagerPanel({
                 </div>
               ) : (
                 filteredFocCards.map((card, idx) => {
-                  const selection = workspace.benefits.find(
-                    (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
-                  );
+                  const selection = findSelectionForCard(card);
                   const assetUrl = resolveAssetUrl(card);
                   const cardSelId = (selection && "id" in selection ? String(selection.id) : card.selection_id) || card.card_key;
                   return (
@@ -607,9 +615,7 @@ export function BenefitsManagerPanel({
                 <>
                   {/* 1. Ticked / Purchased Add-ons (Floated to top, index #01, #02...) */}
                   {filteredPurchasedAddons.map((card, idx) => {
-                    const selection = workspace.benefits.find(
-                      (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
-                    );
+                    const selection = findSelectionForCard(card);
                     const assetUrl = resolveAssetUrl(card);
                     const cardSelId = (selection && "id" in selection ? String(selection.id) : card.selection_id) || card.card_key;
                     return (
@@ -631,9 +637,7 @@ export function BenefitsManagerPanel({
 
                   {/* 2. Optional Available Add-ons (Unticked, index continues from purchased) */}
                   {filteredAddonCards.map((card, idx) => {
-                    const selection = workspace.benefits.find(
-                      (item) => item.catalog_offering_id === card.offering_id || item.selection_key === card.card_key
-                    );
+                    const selection = findSelectionForCard(card);
                     const assetUrl = resolveAssetUrl(card);
                     const effectiveIndex = filteredPurchasedAddons.length + idx;
                     const cardSelId = (selection && "id" in selection ? String(selection.id) : card.selection_id) || card.card_key;

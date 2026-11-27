@@ -223,11 +223,11 @@ def evaluate_betterment_rules(
     if registration_date:
         veh_age = calculate_exact_vehicle_age(registration_date, coverage_start_date or f"{quote_y}-01-01")
         is_under_5 = veh_age < 5
-        within_waiver_cap = veh_age < max_waiver_years
+        within_waiver_cap = veh_age <= max_waiver_years
     elif veh_yom:
         veh_age = max(0, quote_y - veh_yom)
         is_under_5 = veh_age < 5
-        within_waiver_cap = veh_age < max_waiver_years
+        within_waiver_cap = veh_age <= max_waiver_years
     else:
         veh_age = 0
         is_under_5 = False

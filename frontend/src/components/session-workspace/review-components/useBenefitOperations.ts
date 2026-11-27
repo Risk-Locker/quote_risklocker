@@ -236,17 +236,32 @@ export function useBenefitOperations({
     setCustomPrice("");
   }
 
+  const insurerConceptKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const allCards = [
+      ...(workspace?.benefit_cards?.current_benefits || []),
+      ...(workspace?.benefit_cards?.available_addons || []),
+    ];
+    for (const card of allCards) {
+      if (card.concept_key) keys.add(card.concept_key);
+      if (card.concept_id) keys.add(card.concept_id);
+    }
+    return keys;
+  }, [workspace?.benefit_cards?.current_benefits, workspace?.benefit_cards?.available_addons]);
+
   function addConceptAsBenefit(
     concept: GlobalConcept,
     state: "current" | "available_addon" = "current",
     price?: { amount: number; currency: string } | null,
-    coverageLimit?: string | null
+    coverageLimit?: string | null,
+    costStatus?: "included" | "paid"
   ) {
     const key = `concept:${concept.concept_key}:${crypto.randomUUID().slice(0, 8)}`;
     const cleanLimit = coverageLimit && typeof coverageLimit === "string" && !coverageLimit.includes("[object") ? coverageLimit.trim() : "";
     const hasUnitOrText = /^(?:rm|myr)\b|\b(?:km|years?|yrs?|days?|unlimited|%)\b/i.test(cleanLimit);
     const formattedLimit = cleanLimit ? (hasUnitOrText ? cleanLimit : `RM ${cleanLimit}`) : "";
     const conceptDesc = concept.description?.trim() || "";
+    const effectiveCostStatus = costStatus ?? (state === "current" && !price ? "included" : "paid");
     const typedValue = formattedLimit
       ? {
           type: "custom",
@@ -266,9 +281,10 @@ export function useBenefitOperations({
       concept_key: concept.concept_key,
       label: concept.label,
       typed_value: typedValue,
-      cost_status: "paid",
+      cost_status: effectiveCostStatus,
       state,
-      price: price || null,
+      ...(effectiveCostStatus === "paid" && state === "current" ? { is_extra: true } : {}),
+      price: effectiveCostStatus === "included" ? null : (price || null),
       ...(conceptDesc ? { description: conceptDesc } : {}),
     };
     onQueue(op, `benefits.${key}`);
@@ -316,6 +332,7 @@ export function useBenefitOperations({
     setModalFilter,
     currentVehicleCategory,
     isExcludedForVehicle,
+    insurerConceptKeys,
     currentCards,
     addonCards,
     focCards,

@@ -29,7 +29,13 @@ export interface ReviewModalsProps {
   GLOBAL_BENEFIT_KEYS: Set<string>;
   filteredConcepts: any[];
   fileUrl: (path?: string | null) => string;
-  addConceptAsBenefit: (concept: any, target: "current" | "available_addon") => void;
+  addConceptAsBenefit: (
+    concept: any,
+    target: "current" | "available_addon",
+    price?: { amount: number; currency: string } | null,
+    coverageLimit?: string | null,
+    costStatus?: "included" | "paid"
+  ) => void;
   conflictModalOpen: boolean;
   setConflictModalOpen: (val: boolean) => void;
   ownershipConflict: any;
@@ -219,18 +225,27 @@ export function ReviewModals({
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => addConceptAsBenefit(concept, "current")}
-                      className="text-[10px] h-7 px-2 cursor-pointer font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300"
-                      title="Add to Purchased Extras on this quotation"
+                      onClick={() => addConceptAsBenefit(concept, "current", null, null, "included")}
+                      className="text-[10px] h-7 px-2 cursor-pointer font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300"
+                      title="Add to Free Included Coverage (Box 1)"
                     >
-                      + Quotation
+                      + Free (Box 1)
                     </Button>
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => addConceptAsBenefit(concept, "available_addon")}
+                      onClick={() => addConceptAsBenefit(concept, "current", null, null, "paid")}
+                      className="text-[10px] h-7 px-2 cursor-pointer font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300"
+                      title="Add as Purchased / Paid Add-on (Box 2)"
+                    >
+                      + Paid (Box 2)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => addConceptAsBenefit(concept, "available_addon", null, null, "paid")}
                       className="text-[10px] h-7 px-2 cursor-pointer"
-                      title="Add to Optional Add-ons"
+                      title="Add to Optional Add-ons (Box 2)"
                     >
                       + Optional
                     </Button>

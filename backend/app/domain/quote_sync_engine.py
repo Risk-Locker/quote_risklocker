@@ -574,12 +574,28 @@ def sync_comparison_from_workspace(
 
                 has_bet_active = any(s.state == "current" and selection_is_betterment(s, concepts_by_id) for s in selections)
                 has_bet_inactive = any(s.state != "current" and selection_is_betterment(s, concepts_by_id) for s in selections)
+                bet_exceeds_cap = False
                 if has_bet_active or has_bet_inactive:
                     tv = getattr(tenure, "tracked_vehicle", None)
                     veh_yom = getattr(tv, "manufacture_year", None) if tv else None
                     reg_date = _extract_field_raw(f, "registration_date") or _extract_field_raw(f, "reg_date")
                     quote_year = tenure.coverage_start_date.year if tenure.coverage_start_date else datetime.now(timezone.utc).year
                     comp_obj = db.get(InsuranceCompany, ce.company_id) if ce.company_id else None
+                    from app.domain.betterment_engine import resolve_vehicle_age_years
+                    from app.services.marketing_comparison.company_rules import resolve_company_betterment_policy
+
+                    eff_age = resolve_vehicle_age_years(
+                        registration_date=reg_date,
+                        yom=veh_yom,
+                        inception_date=tenure.coverage_start_date,
+                        quote_year=quote_year,
+                    )
+                    bet_pol = resolve_company_betterment_policy(
+                        company_name=getattr(comp_obj, "name", None) if comp_obj else ce.company_name,
+                        company_obj=comp_obj,
+                    )
+                    max_waive_y = int(bet_pol.get("max_waiver_years", 10))
+                    bet_exceeds_cap = bool(eff_age is not None and max_waive_y > 0 and eff_age > max_waive_y)
                     _, b_rate, b_disp = evaluate_betterment_rules(
                         yom=veh_yom,
                         quote_year=quote_year,
@@ -594,8 +610,12 @@ def sync_comparison_from_workspace(
                     ce.betterment_rate = _ZERO if has_bet_active else (to_decimal_clean(b_rate) if b_rate is not None else None)
                     ce.betterment_display = "Yes (0%)" if has_bet_active else b_disp
 
-                for clr_key in ("windscreen_sum_insured", "special_perils", "llp", "llop", "llp_llop", "towing_limit", "waiver_betterment", "motor_premium"):
+                for clr_key in ("windscreen_sum_insured", "special_perils", "llp", "llop", "llp_llop", "towing_limit", "motor_premium"):
                     record_manual_overrides(ce, clear_field=clr_key)
+                if has_bet_active and bet_exceeds_cap:
+                    record_manual_overrides(ce, edited_fields=("waiver_betterment",))
+                else:
+                    record_manual_overrides(ce, clear_field="waiver_betterment")
             elif changed_paths:
                 if any("fields.premium" in p for p in changed_paths):
                     record_manual_overrides(ce, clear_field="motor_premium")

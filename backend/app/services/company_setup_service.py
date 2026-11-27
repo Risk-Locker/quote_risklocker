@@ -11,10 +11,12 @@ from typing import Any
 from collections import defaultdict
 
 from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.cache import _memory_cache, invalidate_cache
 from app.core.errors import AppError
 from app.domain.benefits import BenefitValue
+from app.services.marketing_comparison.company_rules import resolve_company_betterment_policy
 from app.models.enums import Role
 from app.models.tables import (
     AuditEvent,
@@ -57,7 +59,7 @@ from app.services.business_setup_common import (
 )
 
 
-__all__ = ['serialize_company', 'list_business_companies', '_normalize_alias', '_company_alias', 'list_company_aliases', 'save_company_alias', 'retire_company_alias', '_product', '_tier', '_catalog', '_catalogs_batch', 'get_business_company_workspace', 'save_business_company', 'delete_business_company', 'save_business_product', 'delete_business_product', 'save_business_tier', 'delete_business_tier']
+__all__ = ['serialize_company', 'update_company_betterment_rule', 'list_business_companies', '_normalize_alias', '_company_alias', 'list_company_aliases', 'save_company_alias', 'retire_company_alias', '_product', '_tier', '_catalog', '_catalogs_batch', 'get_business_company_workspace', 'save_business_company', 'delete_business_company', 'save_business_product', 'delete_business_product', 'save_business_tier', 'delete_business_tier']
 
 
 def serialize_company(db, company: InsuranceCompany, preloaded_logos: dict[str, BusinessAsset | None] | None = None) -> dict:
@@ -72,11 +74,57 @@ def serialize_company(db, company: InsuranceCompany, preloaded_logos: dict[str, 
         "name": company.name,
         "category": company.category,
         "legal_entity_id": company.legal_entity_id,
+        "policy_rules": company.policy_rules or {},
+        "betterment_rule": resolve_company_betterment_policy(company_obj=company),
         "logo": _asset_summary(logo),
         "status": company.status,
         "created_at": company.created_at.isoformat() if company.created_at else None,
         "updated_at": company.updated_at.isoformat() if company.updated_at else None,
     }
+
+
+def update_company_betterment_rule(db, user, company_id: str, payload: dict) -> dict:
+    """Persist DB-driven betterment age/waiver policy rules on insurance_companies.policy_rules."""
+    _require_business(user)
+    company = db.scalar(select(InsuranceCompany).where(InsuranceCompany.id == company_id).with_for_update())
+    if company is None:
+        raise AppError("Company not found.", 404)
+    current = resolve_company_betterment_policy(company_obj=company)
+    auto_waive = bool(payload["auto_waive_without_peril"]) if "auto_waive_without_peril" in payload and payload["auto_waive_without_peril"] is not None else bool(current.get("auto_waive_without_peril", False))
+    allow_addon = bool(payload["allow_addon_purchase"]) if "allow_addon_purchase" in payload and payload["allow_addon_purchase"] is not None else bool(current.get("allow_addon_purchase", True))
+    free_yrs = int(payload["free_exemption_years"]) if "free_exemption_years" in payload and payload["free_exemption_years"] is not None else int(current.get("free_exemption_years", 5))
+    max_yrs = int(payload["max_waiver_years"]) if "max_waiver_years" in payload and payload["max_waiver_years"] is not None else int(current.get("max_waiver_years", 10))
+    if free_yrs > max_yrs:
+        raise AppError("Free exemption years cannot exceed max waiver years.", 422)
+    rules = dict(company.policy_rules or {})
+    existing = dict(rules.get("betterment") or {})
+    default_display = (
+        str(payload["default_display"]).strip() or current.get("default_display") or "Up to 10 Years"
+        if "default_display" in payload and payload["default_display"] is not None
+        else existing.get("default_display") or current.get("default_display") or "Up to 10 Years"
+    )
+    free_display = (
+        str(payload["free_display"]).strip() or current.get("free_display") or f"Up to {free_yrs} Years"
+        if "free_display" in payload and payload["free_display"] is not None
+        else existing.get("free_display") or current.get("free_display") or f"Up to {free_yrs} Years"
+    )
+    rules["betterment"] = {
+        **existing,
+        "auto_waive_without_peril": auto_waive,
+        "allow_addon_purchase": allow_addon,
+        "free_exemption_years": free_yrs,
+        "max_waiver_years": max_yrs,
+        "default_display": default_display,
+        "free_display": free_display,
+    }
+    company.policy_rules = rules
+    flag_modified(company, "policy_rules")
+    company.revision = int(company.revision or 1) + 1
+    _audit(db, user, "business.company.policy_rules", "insurance_company", company.id, {"betterment": rules["betterment"]})
+    _memory_cache.clear()
+    db.commit()
+    db.refresh(company)
+    return serialize_company(db, company)
 
 
 

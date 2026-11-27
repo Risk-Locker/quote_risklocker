@@ -10,12 +10,23 @@ export type AssetSummary = {
   url: string;
 };
 
+export type BettermentPolicyRule = {
+  auto_waive_without_peril: boolean;
+  allow_addon_purchase: boolean;
+  free_exemption_years: number;
+  max_waiver_years: number;
+  default_display?: string | null;
+  free_display?: string | null;
+};
+
 export type CompanySummary = {
   id: string;
   name: string;
   slug?: string | null;
   revision: number;
   status: string;
+  policy_rules?: { betterment?: Partial<BettermentPolicyRule>; [key: string]: unknown } | null;
+  betterment_rule?: BettermentPolicyRule | null;
   logo?: AssetSummary | null;
 };
 

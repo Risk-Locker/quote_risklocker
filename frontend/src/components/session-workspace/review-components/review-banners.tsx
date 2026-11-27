@@ -1,10 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { CheckCircle, Lock, UserSwitch } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/errors";
 import type { WorkspaceSnapshot } from "../types";
 
 export interface ReviewBannersProps {
@@ -12,9 +12,8 @@ export interface ReviewBannersProps {
   setConflictModalOpen: (open: boolean) => void;
   formValues: Record<string, string>;
   workspace: WorkspaceSnapshot;
-  learnPrompt: { field: string; value: string } | null;
-  learnValue: () => void;
-  setLearnPrompt: (val: null) => void;
+  onRefresh?: () => Promise<void> | void;
+  onDismissOwnerChangeAlert?: () => Promise<void> | void;
 }
 
 export function ReviewBanners({
@@ -22,12 +21,42 @@ export function ReviewBanners({
   setConflictModalOpen,
   formValues,
   workspace,
-  learnPrompt,
-  learnValue,
-  setLearnPrompt,
+  onRefresh,
+  onDismissOwnerChangeAlert,
 }: ReviewBannersProps) {
+  const [resolvingField, setResolvingField] = useState<string | null>(null);
+  const [dismissingOwnerAlert, setDismissingOwnerAlert] = useState(false);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+
+  const discrepanciesList = (
+    workspace?.display_options &&
+    Array.isArray((workspace.display_options as Record<string, unknown>).customer_discrepancies)
+      ? ((workspace.display_options as Record<string, unknown>).customer_discrepancies as Array<{
+          field: string;
+          current: string;
+          detected: string;
+          message: string;
+        }>)
+      : []
+  );
+
   return (
     <>
+      {bannerError ? (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 px-3.5 py-2 bg-red-50 border border-red-300 rounded-[var(--rl-radius-sm)] text-xs text-red-900"
+        >
+          <span>{bannerError}</span>
+          <button
+            type="button"
+            onClick={() => setBannerError(null)}
+            className="font-semibold underline shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
       {/* Vehicle Ownership Conflict Gate Banner */}
       {ownershipConflict?.has_conflict && !ownershipConflict?.resolved ? (
         <div
@@ -108,19 +137,40 @@ export function ReviewBanners({
               {String((workspace.display_options as Record<string, any>).owner_change_alert.message || "Ownership discrepancy noted.")}
             </div>
           </div>
-          <span className="text-xs bg-amber-200/70 text-amber-900 font-semibold px-2.5 py-1 rounded">
-            Ownership Updated
-          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs bg-amber-200/70 text-amber-900 font-semibold px-2.5 py-1 rounded">
+              Ownership Updated
+            </span>
+            {onDismissOwnerChangeAlert && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={dismissingOwnerAlert}
+                className="text-xs h-7 px-2 border-amber-300 text-amber-900 hover:bg-amber-100"
+                onClick={async () => {
+                  setDismissingOwnerAlert(true);
+                  setBannerError(null);
+                  try {
+                    await onDismissOwnerChangeAlert();
+                  } catch (err) {
+                    setBannerError(apiErrorMessage(err));
+                  } finally {
+                    setDismissingOwnerAlert(false);
+                  }
+                }}
+              >
+                {dismissingOwnerAlert ? "Dismissing..." : "Dismiss"}
+              </Button>
+            )}
+          </div>
         </div>
       ) : null}
 
       {/* Customer Contact & Profile Discrepancy Alerts */}
-      {workspace?.display_options &&
-      Array.isArray((workspace.display_options as Record<string, any>).customer_discrepancies) &&
-      ((workspace.display_options as Record<string, any>).customer_discrepancies as any[]).length > 0 ? (
-        ((workspace.display_options as Record<string, any>).customer_discrepancies as Array<{ field: string; current: string; detected: string; message: string }>).map((disc, idx) => (
+      {discrepanciesList.length > 0
+        ? discrepanciesList.map((disc, idx) => (
           <div
-            key={idx}
+            key={`${disc.field}-${idx}`}
             role="alert"
             className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-blue-50/90 border border-blue-200 rounded-[var(--rl-radius-sm)] shadow-xs"
           >
@@ -137,55 +187,53 @@ export function ReviewBanners({
               <Button
                 variant="primary"
                 size="sm"
+                disabled={resolvingField !== null}
                 className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-7 px-2.5"
                 onClick={async () => {
+                  setResolvingField(`${disc.field}:update`);
+                  setBannerError(null);
                   try {
                     await api(`/sessions/${workspace.session_id}/resolve-customer-discrepancy`, {
                       method: "POST",
                       body: JSON.stringify({ action: "update_master", field: disc.field, value: disc.detected }),
                     });
-                    window.location.reload();
-                  } catch (e) {
-                    console.error(e);
+                    if (onRefresh) await onRefresh();
+                  } catch (err) {
+                    setBannerError(apiErrorMessage(err));
+                  } finally {
+                    setResolvingField(null);
                   }
                 }}
               >
-                Update Master Profile
+                {resolvingField === `${disc.field}:update` ? "Updating..." : "Update Master Profile"}
               </Button>
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={resolvingField !== null}
                 className="text-xs h-7 px-2 border-blue-300 text-blue-700 hover:bg-blue-100"
                 onClick={async () => {
+                  setResolvingField(`${disc.field}:dismiss`);
+                  setBannerError(null);
                   try {
                     await api(`/sessions/${workspace.session_id}/resolve-customer-discrepancy`, {
                       method: "POST",
                       body: JSON.stringify({ action: "dismiss", field: disc.field }),
                     });
-                    window.location.reload();
-                  } catch (e) {
-                    console.error(e);
+                    if (onRefresh) await onRefresh();
+                  } catch (err) {
+                    setBannerError(apiErrorMessage(err));
+                  } finally {
+                    setResolvingField(null);
                   }
                 }}
               >
-                Keep Current
+                {resolvingField === `${disc.field}:dismiss` ? "Saving..." : "Keep Current"}
               </Button>
             </div>
           </div>
         ))
-      ) : null}
-
-      {learnPrompt ? (
-        <Card role="status" className="flex flex-wrap items-center justify-between gap-3 border-amber-500/30 bg-amber-500/10 p-3">
-          <p className="text-sm font-semibold text-[var(--rl-text-strong)]">
-            Save &quot;{learnPrompt.value}&quot; to the {learnPrompt.field === "car_brand" ? "vehicle brand list" : "database"} for future quotes?
-          </p>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={learnValue}>Yes, add it</Button>
-            <Button variant="secondary" size="sm" onClick={() => setLearnPrompt(null)}>No</Button>
-          </div>
-        </Card>
-      ) : null}
+        : null}
     </>
   );
 }

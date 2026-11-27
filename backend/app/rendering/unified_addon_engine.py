@@ -64,8 +64,8 @@ CANONICAL_24_CATALOG: list[dict[str, Any]] = [
     {
         "id": "betterment",
         "title": "Waiver of Betterment",
-        "description": "Waives betterment deduction on new parts for vehicles up to 15 years.",
-        "default_value": "Up to 15 Years",
+        "description": "Waives betterment deduction on new parts for vehicles up to 10 years.",
+        "default_value": "Up to 10 Years",
         "icon_hint": "betterment",
     },
     {
@@ -365,18 +365,18 @@ def format_addon_value(raw_val: Any, val_override: Any = None) -> str:
         actual_val = raw_val
 
     if actual_val is None:
-        return "Up to 15 Years" if is_betterment_ctx else ""
+        return "Up to 10 Years" if is_betterment_ctx else ""
     s = re.sub(r"\s+", " ", str(actual_val)).strip()
     if not s:
-        return "Up to 15 Years" if is_betterment_ctx else ""
+        return "Up to 10 Years" if is_betterment_ctx else ""
     low = s.lower().rstrip(" .")
     if low in _SUPPRESSED_VALUES:
-        return "Up to 15 Years" if is_betterment_ctx else ""
+        return "Up to 10 Years" if is_betterment_ctx else ""
 
     # 0. Betterment: Never display an RM monetary amount. Normalize to vehicle age limit or "Betterment Waived".
     if is_betterment_ctx or "betterment" in low:
         if re.match(r"(?i)^\s*rm\b", s):
-            return "Up to 15 Years"
+            return "Up to 10 Years"
         m_bet = re.search(r"(?:up to\s+)?(\d+\s*(?:years?|yrs?))", s, re.IGNORECASE)
         if m_bet:
             return f"Up to {m_bet.group(1).title()}"
@@ -1114,12 +1114,7 @@ def build_unified_matrix_cards(
 
                 _, _, default_years = resolve_company_betterment_rule(company_name=insurer_name)
             except Exception:
-                comp_l = (insurer_name or "").lower()
-                default_years = (
-                    "Up to 10 Years"
-                    if ("qbe" in comp_l or any(k in comp_l for k in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")))
-                    else "Up to 15 Years"
-                )
+                default_years = "Up to 10 Years"
             if not raw_val or raw_val in ("Up to 10 Years", "Up to 15 Years", "Standard"):
                 formatted_val = default_years
             else:
@@ -1324,23 +1319,11 @@ def build_unified_matrix_cards(
             cat_id = cat["id"]
             if cat_id in excluded_ids:
                 continue
-            if cat_id == "towing" and cat_id not in canonical_overrides:
+            if cat_id in {"towing", "betterment"} and cat_id not in canonical_overrides:
                 continue
             if cat_id not in seen_in_output:
                 seen_in_output.add(cat_id)
                 fill_val = format_addon_value(cat.get("default_value"))
-                if cat_id == "betterment":
-                    try:
-                        from app.services.marketing_comparison.company_rules import resolve_company_betterment_rule
-
-                        _, _, fill_val = resolve_company_betterment_rule(company_name=insurer_name)
-                    except Exception:
-                        comp_l = (insurer_name or "").lower()
-                        fill_val = (
-                            "Up to 10 Years"
-                            if ("qbe" in comp_l or any(k in comp_l for k in ("lonpac", "stmb", "takaful malaysia", "syarikat takaful")))
-                            else "Up to 15 Years"
-                        )
                 processed_cards.append(
                     {
                         "id": cat["id"],

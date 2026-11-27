@@ -524,9 +524,14 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
             setConflictModalOpen={conflictAndAi.setConflictModalOpen}
             formValues={formValues}
             workspace={workspace}
-            learnPrompt={state.learnPrompt}
-            learnValue={state.learnValue}
-            setLearnPrompt={state.setLearnPrompt}
+            onRefresh={() => reload({ silent: true })}
+            onDismissOwnerChangeAlert={async () => {
+              queueOperation(
+                { op: "update_display_options", options: { owner_change_alert: null } },
+                "display_options.owner_change_alert"
+              );
+              await save();
+            }}
           />
 
           <ReviewAttentionBar
@@ -649,9 +654,25 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
           companyName={companyName}
           globalConcepts={globalConcepts}
           isExcludedForVehicle={benefits.isExcludedForVehicle}
-          insurerConceptKeys={new Set()}
+          insurerConceptKeys={benefits.insurerConceptKeys}
           GLOBAL_BENEFIT_KEYS={GLOBAL_BENEFIT_KEYS}
-          filteredConcepts={globalConcepts}
+          filteredConcepts={globalConcepts.filter((c) => {
+            if (benefits.isExcludedForVehicle(c)) return false;
+            if (benefits.modalFilter === "insurer") {
+              if (!benefits.insurerConceptKeys.has(c.concept_key) && !benefits.insurerConceptKeys.has(c.id)) return false;
+            } else if (benefits.modalFilter === "global") {
+              if (!GLOBAL_BENEFIT_KEYS.has(c.concept_key)) return false;
+            } else if (benefits.modalFilter === "addons") {
+              if (GLOBAL_BENEFIT_KEYS.has(c.concept_key)) return false;
+            }
+            const q = benefits.globalSearch.trim().toLowerCase();
+            if (!q) return true;
+            return (
+              c.label.toLowerCase().includes(q) ||
+              c.concept_key.toLowerCase().includes(q) ||
+              (c.description || "").toLowerCase().includes(q)
+            );
+          })}
           fileUrl={fileUrl}
           addConceptAsBenefit={benefits.addConceptAsBenefit}
           conflictModalOpen={conflictAndAi.conflictModalOpen}

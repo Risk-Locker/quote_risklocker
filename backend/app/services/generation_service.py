@@ -440,6 +440,13 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
     except Exception:
         pass
 
+    betterment_policy_context = None
+    try:
+        from app.domain.betterment_engine import resolve_draft_betterment_policy_context
+        betterment_policy_context = resolve_draft_betterment_policy_context(db, draft, company=company)
+    except Exception:
+        betterment_policy_context = None
+
     try:
         cards = resolve_benefit_cards(
             selections=selections,
@@ -455,6 +462,7 @@ def build_render_snapshot_context(db, draft: QuotationDraft, revision: TemplateR
             company_bundles=company_bundles,
             catalog_name=catalog_name,
             visual_profile_assets=visual_profile_assets,
+            betterment_policy_context=betterment_policy_context,
         )
     except RenderContextError as exc:
         raise AppError(str(exc), 409) from exc
