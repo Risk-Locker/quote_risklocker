@@ -146,11 +146,11 @@ def run_orchestrator_vision_step(
     if not pool_keys:
         if fail_closed:
             raise AIExtractionUnavailableException(
-                reason="No GEMINI_API_KEY configured in pool.",
+                reason="No Gemini API key configured in Settings -> AI Engine.",
                 status_code=503,
-                detail="AI Extraction Unavailable: No GEMINI_API_KEY configured. Please verify API billing or switch keys.",
+                detail="AI Extraction Unavailable: No Gemini API key configured. Please add an API key in Settings -> AI Engine.",
             )
-        warnings.append("AI Notice: No GEMINI_API_KEY configured. Extracted via native PDF/OCR fallback.")
+        warnings.append("AI Notice: No Gemini API key configured in Settings -> AI Engine. Extracted via native PDF/OCR fallback.")
         return None, None
 
     if len(pdf_bytes) <= 500:

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLedgerState } from "./useLedgerState";
 import { useLedgerModals } from "./useLedgerModals";
@@ -58,8 +58,11 @@ export function TenureTimelineLedger() {
   const modals = useLedgerModals(state);
   const searchParams = useSearchParams();
 
-  // Highlighted tenure row from notifications or URL
+  // Highlighted tenure row(s) from notifications or Copilot deep-links
   const [highlightedTenureId, setHighlightedTenureId] = useState<string | null>(null);
+  const [highlightedTenureIds, setHighlightedTenureIds] = useState<Set<string>>(new Set());
+  const pendingSelectIdsRef = useRef<string[]>([]);
+  const pendingScrollIdRef = useRef<string | null>(null);
   const [, setTicker] = useState(0);
 
   // Tick relative timestamps every 5 seconds
@@ -68,26 +71,80 @@ export function TenureTimelineLedger() {
     return () => clearInterval(timer);
   }, []);
 
-  // Listen for highlight parameter from notifications or URL
+  // Listen for highlight / tenure_ids / select / search deep-link parameters
   useEffect(() => {
-    const target = searchParams?.get("highlight_tenure");
-    if (target) {
-      setHighlightedTenureId(target);
+    const rawTenureIds = searchParams?.get("tenure_ids");
+    const singleHighlight = searchParams?.get("highlight_tenure") || searchParams?.get("highlight");
+    const shouldSelect = searchParams?.get("select") === "true" || searchParams?.get("select") === "1";
+    const paramYear = searchParams?.get("year");
+    const paramCategory = searchParams?.get("category");
+    const paramSearch = searchParams?.get("search");
+
+    const parsedIds: string[] = [];
+    if (rawTenureIds) {
+      rawTenureIds
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((id) => {
+          if (!parsedIds.includes(id)) parsedIds.push(id);
+        });
+    }
+    if (singleHighlight) {
+      singleHighlight
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((id) => {
+          if (!parsedIds.includes(id)) parsedIds.push(id);
+        });
+    }
+
+    if (parsedIds.length > 0 || paramSearch) {
       state.setViewMode("ledger");
-      setTimeout(() => {
-        const el = document.getElementById(`tenure-row-${target}`);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-      }, 500);
+      if (paramYear) {
+        state.setSelectedYear(paramYear);
+      } else if (parsedIds.length > 0 || paramSearch) {
+        state.setSelectedYear("all");
+      }
+      if (paramCategory === "active" || paramCategory === "lost" || paramCategory === "all") {
+        state.setCategory(paramCategory);
+      } else if (parsedIds.length > 0 || paramSearch) {
+        state.setCategory("all");
+      }
+      if (rawTenureIds && parsedIds.length > 0) {
+        state.setFocusedTenureIds(parsedIds);
+      } else {
+        state.setFocusedTenureIds([]);
+      }
+      if (paramSearch && !rawTenureIds) {
+        state.setSearch(paramSearch);
+      } else if (rawTenureIds) {
+        state.setSearch("");
+      }
+    }
+
+    if (parsedIds.length > 0) {
+      setHighlightedTenureId(parsedIds[0]);
+      setHighlightedTenureIds(new Set(parsedIds));
+      pendingScrollIdRef.current = parsedIds[0];
+      if (shouldSelect) {
+        pendingSelectIdsRef.current = parsedIds;
+      }
 
       const clearTimer = setTimeout(() => {
         setHighlightedTenureId(null);
+        setHighlightedTenureIds(new Set());
         try {
           const currentUrl = new URL(window.location.href);
-          if (currentUrl.searchParams.has("highlight_tenure")) {
-            currentUrl.searchParams.delete("highlight_tenure");
-            currentUrl.searchParams.delete("t");
+          let changed = false;
+          for (const k of ["highlight_tenure", "highlight", "t"]) {
+            if (currentUrl.searchParams.has(k)) {
+              currentUrl.searchParams.delete(k);
+              changed = true;
+            }
+          }
+          if (changed) {
             window.history.replaceState(
               {},
               "",
@@ -96,11 +153,38 @@ export function TenureTimelineLedger() {
             );
           }
         } catch {}
-      }, 3500);
+      }, 4500);
 
       return () => clearTimeout(clearTimer);
     }
-  }, [searchParams, state]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Apply pending auto-selection and smooth scroll once ledger rows finish loading
+  useEffect(() => {
+    if (state.loadingTenures || state.tenures.length === 0) return;
+    const loadedSet = new Set(state.tenures.map((t) => t.id));
+
+    if (pendingSelectIdsRef.current.length > 0) {
+      const matched = pendingSelectIdsRef.current.filter((id) => loadedSet.has(id));
+      if (matched.length > 0) {
+        state.setSelectedTenureIds(matched);
+        pendingSelectIdsRef.current = [];
+      }
+    }
+
+    if (pendingScrollIdRef.current && loadedSet.has(pendingScrollIdRef.current)) {
+      const scrollId = pendingScrollIdRef.current;
+      pendingScrollIdRef.current = null;
+      setTimeout(() => {
+        const el = document.getElementById(`tenure-row-${scrollId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 120);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.loadingTenures, state.tenures]);
 
   const realtime = useRealtimeSync({
     scope: "ledger",
@@ -223,6 +307,34 @@ export function TenureTimelineLedger() {
         onToggleColumnVisibility={state.toggleColumnVisibility}
       />
 
+      {/* Copilot Deep-Link Focus Banner */}
+      {state.focusedTenureIds.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--rl-radius-sm)] border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs text-emerald-950">
+          <span className="font-semibold">
+            Showing {state.focusedTenureIds.length} vehicle{state.focusedTenureIds.length === 1 ? "" : "s"} selected from AI Copilot
+            {state.selectedTenureIds.length > 0 ? ` · ${state.selectedTenureIds.length} checked` : ""}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              pendingSelectIdsRef.current = [];
+              pendingScrollIdRef.current = null;
+              state.setFocusedTenureIds([]);
+              state.setSelectedTenureIds([]);
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete("tenure_ids");
+                url.searchParams.delete("select");
+                window.history.replaceState({}, "", url.pathname + (url.search ? `?${url.searchParams.toString()}` : ""));
+              } catch {}
+            }}
+            className="rounded border border-emerald-400 bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100 cursor-pointer"
+          >
+            Show All Ledger
+          </button>
+        </div>
+      )}
+
       {/* 3. VIEW 1: EXECUTIVE TABLE LEDGER */}
       {state.viewMode === "ledger" && (
         <LedgerTable
@@ -240,6 +352,7 @@ export function TenureTimelineLedger() {
           selectedMonth={state.selectedMonth}
           selectedYear={state.selectedYear}
           highlightedTenureId={highlightedTenureId}
+          highlightedTenureIds={highlightedTenureIds}
           pics={state.pics}
           density={state.density}
           hiddenColumns={state.hiddenColumns}

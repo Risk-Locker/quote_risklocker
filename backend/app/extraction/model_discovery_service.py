@@ -21,7 +21,7 @@ from app.models.tables import AppSetting
 
 SAFE_RPD_CEILING = 480
 SAFE_RPM_CEILING = 13
-SAFE_TPM_CEILING = 200_000
+SAFE_TPM_CEILING = 220_000
 ALLOWED_PRODUCTION_MODELS = frozenset({"gemini-3.1-flash-lite", "gemini-3.5-flash-lite"})
 
 # Canonical verified baseline models

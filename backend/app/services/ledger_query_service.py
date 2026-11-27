@@ -34,6 +34,7 @@ class LedgerFilterSpec:
     policy_status: PolicyStatusFilter = "all"
     sub_agent: str | None = None
     search: str | None = None
+    tenure_ids: tuple[str, ...] | None = None
     show_hidden: bool = False
     show_discarded: bool = False
 
@@ -274,6 +275,11 @@ def apply_base_ledger_filters(query: Any, spec: LedgerFilterSpec) -> Any:
 
     if sub_agent and str(sub_agent).strip():
         query = query.where(InsuranceTenure.sub_agent_name.ilike(f"%{str(sub_agent).strip()}%"))
+
+    if spec.tenure_ids:
+        clean_ids = tuple(str(tid).strip() for tid in spec.tenure_ids if str(tid).strip())
+        if clean_ids:
+            query = query.where(InsuranceTenure.id.in_(clean_ids))
 
     if search and str(search).strip():
         term = f"%{str(search).strip()}%"

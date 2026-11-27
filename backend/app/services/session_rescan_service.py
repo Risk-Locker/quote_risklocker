@@ -717,7 +717,7 @@ def rescan_session(
             if not gemini_res:
                 keys_pool = get_key_pool()
                 if not keys_pool.get_all_keys():
-                    raise AppError("No GEMINI_API_KEY configured. Please check your environment.", 400)
+                    raise AppError("No Gemini API key configured. Please add an API key in Settings -> AI Engine.", 400)
                 err = keys_pool.get_last_error_message() or "AI extraction failed or returned an empty result."
                 raise AppError(f"Gemini AI extraction failed: {err}", 502)
 

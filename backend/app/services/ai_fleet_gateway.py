@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 STALE_IN_FLIGHT_SECONDS = 120.0
 EVENT_RETENTION_DAYS = 7
+RATE_WINDOW_SECONDS = 80.0
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,11 @@ DEFAULT_COPILOT_QUOTA_POLICY: dict[str, Any] = {
     "admin_daily_turns": 150,
     "admin_daily_tokens": 250_000,
     "max_tool_hops": 4,
-    "max_input_tokens_per_turn": 12_000,
+    "max_input_tokens_per_turn": 200_000,
+    "max_tokens_per_turn": 150_000,
+    "staff_max_tokens_per_turn": 60_000,
+    "warn_turn_tokens": 15_000,
+    "copilot_allow_shared_spillover": False,
 }
 
 
@@ -102,7 +107,11 @@ def normalize_copilot_quota_policy(raw: dict[str, Any] | None) -> dict[str, Any]
         "admin_daily_turns": max(10, min(1_000, int(src.get("admin_daily_turns", 150) or 150))),
         "admin_daily_tokens": max(10_000, min(5_000_000, int(src.get("admin_daily_tokens", 250_000) or 250_000))),
         "max_tool_hops": max(1, min(8, int(src.get("max_tool_hops", 4) or 4))),
-        "max_input_tokens_per_turn": max(2_000, min(40_000, int(src.get("max_input_tokens_per_turn", 12_000) or 12_000))),
+        "max_input_tokens_per_turn": max(2_000, min(220_000, int(src.get("max_input_tokens_per_turn", 200_000) or 200_000))),
+        "max_tokens_per_turn": max(10_000, min(440_000, int(src.get("max_tokens_per_turn", 150_000) or 150_000))),
+        "staff_max_tokens_per_turn": max(5_000, min(220_000, int(src.get("staff_max_tokens_per_turn", 60_000) or 60_000))),
+        "warn_turn_tokens": max(2_000, min(100_000, int(src.get("warn_turn_tokens", 15_000) or 15_000))),
+        "copilot_allow_shared_spillover": bool(src.get("copilot_allow_shared_spillover", False)),
     }
 
 
@@ -280,13 +289,22 @@ class GeminiFleetGateway:
                 cleaned[rid] = meta
         return cleaned, len(cleaned)
 
-    def _prune_60s_windows(
+    def _sum_inflight_tokens(self, in_flight_meta: dict[str, Any] | None) -> int:
+        total = 0
+        for meta in (in_flight_meta or {}).values():
+            if isinstance(meta, dict):
+                total += max(0, int(meta.get("estimated_tokens") or 0))
+        return total
+
+    def _prune_rate_windows(
         self,
         recent_calls: list[Any],
         recent_tokens: list[Any],
         now: float,
+        *,
+        window_sec: float = RATE_WINDOW_SECONDS,
     ) -> tuple[list[float], list[list[Any]]]:
-        cutoff = now - 60.0
+        cutoff = now - window_sec
         calls = [float(t) for t in (recent_calls or []) if float(t) >= cutoff]
         tokens: list[list[Any]] = []
         for entry in (recent_tokens or []):
@@ -296,6 +314,14 @@ class GeminiFleetGateway:
                 if ts >= cutoff:
                     tokens.append([ts, tok])
         return calls, tokens
+
+    def _prune_60s_windows(
+        self,
+        recent_calls: list[Any],
+        recent_tokens: list[Any],
+        now: float,
+    ) -> tuple[list[float], list[list[Any]]]:
+        return self._prune_rate_windows(recent_calls, recent_tokens, now, window_sec=RATE_WINDOW_SECONDS)
 
     def _sync_db_lanes_locked(self, db: Any, accounts: list[Any], active_models: list[str], now: float) -> list[AIFleetLane]:
         today_pt = get_current_pt_cycle_date()
@@ -639,6 +665,10 @@ class GeminiFleetGateway:
                 continue
             if not is_copilot and scope == "copilot_only":
                 continue
+            # Strict 100% isolation: if dedicated copilot_only key(s) exist and spillover is disabled,
+            # Chatbot ONLY uses copilot_only lanes and never spills onto extraction/shared keys.
+            if is_copilot and has_dedicated_copilot and not eff_policy["copilot_allow_shared_spillover"] and scope != "copilot_only":
+                continue
             eligible_account_lanes.append(l)
 
         if not eligible_account_lanes:
@@ -659,19 +689,36 @@ class GeminiFleetGateway:
         if not rpd_available:
             return None, float("inf"), True
 
-        # Order round-robin across RPD-capable lanes, preferring dedicated lanes first
+        # Order lanes:
+        # - For Copilot: Max-Headroom Dual-Barrel Reloader scoring (prefers highest remaining TPM + RPM in 80s window)
+        # - For Extraction: Round-robin across RPD-capable lanes, preferring dedicated lanes first
         n = len(rpd_available)
-        if batch_item_index is not None:
-            start_idx = abs(int(batch_item_index)) % n
-        else:
-            start_idx = self._rr_seq % n
-            self._rr_seq += 1
-        rr_ordered = rpd_available[start_idx:] + rpd_available[:start_idx]
         if is_copilot:
-            ordered = [l for l in rr_ordered if (getattr(acc_by_id.get(l.account_id), "workload_scope", "all") == "copilot_only")] + [
-                l for l in rr_ordered if (getattr(acc_by_id.get(l.account_id), "workload_scope", "all") != "copilot_only")
-            ]
+            def _copilot_barrel_score(lane_obj: Any) -> tuple[int, int, float, float]:
+                acc_obj = acc_by_id.get(lane_obj.account_id)
+                is_ded = 1 if getattr(acc_obj, "workload_scope", "all") == "copilot_only" else 0
+                tpm_lim = max(1, int(lane_obj.tpm_limit or SAFE_TPM_CEILING))
+                rpm_lim = max(1, int(lane_obj.rpm_limit or SAFE_RPM_CEILING))
+                recent_tok = sum(
+                    int(e[1] or 0)
+                    for e in (lane_obj.recent_tokens_json or [])
+                    if isinstance(e, (list, tuple)) and len(e) >= 2
+                )
+                inflight_tok = self._sum_inflight_tokens(lane_obj.in_flight_meta)
+                tpm_rem = max(0, tpm_lim - (recent_tok + inflight_tok))
+                rpm_rem = max(0, rpm_lim - (len(lane_obj.recent_calls_json or []) + int(lane_obj.in_flight_count or 0)))
+                fits = 1 if (tpm_rem >= estimated_tokens and rpm_rem >= 1) else 0
+                headroom = (tpm_rem / tpm_lim) * 0.7 + (rpm_rem / rpm_lim) * 0.3
+                return (is_ded, fits, headroom, -float(lane_obj.last_dispatched_at or 0.0))
+
+            ordered = sorted(rpd_available, key=_copilot_barrel_score, reverse=True)
         else:
+            if batch_item_index is not None:
+                start_idx = abs(int(batch_item_index)) % n
+            else:
+                start_idx = self._rr_seq % n
+                self._rr_seq += 1
+            rr_ordered = rpd_available[start_idx:] + rpd_available[:start_idx]
             ordered = [l for l in rr_ordered if (getattr(acc_by_id.get(l.account_id), "workload_scope", "all") == "extraction_only")] + [
                 l for l in rr_ordered if (getattr(acc_by_id.get(l.account_id), "workload_scope", "all") != "extraction_only")
             ]
@@ -729,23 +776,47 @@ class GeminiFleetGateway:
             if key_ready_at > now:
                 wait_reasons.append(key_ready_at - now)
 
-            # 60s RPM sliding window (includes in_flight_count)
+            # 80s RPM sliding window (includes in_flight_count)
             recent_calls = [float(t) for t in (l.recent_calls_json or [])]
             active_rpm = len(recent_calls) + int(l.in_flight_count or 0)
             if active_rpm >= int(l.rpm_limit or SAFE_RPM_CEILING):
                 if recent_calls:
-                    wait_reasons.append(max(0.25, (min(recent_calls) + 60.05) - now))
+                    wait_reasons.append(max(0.25, (min(recent_calls) + RATE_WINDOW_SECONDS + 0.05) - now))
                 else:
                     wait_reasons.append(2.0)
 
-            # 60s TPM sliding window
-            recent_tok_sum = sum(int(e[1] or 0) for e in (l.recent_tokens_json or []) if isinstance(e, (list, tuple)) and len(e) >= 2)
-            if recent_tok_sum + estimated_tokens > int(l.tpm_limit or SAFE_TPM_CEILING):
-                if l.recent_tokens_json:
-                    oldest_tok_ts = min(float(e[0]) for e in l.recent_tokens_json if isinstance(e, (list, tuple)) and len(e) >= 1)
-                    wait_reasons.append(max(0.25, (oldest_tok_ts + 60.05) - now))
+            # 80s TPM sliding window (includes live in-flight estimated_tokens)
+            tok_entries = sorted(
+                (
+                    (float(e[0]), int(e[1] or 0))
+                    for e in (l.recent_tokens_json or [])
+                    if isinstance(e, (list, tuple)) and len(e) >= 2
+                ),
+                key=lambda item: item[0],
+            )
+            recent_tok_sum = sum(tok for _, tok in tok_entries)
+            inflight_tok_sum = self._sum_inflight_tokens(l.in_flight_meta)
+            active_tpm = recent_tok_sum + inflight_tok_sum
+            tpm_limit_val = int(l.tpm_limit or SAFE_TPM_CEILING)
+            if active_tpm + estimated_tokens > tpm_limit_val:
+                if estimated_tokens > tpm_limit_val:
+                    wait_reasons.append(float("inf"))
+                elif tok_entries:
+                    # Find earliest timestamp whose expiration frees enough TPM in the 80s reload window
+                    freed = 0
+                    reload_ts = tok_entries[-1][0]
+                    for ts, tok in tok_entries:
+                        freed += tok
+                        if (active_tpm - freed) + estimated_tokens <= tpm_limit_val:
+                            reload_ts = ts
+                            break
+                    if (active_tpm - freed) + estimated_tokens <= tpm_limit_val:
+                        wait_reasons.append(max(0.25, (reload_ts + RATE_WINDOW_SECONDS + 0.05) - now))
+                    else:
+                        # In-flight requests hold the remaining TPM; wait briefly for them to settle
+                        wait_reasons.append(1.5)
                 else:
-                    wait_reasons.append(2.0)
+                    wait_reasons.append(1.5)
 
             if not wait_reasons:
                 return l, 0.0, False
@@ -755,6 +826,10 @@ class GeminiFleetGateway:
                 min_wait = lane_wait
 
         if min_wait == float("inf"):
+            # All lanes cannot ever satisfy this single request (e.g. >220k TPM cap)
+            max_tpm_avail = max((int(l.tpm_limit or SAFE_TPM_CEILING) for l in ordered), default=SAFE_TPM_CEILING)
+            if estimated_tokens > max_tpm_avail:
+                return None, float("inf"), False
             min_wait = 2.0
         return None, max(0.1, min_wait), False
 
@@ -1268,6 +1343,7 @@ class GeminiFleetGateway:
         parse_fn: Callable[[dict[str, Any]], Any] | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         http_post_fn: Callable[[str, dict[str, Any], float], httpx.Response] | None = None,
+        on_wait_cb: Callable[[dict[str, Any]], None] | None = None,
     ) -> Any:
         """Execute a Gemini generateContent call through the 2D Fleet Gateway with pacing & spillover."""
         if payload is None and payload_builder is None:
@@ -1312,6 +1388,17 @@ class GeminiFleetGateway:
                         )
                     return None
 
+                if wait_sec == float("inf"):
+                    msg = f"Single request step (~{est_tok:,} tok) exceeds per-model {SAFE_TPM_CEILING:,} TPM safety cap."
+                    if allow_quota_raise:
+                        raise QuotaExhaustedError(
+                            msg,
+                            is_daily_exhausted=False,
+                            wait_seconds=float("inf"),
+                            resume_at_utc=datetime.now(timezone.utc) + timedelta(seconds=RATE_WINDOW_SECONDS),
+                        )
+                    return None
+
                 remaining = deadline - time.monotonic()
                 if remaining <= 0.1 or wait_sec > remaining:
                     msg = f"Gemini lanes temporarily busy (~{wait_sec:.1f}s wait exceeds remaining budget {max(0.0, remaining):.1f}s)."
@@ -1325,6 +1412,17 @@ class GeminiFleetGateway:
                     return None
 
                 sleep_dur = min(wait_sec + 0.05, remaining)
+                if on_wait_cb is not None and sleep_dur >= 0.4:
+                    try:
+                        on_wait_cb(
+                            {
+                                "reason": "barrel_reload",
+                                "wait_seconds": round(sleep_dur, 1),
+                                "estimated_tokens": est_tok,
+                            }
+                        )
+                    except Exception:
+                        pass
                 now_ts = time.time()
                 if sleep_dur >= 1.5 and (now_ts - self._last_pace_event_ts) >= 5.0:
                     self._last_pace_event_ts = now_ts
@@ -1812,6 +1910,74 @@ class GeminiFleetGateway:
             "shared_reserve_rpd": shared_reserve_rpd,
             "per_user_today": per_user_today,
         }
+
+    def get_copilot_barrel_snapshot(self, db: Any = None) -> list[dict[str, Any]]:
+        """Return live 80-second TPM/RPM barrel status for Copilot-eligible lanes."""
+        now = time.time()
+        with self._lock:
+            accounts, active_models, acc_by_id = self._active_accounts_and_models(db if self._use_db(db) else None)
+            if self._use_db(db):
+                owns_db = db is None
+                sess = db if db is not None else self._open_db()
+                try:
+                    lanes = self._sync_db_lanes_locked(sess, accounts, active_models, now)
+                finally:
+                    if owns_db:
+                        sess.close()
+            else:
+                lanes = self._sync_mem_lanes_locked(accounts, active_models, now)
+
+            policy = get_copilot_quota_policy(db)
+            has_ded = any(
+                (not acc.is_paused and acc.status not in ("denied", "invalid_key") and getattr(acc, "workload_scope", "all") == "copilot_only")
+                for acc in accounts
+            )
+            barrels: list[dict[str, Any]] = []
+            for l in lanes:
+                acc = acc_by_id.get(l.account_id)
+                if not acc or acc.is_paused or acc.status in ("denied", "invalid_key"):
+                    continue
+                scope = getattr(acc, "workload_scope", "all") or "all"
+                if scope == "extraction_only":
+                    continue
+                if has_ded and not policy.get("copilot_allow_shared_spillover", False) and scope != "copilot_only":
+                    continue
+                calls, tokens = self._prune_rate_windows(l.recent_calls_json, l.recent_tokens_json, now)
+                recent_tok = sum(int(e[1] or 0) for e in tokens)
+                inf_tok = self._sum_inflight_tokens(l.in_flight_meta)
+                tpm_lim = int(l.tpm_limit or SAFE_TPM_CEILING)
+                rpm_lim = int(l.rpm_limit or SAFE_RPM_CEILING)
+                rpd_lim = int(l.rpd_limit or SAFE_RPD_CEILING)
+                tpm_used = recent_tok + inf_tok
+                rpm_used = len(calls) + int(l.in_flight_count or 0)
+                reload_in = 0.0
+                if tokens and tpm_used >= int(tpm_lim * 0.85):
+                    oldest_ts = min(float(e[0]) for e in tokens)
+                    reload_in = max(0.0, (oldest_ts + RATE_WINDOW_SECONDS) - now)
+                elif l.cooling_until and now < float(l.cooling_until):
+                    reload_in = max(0.0, float(l.cooling_until) - now)
+                barrels.append(
+                    {
+                        "lane_id": l.lane_id,
+                        "model": l.model,
+                        "account_id": l.account_id,
+                        "account_label": acc.label,
+                        "scope": scope,
+                        "rpm_used": rpm_used,
+                        "rpm_limit": rpm_lim,
+                        "rpm_remaining": max(0, rpm_lim - rpm_used),
+                        "tpm_used": tpm_used,
+                        "tpm_limit": tpm_lim,
+                        "tpm_remaining": max(0, tpm_lim - tpm_used),
+                        "rpd_used": int(l.rpd_used or 0),
+                        "rpd_limit": rpd_lim,
+                        "in_flight_count": int(l.in_flight_count or 0),
+                        "in_flight_tokens": inf_tok,
+                        "reload_in_sec": round(reload_in, 1),
+                        "status": l.status,
+                    }
+                )
+            return barrels
 
 
 _GLOBAL_GATEWAY: GeminiFleetGateway | None = None

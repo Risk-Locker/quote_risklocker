@@ -9,7 +9,7 @@ export type CopilotToolStep = {
 };
 
 export type CopilotVerifiedLink = {
-  kind: "comparison" | "ledger" | "session" | "client" | string;
+  kind: "ledger_batch" | "comparison" | "ledger" | "session" | "client" | string;
   label: string;
   href: string;
 };
@@ -39,6 +39,10 @@ export type CopilotArtifact = {
 
 export type CopilotThread = {
   id: string;
+  user_id?: string;
+  owner_name?: string | null;
+  owner_email?: string | null;
+  owner_role?: string | null;
   title: string;
   is_pinned: boolean;
   anchor_type?: "tenure" | "session" | "vehicle" | "client" | string | null;
@@ -69,6 +73,47 @@ export type CopilotMessage = {
   isStreaming?: boolean;
 };
 
+export type CopilotBarrelStatus = {
+  lane_id: string;
+  model: string;
+  account_id: string;
+  account_label: string;
+  scope: string;
+  rpm_used: number;
+  rpm_limit: number;
+  rpm_remaining: number;
+  tpm_used: number;
+  tpm_limit: number;
+  tpm_remaining: number;
+  rpd_used: number;
+  rpd_limit: number;
+  in_flight_count: number;
+  in_flight_tokens: number;
+  reload_in_sec: number;
+  status: string;
+};
+
+export type CopilotQueueStatus = {
+  reason: "fair_queue" | "barrel_reload" | string;
+  position?: number;
+  active_users?: number;
+  inflight_turns?: number;
+  wait_seconds?: number;
+  estimated_tokens?: number;
+};
+
+export type CopilotAdminUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  thread_count: number;
+  last_active_at?: string | null;
+  tokens_used_today: number;
+  is_self: boolean;
+};
+
 export type CopilotUserQuota = {
   enabled: boolean;
   turns_used: number;
@@ -79,6 +124,11 @@ export type CopilotUserQuota = {
   tokens_remaining: number;
   is_exhausted: boolean;
   pt_cycle_date: string;
+  warn_turn_tokens?: number;
+  max_tokens_per_turn?: number;
+  max_input_tokens_per_turn?: number;
+  barrels?: CopilotBarrelStatus[];
+  dedicated_copilot_keys_count?: number;
 };
 
 export type CopilotPageContext = {
@@ -88,4 +138,4 @@ export type CopilotPageContext = {
   anchor_label?: string | null;
 };
 
-export type CopilotDrawerMode = "normal" | "wide";
+export type CopilotDrawerMode = "compact" | "wide" | "modal";

@@ -30,11 +30,15 @@ from app.core.config import Settings, resolve_active_gemini_model
 from app.core.errors import AppError
 from app.db.session import SessionLocal, get_db
 from app.models.enums import Role
-from app.models.tables import AuditEvent, CopilotArtifact, CopilotMessage, CopilotThread, User
+from app.models.tables import AuditEvent, CopilotArtifact, CopilotMessage, CopilotThread, GeminiApiCallLog, User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _is_admin_role(user: User) -> bool:
+    return user.role in {Role.SUPER_ADMIN.value, Role.ADMIN.value, Role.DEV.value}
 
 
 @router.post("/copilot/chat", response_model=CopilotChatResponse)
@@ -332,28 +336,99 @@ def copilot_quota_route(
     return get_user_copilot_quota(db, user)
 
 
+@router.get("/copilot/admin/users")
+def copilot_admin_users_list(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """List all users with Copilot thread counts and today's token usage (admin/super_admin/dev only)."""
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV)
+    from app.services.gemini_account_service import get_current_pt_cycle_date
+
+    users = list(db.scalars(select(User).order_by(User.name.asc(), User.email.asc())).all())
+    thread_stats = db.execute(
+        select(
+            CopilotThread.user_id,
+            func.count(CopilotThread.id),
+            func.max(CopilotThread.last_message_at),
+        )
+        .where(CopilotThread.deleted_at.is_(None))
+        .group_by(CopilotThread.user_id)
+    ).all()
+    thread_map = {
+        str(uid): {
+            "thread_count": int(cnt or 0),
+            "last_active_at": last_at.isoformat() if last_at else None,
+        }
+        for uid, cnt, last_at in thread_stats
+    }
+
+    today_pt = get_current_pt_cycle_date()
+    tok_stats = db.execute(
+        select(
+            GeminiApiCallLog.actor_user_id,
+            func.coalesce(func.sum(GeminiApiCallLog.total_tokens), 0),
+        )
+        .where(
+            GeminiApiCallLog.local_date == today_pt,
+            GeminiApiCallLog.actor_user_id.is_not(None),
+            GeminiApiCallLog.purpose.like("copilot%"),
+        )
+        .group_by(GeminiApiCallLog.actor_user_id)
+    ).all()
+    tok_map = {str(uid): int(tok or 0) for uid, tok in tok_stats}
+
+    out = []
+    for u in users:
+        uid = str(u.id)
+        ts = thread_map.get(uid, {})
+        out.append(
+            {
+                "id": uid,
+                "name": u.name or u.email,
+                "email": u.email,
+                "role": u.role,
+                "status": u.status,
+                "thread_count": ts.get("thread_count", 0),
+                "last_active_at": ts.get("last_active_at"),
+                "tokens_used_today": tok_map.get(uid, 0),
+                "is_self": uid == str(user.id),
+            }
+        )
+    out.sort(key=lambda item: (not item["is_self"], -item["thread_count"], item["name"].lower()))
+    return {"users": out}
+
+
 @router.get("/copilot/threads")
 def copilot_threads_list(
     search: str | None = Query(default=None, max_length=120),
+    user_id: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=40, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    """List current user's private Copilot inbox threads (read-only)."""
+    """List Copilot inbox threads for current user (or selected user for admin/system oversight)."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
     from app.services.copilot_agent_service import serialize_thread
 
+    target_user_id = str(user.id)
+    if user_id and user_id.strip() and user_id.strip() != str(user.id):
+        if not _is_admin_role(user):
+            raise AppError("You do not have permission to view another user's chats.", 403)
+        target_user_id = user_id.strip()
+
+    owner = user if target_user_id == str(user.id) else db.get(User, target_user_id)
     stmt = (
         select(CopilotThread)
-        .where(CopilotThread.user_id == user.id, CopilotThread.deleted_at.is_(None))
+        .where(CopilotThread.user_id == target_user_id, CopilotThread.deleted_at.is_(None))
         .order_by(desc(CopilotThread.is_pinned), desc(CopilotThread.last_message_at))
     )
     if search and search.strip():
         q = f"%{search.strip()}%"
         stmt = stmt.where(or_(CopilotThread.title.ilike(q), CopilotThread.anchor_label.ilike(q)))
     rows = list(db.scalars(stmt.offset(offset).limit(limit)).all())
-    return {"threads": [serialize_thread(t) for t in rows]}
+    return {"threads": [serialize_thread(t, owner=owner) for t in rows]}
 
 
 @router.post("/copilot/threads")
@@ -377,7 +452,7 @@ def copilot_thread_create(
     db.add(thread)
     db.commit()
     db.refresh(thread)
-    return {"thread": serialize_thread(thread)}
+    return {"thread": serialize_thread(thread, owner=user)}
 
 
 @router.get("/copilot/threads/{thread_id}")
@@ -386,14 +461,18 @@ def copilot_thread_detail(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    """Fetch a single private thread, its messages, and attached artifacts (read-only)."""
+    """Fetch a single thread, its messages, and attached artifacts (owner or admin oversight)."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
     from app.services.copilot_agent_service import serialize_artifact, serialize_message, serialize_thread
 
     thread = db.get(CopilotThread, thread_id)
-    if not thread or thread.deleted_at is not None or str(thread.user_id) != str(user.id):
+    if not thread or thread.deleted_at is not None:
+        raise AppError("Copilot thread not found.", 404)
+    is_owner = str(thread.user_id) == str(user.id)
+    if not is_owner and not _is_admin_role(user):
         raise AppError("Copilot thread not found.", 404)
 
+    owner = user if is_owner else db.get(User, thread.user_id)
     msgs = list(
         db.scalars(
             select(CopilotMessage)
@@ -417,7 +496,8 @@ def copilot_thread_detail(
             orphan_arts.append(art)
 
     return {
-        "thread": serialize_thread(thread),
+        "thread": serialize_thread(thread, owner=owner),
+        "read_only": not is_owner,
         "messages": [serialize_message(m, art_by_msg.get(str(m.id), [])) for m in msgs],
         "artifacts": [serialize_artifact(a) for a in artifacts],
         "unlinked_artifacts": [serialize_artifact(a) for a in orphan_arts],
@@ -431,7 +511,7 @@ def copilot_thread_update(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    """Rename or pin/unpin a Copilot thread."""
+    """Rename or pin/unpin a Copilot thread (owner only)."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
     from app.services.copilot_agent_service import serialize_thread
 
@@ -445,7 +525,7 @@ def copilot_thread_update(
         thread.is_pinned = bool(payload.is_pinned)
     db.commit()
     db.refresh(thread)
-    return {"thread": serialize_thread(thread)}
+    return {"thread": serialize_thread(thread, owner=user)}
 
 
 @router.delete("/copilot/threads/{thread_id}")
@@ -454,14 +534,28 @@ def copilot_thread_delete(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
-    """Soft-delete a Copilot thread."""
+    """Soft-delete a Copilot thread (owner or admin/super_admin/dev)."""
     require_role(user, Role.SUPER_ADMIN, Role.ADMIN, Role.DEV, Role.STAFF)
 
     thread = db.get(CopilotThread, thread_id)
-    if not thread or thread.deleted_at is not None or str(thread.user_id) != str(user.id):
+    if not thread or thread.deleted_at is not None:
+        raise AppError("Copilot thread not found.", 404)
+
+    is_owner = str(thread.user_id) == str(user.id)
+    if not is_owner and not _is_admin_role(user):
         raise AppError("Copilot thread not found.", 404)
 
     thread.deleted_at = datetime.now(timezone.utc)
+    if not is_owner:
+        db.add(
+            AuditEvent(
+                actor_id=user.id,
+                action="copilot.thread.admin_delete",
+                entity_type="copilot_threads",
+                entity_id=str(thread.id),
+                details={"owner_user_id": str(thread.user_id), "title": thread.title},
+            )
+        )
     db.commit()
     return {"ok": True, "thread_id": thread_id}
 

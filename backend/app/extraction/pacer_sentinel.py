@@ -21,7 +21,7 @@ from app.services.gemini_account_service import get_current_pt_cycle_date
 logger = logging.getLogger(__name__)
 
 SAFE_RPM_CEILING: int = 13
-SAFE_TPM_CEILING: int = 200_000
+SAFE_TPM_CEILING: int = 220_000
 SAFE_RPD_CEILING: int = 480
 
 

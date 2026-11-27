@@ -13,6 +13,8 @@ function ComparisonContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const tenureId = searchParams.get("tenure_id");
+  const highlightEntryId = searchParams.get("highlight_entry");
+  const highlightCompany = searchParams.get("highlight_company");
   const initCalledRef = useRef(false);
 
   useEffect(() => {
@@ -91,7 +93,11 @@ function ComparisonContent() {
       </div>
 
       {/* Side-by-Side Comparison Matrix for this Tenure */}
-      <ComparisonMatrix tenureId={tenureId} />
+      <ComparisonMatrix
+        tenureId={tenureId}
+        highlightEntryId={highlightEntryId}
+        highlightCompany={highlightCompany}
+      />
     </div>
   );
 }

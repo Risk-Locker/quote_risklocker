@@ -23,7 +23,7 @@ def test_evaluate_model_eligibility_accepts_flash_lite():
     assert meta["id"] == "gemini-3.1-flash-lite"
     assert meta["rpd_limit"] == 480
     assert meta["rpm_limit"] == 13
-    assert meta["tpm_limit"] == 200_000
+    assert meta["tpm_limit"] == 220_000
 
     model_35 = {
         "name": "models/gemini-3.5-flash-lite",

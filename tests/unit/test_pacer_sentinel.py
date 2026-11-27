@@ -71,15 +71,15 @@ def test_rolling_safety_ceilings_enforced():
     assert can_proceed is True
     sentinel.record_dispatch(slot_idx=1, now=now, tokens=120_000)
 
-    # Second request with 90k tokens would push rolling total to 210k > 200k TPM ceiling
+    # Second request with 110k tokens would push rolling total to 230k > 220k TPM ceiling
     can_proceed, reason = sentinel.check_slot_limits(
         slot_idx=1,
         now=now + 5.0,
-        estimated_tokens=90_000,
+        estimated_tokens=110_000,
     )
     assert can_proceed is False
     assert reason is not None
-    assert "TPM ceiling (200,000 tokens/min) reached" in reason
+    assert "TPM ceiling (220,000 tokens/min) reached" in reason
 
 
 def test_acquire_pacing_and_slot_round_robin():

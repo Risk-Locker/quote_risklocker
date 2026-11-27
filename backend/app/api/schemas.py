@@ -728,7 +728,7 @@ class CopilotThreadUpdateRequest(StrictRequest):
 
 
 class CopilotStreamRequest(StrictRequest):
-    message: str = Field(min_length=1, max_length=4000)
+    message: str = Field(min_length=1, max_length=60000)
     enable_web_research: bool = False
     page_context: dict[str, Any] | None = None
 
@@ -750,7 +750,11 @@ class CopilotPolicyUpdateRequest(StrictRequest):
     admin_daily_turns: int | None = Field(default=None, ge=10, le=1000)
     admin_daily_tokens: int | None = Field(default=None, ge=10000, le=5000000)
     max_tool_hops: int | None = Field(default=None, ge=1, le=8)
-    max_input_tokens_per_turn: int | None = Field(default=None, ge=2000, le=40000)
+    max_input_tokens_per_turn: int | None = Field(default=None, ge=2000, le=220000)
+    max_tokens_per_turn: int | None = Field(default=None, ge=10000, le=440000)
+    staff_max_tokens_per_turn: int | None = Field(default=None, ge=5000, le=220000)
+    warn_turn_tokens: int | None = Field(default=None, ge=2000, le=100000)
+    copilot_allow_shared_spillover: bool | None = None
 
 
 # --- Quotation Insights & Hit and Miss Tracking ---

@@ -9,11 +9,12 @@ import {
   PushPin,
   Trash,
   Check,
+  Users,
   X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import type { CopilotThread } from "./types";
+import type { CopilotAdminUser, CopilotThread } from "./types";
 
 type CopilotInboxSidebarProps = {
   threads: CopilotThread[];
@@ -26,6 +27,11 @@ type CopilotInboxSidebarProps = {
   onRenameThread: (id: string, title: string) => Promise<void>;
   onTogglePin: (id: string, pinned: boolean) => Promise<void>;
   onDeleteThread: (id: string) => Promise<void>;
+  isAdminUser?: boolean;
+  adminUsers?: CopilotAdminUser[];
+  viewingUserId?: string | null;
+  isReadOnlyOversight?: boolean;
+  onSelectViewingUser?: (uid: string | null) => void;
 };
 
 function bucketThreadDate(iso?: string | null): "Today" | "Yesterday" | "Last 7 Days" | "Older" {
@@ -51,6 +57,11 @@ export function CopilotInboxSidebar({
   onRenameThread,
   onTogglePin,
   onDeleteThread,
+  isAdminUser = false,
+  adminUsers = [],
+  viewingUserId = null,
+  isReadOnlyOversight = false,
+  onSelectViewingUser,
 }: CopilotInboxSidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -102,7 +113,7 @@ export function CopilotInboxSidebar({
 
   function renderThreadRow(t: CopilotThread) {
     const isActive = t.id === activeThreadId;
-    const isEditing = editingId === t.id;
+    const isEditing = editingId === t.id && !isReadOnlyOversight;
 
     return (
       <div
@@ -176,33 +187,37 @@ export function CopilotInboxSidebar({
               } transition-opacity`}
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                type="button"
-                onClick={() => onTogglePin(t.id, !t.is_pinned)}
-                title={t.is_pinned ? "Unpin" : "Pin"}
-                className={`p-1 rounded cursor-pointer ${
-                  isActive ? "hover:bg-white/15 text-neutral-200" : "hover:bg-neutral-200 text-neutral-500"
-                }`}
-              >
-                <PushPin size={12} weight={t.is_pinned ? "fill" : "regular"} />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingId(t.id);
-                  setEditingTitle(t.title);
-                }}
-                title="Rename"
-                className={`p-1 rounded cursor-pointer ${
-                  isActive ? "hover:bg-white/15 text-neutral-200" : "hover:bg-neutral-200 text-neutral-500"
-                }`}
-              >
-                <PencilSimple size={12} />
-              </button>
+              {!isReadOnlyOversight && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onTogglePin(t.id, !t.is_pinned)}
+                    title={t.is_pinned ? "Unpin" : "Pin"}
+                    className={`p-1 rounded cursor-pointer ${
+                      isActive ? "hover:bg-white/15 text-neutral-200" : "hover:bg-neutral-200 text-neutral-500"
+                    }`}
+                  >
+                    <PushPin size={12} weight={t.is_pinned ? "fill" : "regular"} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingId(t.id);
+                      setEditingTitle(t.title);
+                    }}
+                    title="Rename"
+                    className={`p-1 rounded cursor-pointer ${
+                      isActive ? "hover:bg-white/15 text-neutral-200" : "hover:bg-neutral-200 text-neutral-500"
+                    }`}
+                  >
+                    <PencilSimple size={12} />
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => setDeleteTarget(t)}
-                title="Delete"
+                title={isReadOnlyOversight ? "Delete user chat (Admin)" : "Delete"}
                 className={`p-1 rounded cursor-pointer ${
                   isActive ? "hover:bg-white/15 text-rose-300" : "hover:bg-rose-50 text-rose-600"
                 }`}
@@ -218,16 +233,53 @@ export function CopilotInboxSidebar({
 
   return (
     <div className="flex h-full flex-col border-r border-[var(--rl-border)] bg-neutral-50/70">
-      <div className="p-3 border-b border-[var(--rl-border)] space-y-2">
-        <Button
-          type="button"
-          size="sm"
-          onClick={onNewChat}
-          className="w-full h-8 text-xs justify-center gap-1.5"
-          icon={<Plus size={13} weight="bold" />}
-        >
-          New Chat
-        </Button>
+      <div className="p-3 border-b border-[var(--rl-border)] flex flex-col gap-2">
+        {isAdminUser && adminUsers.length > 0 && onSelectViewingUser && (
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
+              <Users size={11} weight="bold" />
+              <span>View Account Chats</span>
+            </label>
+            <select
+              value={viewingUserId || ""}
+              onChange={(e) => onSelectViewingUser(e.target.value || null)}
+              className="w-full rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-white px-2 py-1.5 text-[11px] font-medium text-[var(--rl-text-strong)] focus:outline-none focus:border-[var(--rl-black)]"
+            >
+              <option value="">My Chats (Personal)</option>
+              {adminUsers
+                .filter((u) => !u.is_self)
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.role}) · {u.thread_count} chat{u.thread_count === 1 ? "" : "s"}
+                    {u.tokens_used_today > 0 ? ` · ${Math.round(u.tokens_used_today / 1000)}k tok` : ""}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
+
+        {!isReadOnlyOversight ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={onNewChat}
+            className="w-full h-8 text-xs justify-center gap-1.5"
+            icon={<Plus size={13} weight="bold" />}
+          >
+            New Chat
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => onSelectViewingUser?.(null)}
+            className="w-full h-8 text-xs justify-center"
+          >
+            ← Back to My Chats
+          </Button>
+        )}
+
         <div className="relative">
           <MagnifyingGlass
             size={13}
@@ -243,13 +295,13 @@ export function CopilotInboxSidebar({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-3">
+      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-3">
         {loading && threads.length === 0 ? (
           <div className="p-3 text-center text-[11px] text-[var(--rl-text-muted)]">Loading sessions...</div>
         ) : null}
 
         {grouped.pinned.length > 0 && (
-          <div className="space-y-0.5">
+          <div className="flex flex-col gap-0.5">
             <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
               Pinned
             </div>
@@ -261,7 +313,7 @@ export function CopilotInboxSidebar({
           const list = grouped.buckets[label];
           if (!list.length) return null;
           return (
-            <div key={label} className="space-y-0.5">
+            <div key={label} className="flex flex-col gap-0.5">
               <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--rl-text-muted)]">
                 {label}
               </div>
@@ -271,8 +323,8 @@ export function CopilotInboxSidebar({
         })}
 
         {!loading && threads.length === 0 && (
-          <div className="p-4 text-center space-y-1.5 text-[var(--rl-text-muted)]">
-            <ChatCircleText size={20} className="mx-auto opacity-60" />
+          <div className="p-4 text-center flex flex-col items-center gap-1.5 text-[var(--rl-text-muted)]">
+            <ChatCircleText size={20} className="opacity-60" />
             <p className="text-[11px]">No saved conversations yet.</p>
           </div>
         )}
@@ -283,8 +335,12 @@ export function CopilotInboxSidebar({
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-        title="Delete Chat Session"
-        message={`Delete "${deleteTarget?.title || "this chat"}"? This removes it from your inbox.`}
+        title={isReadOnlyOversight ? "Delete User Chat Session" : "Delete Chat Session"}
+        message={
+          isReadOnlyOversight
+            ? `Delete "${deleteTarget?.title || "this chat"}" belonging to ${deleteTarget?.owner_name || "this user"}? This action is audited.`
+            : `Delete "${deleteTarget?.title || "this chat"}"? This removes it from your inbox.`
+        }
         confirmLabel="Delete"
         loading={deleting}
         onConfirm={confirmDelete}

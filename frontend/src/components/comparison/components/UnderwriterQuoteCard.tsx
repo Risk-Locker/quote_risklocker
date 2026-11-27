@@ -36,6 +36,7 @@ export interface UnderwriterQuoteCardProps {
   };
   activeIds: string[];
   isViewingPdf: boolean;
+  isSpotlighted?: boolean;
   visibleRanksMap: Record<string, number>;
   visibleDisplayEntriesCount: number;
   editingRankEntryId: string | null;
@@ -65,6 +66,7 @@ export function UnderwriterQuoteCard({
   group,
   activeIds,
   isViewingPdf,
+  isSpotlighted = false,
   visibleRanksMap,
   visibleDisplayEntriesCount,
   editingRankEntryId,
@@ -128,7 +130,9 @@ export function UnderwriterQuoteCard({
     <div
       id={`comparison-entry-${entry.id}`}
       key={entry.id}
-      className={`w-[286px] shrink-0 rounded-2xl bg-white flex flex-col justify-between transition-all duration-200 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${isViewingPdf
+      className={`w-[286px] shrink-0 rounded-2xl bg-white flex flex-col justify-between transition-all duration-300 relative break-inside-avoid print:w-auto print:flex-1 print:min-w-[200px] ${isSpotlighted
+          ? "border-2 border-emerald-600 ring-4 ring-emerald-500/30 shadow-xl scale-[1.01]"
+          : isViewingPdf
           ? "border-2 border-[#1b1717] ring-4 ring-[#1b1717]/15 shadow-xl scale-[1.01]"
           : isWinner
             ? "border-2 border-[#1b1717] shadow-lg ring-1 ring-black/5"
@@ -136,7 +140,15 @@ export function UnderwriterQuoteCard({
         }`}
     >
       {/* Equal Height Standardized Top Slot (h-8) for Perfect Grid Row Alignment */}
-      {isWinner ? (
+      {isSpotlighted ? (
+        <div className="h-8 bg-emerald-600 text-white text-xs font-bold px-3 flex items-center justify-between rounded-t-[6px] shrink-0">
+          <span className="flex items-center gap-1.5">
+            <ShieldCheck size={14} weight="fill" />
+            REFERENCED BY COPILOT
+          </span>
+          <span className="text-[10px] font-mono">Rank #{visibleRanksMap[entry.id] ?? entry.rank ?? 1}</span>
+        </div>
+      ) : isWinner ? (
         <div className="h-8 bg-[#1b1717] text-white text-xs font-bold px-3 flex items-center justify-between rounded-t-[6px] shrink-0 print:bg-black print:text-white">
           <span className="flex items-center gap-1.5">
             <Star weight="fill" size={13} className="text-amber-400" />

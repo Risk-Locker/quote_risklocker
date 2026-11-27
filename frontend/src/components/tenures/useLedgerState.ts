@@ -72,6 +72,7 @@ export function useLedgerState() {
   const [loadingTenures, setLoadingTenures] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [focusedTenureIds, setFocusedTenureIds] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [policyFilter, setPolicyFilter] = useState<"all" | "issued" | "pending">("all");
 
@@ -173,6 +174,7 @@ export function useLedgerState() {
     category,
     stageFilter,
     debouncedSearch,
+    focusedTenureIds,
     statusFilter,
     policyFilter,
     showHidden,
@@ -328,6 +330,9 @@ export function useLedgerState() {
       if (debouncedSearch.trim()) {
         params.set("search", debouncedSearch.trim());
       }
+      if (focusedTenureIds.length > 0) {
+        params.set("tenure_ids", focusedTenureIds.join(","));
+      }
       if (statusFilter && statusFilter !== "all") {
         params.set("status", statusFilter);
       }
@@ -369,6 +374,7 @@ export function useLedgerState() {
     stageFilter,
     policyFilter,
     debouncedSearch,
+    focusedTenureIds,
     statusFilter,
     showHidden,
     sortBy,
@@ -562,8 +568,9 @@ export function useLedgerState() {
       statusFilter !== "all" ||
       policyFilter !== "all" ||
       searchInput.trim() !== "" ||
+      focusedTenureIds.length > 0 ||
       showHidden,
-    [selectedMonth, anchor, category, stageFilter, statusFilter, policyFilter, searchInput, showHidden]
+    [selectedMonth, anchor, category, stageFilter, statusFilter, policyFilter, searchInput, focusedTenureIds, showHidden]
   );
 
   const resetFilters = useCallback(() => {
@@ -576,6 +583,7 @@ export function useLedgerState() {
     setPolicyFilter("all");
     setSearchInput("");
     setDebouncedSearch("");
+    setFocusedTenureIds([]);
     setShowHidden(false);
     setPage(1);
   }, [currentYear]);
@@ -882,6 +890,8 @@ export function useLedgerState() {
     search: searchInput,
     setSearch: setSearchInput,
     debouncedSearch,
+    focusedTenureIds,
+    setFocusedTenureIds,
     statusFilter,
     setStatusFilter,
     policyFilter,

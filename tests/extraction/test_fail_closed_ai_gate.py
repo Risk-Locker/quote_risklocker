@@ -23,7 +23,7 @@ def test_fail_closed_raises_when_no_api_keys(tmp_path: Path):
             orchestrator.extract_file(dummy_pdf, fail_closed=True)
 
         assert exc_info.value.status_code == 503
-        assert "No GEMINI_API_KEY configured" in exc_info.value.message
+        assert "No Gemini API key configured" in exc_info.value.message
 
 
 def test_fail_closed_raises_when_quota_exhausted_429(tmp_path: Path):
@@ -63,5 +63,5 @@ def test_fail_closed_false_falls_back_with_warning(tmp_path: Path):
         # Must have recorded warning
         full_rec = res.get("full_record") or {}
         warnings = full_rec.get("warnings") or []
-        assert any("No GEMINI_API_KEY configured" in w for w in warnings)
+        assert any("No Gemini API key configured" in w for w in warnings)
 

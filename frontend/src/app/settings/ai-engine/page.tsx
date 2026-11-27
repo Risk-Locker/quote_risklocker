@@ -328,7 +328,7 @@ export default function SettingsAiEnginePage() {
               Gemini AI Fleet Management
             </h1>
             <p className="text-[14px] text-[var(--rl-text-muted)]">
-              Multi-account rate-limiting guard. Primary key loaded from <code className="font-mono text-gray-700 bg-gray-100 px-1 py-0.5 rounded">.env</code>; additional accounts validated live and saved in Settings.
+              Multi-account rate-limiting guard. All API keys are validated live and managed securely in Postgres via Settings.
             </p>
           </div>
           <Button
@@ -358,7 +358,7 @@ export default function SettingsAiEnginePage() {
                 <span className="text-xs text-gray-500">accounts</span>
               </div>
               <span className="mt-2 text-[11px] text-gray-500 block">
-                1 from .env, {Math.max(0, accounts.length - 1)} added manually
+                Managed in Settings → AI Engine (DB-backed)
               </span>
             </div>
           </Card>
@@ -644,14 +644,8 @@ export default function SettingsAiEnginePage() {
                         </td>
 
                         <td className="py-3 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-mono ${
-                              acc.source === "env"
-                                ? "bg-purple-100 text-purple-800"
-                                : "bg-blue-100 text-blue-800"
-                            }`}
-                          >
-                            {acc.source === "env" ? ".env (Primary)" : "Manual"}
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-100 text-blue-800">
+                            Settings (DB)
                           </span>
                         </td>
 
@@ -758,24 +752,15 @@ export default function SettingsAiEnginePage() {
                               )}
                             </button>
 
-                            {acc.source === "manual" ? (
-                              <button
-                                type="button"
-                                disabled={deletingId === acc.id}
-                                onClick={() => handleDeleteKey(acc.id, acc.label)}
-                                title="Remove key from database and pool"
-                                className="text-gray-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-                              >
-                                <Trash size={14} weight="bold" />
-                              </button>
-                            ) : (
-                              <span
-                                title="Primary key defined in .env cannot be deleted from the UI, but can be paused/rested"
-                                className="text-gray-300 p-1 cursor-not-allowed"
-                              >
-                                <Trash size={14} weight="regular" />
-                              </span>
-                            )}
+                            <button
+                              type="button"
+                              disabled={deletingId === acc.id}
+                              onClick={() => handleDeleteKey(acc.id, acc.label)}
+                              title="Remove key from database and pool"
+                              className="text-gray-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
+                            >
+                              <Trash size={14} weight="bold" />
+                            </button>
                           </div>
                         </td>
                       </tr>

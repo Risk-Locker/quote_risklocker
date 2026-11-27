@@ -129,7 +129,7 @@ export function GeminiQuotaTooltipContent({
           </span>
         </div>
         <p className="text-gray-300 text-[11px] leading-relaxed">
-          No <code className="font-mono text-amber-300">GEMINI_API_KEY</code> set in <code className="font-mono text-gray-200">.env</code>. Uploads will use offline deterministic regex fallback.
+          No Gemini API keys configured yet. An Admin or System Manager can add keys in <strong className="text-white">Settings → AI Engine</strong>.
         </p>
         <a
           href="https://aistudio.google.com/apikey"
@@ -216,7 +216,7 @@ export function GeminiQuotaTooltipContent({
 
         <div className="bg-amber-950/40 border border-amber-900/80 rounded p-2 text-[11px] text-amber-200">
           <p className="text-[10px] text-amber-300 leading-snug">
-            Free tier rate limit reached (15 RPM or 1,500 requests/day). Add a secondary key to GEMINI_API_KEYS for automatic failover.
+            Rate limit reached across active keys. Add an additional key in Settings → AI Engine for automatic failover.
           </p>
         </div>
 

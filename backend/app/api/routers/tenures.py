@@ -450,6 +450,7 @@ def list_tenures(
     category: str | None = None,
     policy_status: str = Query("all", description="all, issued, or pending"),
     sub_agent: str | None = None,
+    tenure_ids: str | None = Query(default=None, description="Comma-separated tenure UUIDs to isolate"),
     show_hidden: bool = False,
     show_discarded: bool = False,
     sort_by: str | None = Query("last_activity", description="Sort by last_activity, vehicle_no, customer_name, stage, coverage_end_date, coverage_period, created_at, pic"),
@@ -463,6 +464,8 @@ def list_tenures(
     norm_anchor = normalize_anchor(anchor)
     parsed_year, parsed_month = parse_year_month(year, month)
     target_year = parsed_year
+    raw_tids = tenure_ids if isinstance(tenure_ids, str) else None
+    parsed_tenure_ids = tuple(t.strip() for t in (raw_tids or "").split(",") if t.strip()) or None
 
     spec = LedgerFilterSpec(
         year=parsed_year,
@@ -474,6 +477,7 @@ def list_tenures(
         policy_status=normalize_policy_status(policy_status),
         sub_agent=sub_agent,
         search=search,
+        tenure_ids=parsed_tenure_ids,
         show_hidden=show_hidden,
         show_discarded=show_discarded,
     )
@@ -530,6 +534,7 @@ def list_tenures(
         policy_status="all",
         sub_agent=sub_agent,
         search=search,
+        tenure_ids=parsed_tenure_ids,
         show_hidden=show_hidden,
         show_discarded=show_discarded,
     )

@@ -70,7 +70,7 @@ class Settings:
     gemini_model: str = "gemini-3.1-flash-lite"
     gemini_max_rpd_per_key: int = 480
     gemini_max_rpm_per_key: int = 13
-    gemini_max_tpm_per_key: int = 200_000
+    gemini_max_tpm_per_key: int = 220_000
     gemini_max_prompt_tokens: int = 60_000
     gemini_max_accounts: int = 16
     ai_readonly_database_url: str = ""
@@ -325,13 +325,11 @@ def get_settings() -> Settings:
         session_cookie_secure=session_cookie_secure,
         trash_retention_days=_int("TRASH_RETENTION_DAYS", 14),
         cors_origins=origins,
-        gemini_api_keys=tuple(
-            k.strip() for k in (os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY") or "").split(",") if k.strip()
-        ),
+        gemini_api_keys=(),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip() or "gemini-3.1-flash-lite",
         gemini_max_rpd_per_key=_bounded_int("GEMINI_MAX_RPD_PER_KEY", 480, 10, 480),
         gemini_max_rpm_per_key=_bounded_int("GEMINI_MAX_RPM_PER_KEY", 13, 1, 13),
-        gemini_max_tpm_per_key=_bounded_int("GEMINI_MAX_TPM_PER_KEY", 200_000, 1000, 200_000),
+        gemini_max_tpm_per_key=_bounded_int("GEMINI_MAX_TPM_PER_KEY", 220_000, 1000, 220_000),
         gemini_max_prompt_tokens=_bounded_int("GEMINI_MAX_PROMPT_TOKENS", 60_000, 1000, 1_000_000),
         gemini_max_accounts=_bounded_int("GEMINI_MAX_ACCOUNTS", 16, 1, 32),
         ai_readonly_database_url=os.getenv("AI_READONLY_DATABASE_URL", "").strip(),

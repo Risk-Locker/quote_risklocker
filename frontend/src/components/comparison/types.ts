@@ -1,5 +1,7 @@
 export interface ComparisonMatrixProps {
   tenureId: string;
+  highlightEntryId?: string | null;
+  highlightCompany?: string | null;
 }
 
 export interface TenureSpec {

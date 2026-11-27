@@ -19,6 +19,7 @@ export interface TenureRowProps {
   onToggleSelectGroup: (ids: string[], isSelected: boolean) => void;
   onDeleteTarget: (target: { id: string; vehicleNo: string; allIds: string[] }) => void;
   highlightedTenureId: string | null;
+  highlightedTenureIds?: Set<string>;
   pics: PicItem[];
   density?: LedgerDensity;
   hiddenColumns?: string[];
@@ -37,6 +38,7 @@ export function TenureRowComponent({
   onToggleSelectGroup,
   onDeleteTarget,
   highlightedTenureId,
+  highlightedTenureIds,
   pics,
   density = "comfortable",
   hiddenColumns = [],
@@ -66,7 +68,8 @@ export function TenureRowComponent({
 
   const isGroupSelected = group.tenures.some((t) => selectedTenureIds.includes(t.id));
   const displayName = getVehicleDisplayName(group.vehicle_no, group.chassis_no, group.engine_no);
-  const isHighlighted = highlightedTenureId === mainTenure.id;
+  const isHighlighted =
+    highlightedTenureId === mainTenure.id || Boolean(highlightedTenureIds?.has(mainTenure.id));
   const isLost = stageConf.isLost;
   const stickyBg = isHighlighted
     ? "bg-emerald-50/95"

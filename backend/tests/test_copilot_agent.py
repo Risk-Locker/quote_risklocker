@@ -216,6 +216,8 @@ def _seed_agency_data(SessionMaker):
             "admin": admin.id,
             "staff_a": staff_a.id,
             "staff_b": staff_b.id,
+            "veh1": veh1.id,
+            "veh2": veh2.id,
             "t_2025": t_2025.id,
             "t_2026": t_2026.id,
             "t_888": t_888.id,
@@ -589,3 +591,257 @@ def test_copilot_threads_privacy_and_artifact_download_api(sqlite_db, monkeypatc
     r_del = client_a.delete(f"/api/copilot/threads/{thread_id}", headers=headers_a)
     assert r_del.status_code == 200
     assert client_a.get("/api/copilot/threads", headers=headers_a).json()["threads"] == []
+
+
+# ---------------------------------------------------------------------------
+# 5. Dual-Barrel 80s Reloader, Fair-Queue, Bulk 400-Plate, Admin Oversight & Ledger Deep-Link Tests
+# ---------------------------------------------------------------------------
+
+
+def test_dual_barrel_80s_reloader_max_headroom_and_strict_copilot_only(monkeypatch):
+    import time as _t
+
+    monkeypatch.delenv("GEMINI_MAX_TPM_PER_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_MAX_RPM_PER_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_MAX_RPD_PER_KEY", raising=False)
+
+    gw = GeminiFleetGateway(force_memory=True)
+    # 5-key setup: 1 dedicated copilot_only + 4 shared/extraction keys
+    accounts = [
+        GeminiAccount(id="k_chat", key="AIzaSyChatKey000000000000000000000", label="Chat Key", status="ready", workload_scope="copilot_only"),
+        GeminiAccount(id="k_ext1", key="AIzaSyExt1Key000000000000000000000", label="Ext 1", status="ready", workload_scope="all"),
+        GeminiAccount(id="k_ext2", key="AIzaSyExt2Key000000000000000000000", label="Ext 2", status="ready", workload_scope="all"),
+        GeminiAccount(id="k_ext3", key="AIzaSyExt3Key000000000000000000000", label="Ext 3", status="ready", workload_scope="extraction_only"),
+        GeminiAccount(id="k_ext4", key="AIzaSyExt4Key000000000000000000000", label="Ext 4", status="ready", workload_scope="extraction_only"),
+    ]
+    fake_pool = SimpleNamespace(
+        _parallel_models=("gemini-3.1-flash-lite", "gemini-3.5-flash-lite"),
+        _max_rpd_per_key=480,
+        _max_rpm_per_key=13,
+        _max_tpm_per_key=220_000,
+        sync_accounts=lambda **kw: None,
+        get_accounts=lambda: list(accounts),
+        record_success=lambda **kw: None,
+        record_failure=lambda *a, **kw: None,
+    )
+    monkeypatch.setattr("app.services.ai_fleet_gateway.get_key_pool", lambda: fake_pool)
+
+    # 1. Small chat (~500 tok) fires on Barrel 1 (k_chat::3.1-flash-lite)
+    r1, wait1, daily1 = gw.reserve_lane(estimated_tokens=500, purpose="copilot_agent", priority=10)
+    assert r1 is not None and r1.account_id == "k_chat" and wait1 == 0.0 and daily1 is False
+    gw.commit_lane(r1, prompt_tokens=400, candidate_tokens=100, total_tokens=500, purpose="copilot_agent")
+
+    # Advance clock past 1.8s same-key gap
+    for st in gw._mem_lanes.values():
+        st.last_dispatched_at -= 2.5
+
+    # 2. Huge prompt (218,000 tok) prefers Barrel 2 (220k > 219.5k remaining on Barrel 1)
+    r2, wait2, _ = gw.reserve_lane(estimated_tokens=218_000, purpose="copilot_agent", priority=10)
+    assert r2 is not None and r2.account_id == "k_chat" and r2.lane_id != r1.lane_id and wait2 == 0.0
+    gw.commit_lane(r2, prompt_tokens=217_000, candidate_tokens=1_000, total_tokens=218_000, purpose="copilot_agent")
+
+    for st in gw._mem_lanes.values():
+        st.last_dispatched_at -= 2.5
+
+    # 3. Second huge prompt (200,000 tok) switches back to Barrel 1 (219.5k >= 200k), NEVER spills onto k_ext*!
+    r3, wait3, _ = gw.reserve_lane(estimated_tokens=200_000, purpose="copilot_agent", priority=10)
+    assert r3 is not None and r3.account_id == "k_chat" and r3.lane_id == r1.lane_id and wait3 == 0.0
+    gw.commit_lane(r3, prompt_tokens=199_000, candidate_tokens=1_000, total_tokens=200_000, purpose="copilot_agent")
+
+    for st in gw._mem_lanes.values():
+        st.last_dispatched_at -= 2.5
+
+    # 4. Third huge prompt (200,000 tok) within 80s: both k_chat barrels TPM-saturated, MUST NOT spill to k_ext1..4!
+    r4, wait4, daily4 = gw.reserve_lane(estimated_tokens=200_000, purpose="copilot_agent", priority=10)
+    assert r4 is None and daily4 is False
+    assert 60.0 <= wait4 <= 81.0
+
+    # 5. Extraction never touches k_chat
+    for _ in range(4):
+        for st in gw._mem_lanes.values():
+            st.last_dispatched_at -= 2.5
+        re_lane, _, _ = gw.reserve_lane(estimated_tokens=8_000, purpose="extraction", priority=100)
+        assert re_lane is not None and re_lane.account_id != "k_chat"
+
+    # 6. Barrel snapshot exposes live remaining TPM & reload ETA
+    barrels = gw.get_copilot_barrel_snapshot()
+    assert len(barrels) == 2
+    assert all(b["account_id"] == "k_chat" for b in barrels)
+    assert all(b["tpm_remaining"] < 25_000 for b in barrels)
+    assert any(b["reload_in_sec"] > 0 for b in barrels)
+
+    # 7. After 80.5s window expires, Barrel 1 reloads back to 220k
+    now_plus = _t.time() - 81.0
+    for st in gw._mem_lanes.values():
+        if st.account_id == "k_chat":
+            st.recent_calls_json = [now_plus]
+            st.recent_tokens_json = [[now_plus, 200_000]]
+    r5, wait5, _ = gw.reserve_lane(estimated_tokens=200_000, purpose="copilot_agent", priority=10)
+    assert r5 is not None and r5.account_id == "k_chat" and wait5 == 0.0
+
+
+def test_copilot_fair_queue_orchestrator_work_conserving_and_interleaving():
+    import threading
+    from app.services.copilot_orchestrator import CopilotFairQueueOrchestrator
+
+    orch = CopilotFairQueueOrchestrator(max_concurrent_turns=2)
+    # Single active user gets immediate access across bursts (no idle-user splitting)
+    with orch.acquire_turn_slot(user_id="u1", estimated_tokens=500) as slot1:
+        assert slot1["user_id"] == "u1"
+        with orch.acquire_turn_slot(user_id="u1", estimated_tokens=500) as slot2:
+            assert slot2["user_id"] == "u1"
+
+    # Multi-user contention interleaves fairly when single-concurrency slot is held
+    orch_single = CopilotFairQueueOrchestrator(max_concurrent_turns=1)
+    order: list[str] = []
+    ready_u2 = threading.Event()
+    ready_u3 = threading.Event()
+
+    def run_user(uid: str, ev_after: threading.Event | None = None):
+        with orch_single.acquire_turn_slot(user_id=uid, estimated_tokens=1_000):
+            order.append(uid)
+            if ev_after:
+                ev_after.set()
+
+    with orch_single.acquire_turn_slot(user_id="u1", estimated_tokens=1_000):
+        t2 = threading.Thread(target=run_user, args=("u2", ready_u2))
+        t3 = threading.Thread(target=run_user, args=("u3", ready_u3))
+        t2.start()
+        t3.start()
+        # Wait briefly until both threads are queued
+        import time as _t
+        _t.sleep(0.08)
+    t2.join(timeout=2.0)
+    t3.join(timeout=2.0)
+    assert set(order) == {"u2", "u3"}
+
+
+def test_bulk_check_plates_400_entries_history_and_client_records(sqlite_db):
+    from app.models.tables import ClientRecord, VehiclePlateHistory
+    from app.services.copilot_agent_service import _collect_verified_links, _execute_bulk_check_plates
+
+    ids = _seed_agency_data(sqlite_db)
+    with sqlite_db() as db:
+        # Add historical plate + ClientRecord entry
+        db.add(
+            VehiclePlateHistory(
+                id=new_id(),
+                tracked_vehicle_id=ids["veh1"],
+                plate_no="OLD9999",
+            )
+        )
+        db.add(
+            ClientRecord(
+                id=new_id(),
+                insurer_no="INS-9901",
+                vehicle_no="CR 7777 A",
+                customer_name="Client Record Co",
+                insurance_company="Allianz",
+            )
+        )
+        db.commit()
+
+        # Build 400 plates including known ledger plate, historical plate, client_record plate, and missing plates
+        plates = ["JWX 1234", "VAA888", "old-9999", "CR7777A"] + [f"TEST{i:04d}" for i in range(396)]
+        summary, matched_rows = _execute_bulk_check_plates(db, plates)
+
+        assert summary["total_checked"] == 400
+        assert summary["found_count"] == 4
+        assert summary["missing_count"] == 396
+        assert len(summary["missing_plates"]) == 396
+        assert any(h["queried_plate"] == "OLD-9999" for h in summary["matched_via_history"])
+        assert len(matched_rows) == 4
+
+        # Verify links filter cleanly: when answer only lists missing plates, no unrelated vehicle links attach
+        missing_only_links = _collect_verified_links(
+            matched_rows,
+            final_markdown="Missing entries:\n- TEST0001\n- TEST0002",
+        )
+        assert missing_only_links == []
+
+        # When answer mentions 2 existing plates, a batch select & highlight ledger link is emitted
+        matched_links = _collect_verified_links(
+            matched_rows,
+            final_markdown="Found **JWX 1234** and **VAA 888** in the ledger.",
+        )
+        assert any(lnk["kind"] == "ledger_batch" and "select=true" in lnk["href"] for lnk in matched_links)
+
+
+def test_admin_oversight_readonly_plus_delete_and_ledger_tenure_ids(sqlite_db):
+    ids = _seed_agency_data(sqlite_db)
+    app = create_app()
+
+    def override_get_db():
+        with sqlite_db() as db:
+            yield db
+
+    from app.api import deps as api_deps
+    from fastapi import Header
+
+    def override_current_user(x_test_user: str = Header(default="")):
+        with sqlite_db() as db:
+            return db.get(User, x_test_user or ids["staff_a"])
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[api_deps.current_user] = override_current_user
+    settings = get_settings()
+
+    tok_admin = generate_session_token()
+    tok_staff_a = generate_session_token()
+    tok_staff_b = generate_session_token()
+    csrf_admin = csrf_token_for_session(tok_admin, settings.auth_hash_secret)
+    csrf_a = csrf_token_for_session(tok_staff_a, settings.auth_hash_secret)
+    csrf_b = csrf_token_for_session(tok_staff_b, settings.auth_hash_secret)
+
+    c_admin = TestClient(app)
+    c_admin.cookies.set(settings.session_cookie_name, tok_admin)
+    c_admin.cookies.set(settings.csrf_cookie_name, csrf_admin)
+    h_admin = {"X-CSRF-Token": csrf_admin, "X-Test-User": ids["admin"]}
+
+    c_a = TestClient(app)
+    c_a.cookies.set(settings.session_cookie_name, tok_staff_a)
+    c_a.cookies.set(settings.csrf_cookie_name, csrf_a)
+    h_a = {"X-CSRF-Token": csrf_a, "X-Test-User": ids["staff_a"]}
+
+    c_b = TestClient(app)
+    c_b.cookies.set(settings.session_cookie_name, tok_staff_b)
+    c_b.cookies.set(settings.csrf_cookie_name, csrf_b)
+    h_b = {"X-CSRF-Token": csrf_b, "X-Test-User": ids["staff_b"]}
+
+    # Staff A creates a thread
+    r_th = c_a.post("/api/copilot/threads", json={"title": "Alice Oversight Thread"}, headers=h_a)
+    assert r_th.status_code == 200
+    tid = r_th.json()["thread"]["id"]
+
+    # Staff B cannot list admin users or view Staff A's threads
+    assert c_b.get("/api/copilot/admin/users", headers=h_b).status_code == 403
+    assert c_b.get(f"/api/copilot/threads?user_id={ids['staff_a']}", headers=h_b).status_code == 403
+    assert c_b.delete(f"/api/copilot/threads/{tid}", headers=h_b).status_code == 404
+
+    # Admin can list users, view Staff A's thread read-only, CANNOT rename/stream into it, and CAN delete it
+    r_users = c_admin.get("/api/copilot/admin/users", headers=h_admin)
+    assert r_users.status_code == 200
+    assert any(u["id"] == ids["staff_a"] and u["thread_count"] >= 1 for u in r_users.json()["users"])
+
+    r_list = c_admin.get(f"/api/copilot/threads?user_id={ids['staff_a']}", headers=h_admin)
+    assert r_list.status_code == 200
+    assert any(t["id"] == tid for t in r_list.json()["threads"])
+
+    r_det = c_admin.get(f"/api/copilot/threads/{tid}", headers=h_admin)
+    assert r_det.status_code == 200
+    assert r_det.json()["read_only"] is True
+
+    # Admin cannot rename or message inside Staff A's thread
+    assert c_admin.patch(f"/api/copilot/threads/{tid}", json={"title": "Hijack"}, headers=h_admin).status_code == 404
+    assert c_admin.post(f"/api/copilot/threads/{tid}/stream", json={"message": "hello"}, headers=h_admin).status_code == 404
+
+    # Admin CAN delete Staff A's thread
+    r_adm_del = c_admin.delete(f"/api/copilot/threads/{tid}", headers=h_admin)
+    assert r_adm_del.status_code == 200
+
+    # Verify GET /tenures?tenure_ids=... filters cleanly to requested IDs
+    r_ten = c_admin.get(f"/api/tenures?tenure_ids={ids['t_2025']},{ids['t_888']}", headers=h_admin)
+    assert r_ten.status_code == 200
+    returned_ids = {item["id"] for item in r_ten.json()["items"]}
+    assert returned_ids == {ids["t_2025"], ids["t_888"]}
+

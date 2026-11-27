@@ -31,13 +31,13 @@ def test_gemini_38_flash_is_strictly_forbidden():
 
 
 def test_safe_limits_enforced_for_google_ai_studio_survival():
-    """Verify that RPM <= 13, RPD <= 480, and TPM <= 200,000 to prevent permanent account bans."""
+    """Verify that RPM <= 13, RPD <= 480, and TPM <= 220,000 to prevent permanent account bans."""
     assert ai_sharded_pool.SAFE_RPM_LIMIT_PER_SLOT <= 13
     assert ai_sharded_pool.SAFE_RPD_LIMIT_PER_SLOT <= 480
-    assert getattr(ai_sharded_pool, "SAFE_TPM_LIMIT_PER_SLOT", 0) <= 200_000
+    assert getattr(ai_sharded_pool, "SAFE_TPM_LIMIT_PER_SLOT", 0) <= 220_000
 
     settings = get_settings()
     assert settings.gemini_max_rpm_per_key <= 13
     assert settings.gemini_max_rpd_per_key <= 480
-    assert settings.gemini_max_tpm_per_key <= 200_000
+    assert settings.gemini_max_tpm_per_key <= 220_000
 

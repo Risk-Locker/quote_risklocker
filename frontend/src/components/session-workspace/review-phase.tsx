@@ -38,7 +38,17 @@ import { DeepRedetectProgressBanner } from "@/components/redetect/DeepRedetectPr
 import type { BenefitCardSummary } from "./types";
 import { useDeepRedetect } from "@/components/redetect/useDeepRedetect";
 
-export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () => void; onBack?: () => void }) {
+export function ReviewPhase({
+  id,
+  highlightField,
+  onNext,
+  onBack,
+}: {
+  id: string;
+  highlightField?: string;
+  onNext?: () => void;
+  onBack?: () => void;
+}) {
   const { workspace, loading, loadError, remoteSyncNotice, dismissRemoteSyncNotice } = useWorkspaceData();
   const { queueOperation, reload, save, discard, decideField } = useWorkspaceActions();
   const mutation = useWorkspaceMutation();
@@ -142,6 +152,14 @@ export function ReviewPhase({ id, onNext, onBack }: { id: string; onNext?: () =>
     state.setToastMessage(remoteSyncNotice);
     dismissRemoteSyncNotice();
   }, [remoteSyncNotice, dismissRemoteSyncNotice, state]);
+
+  useEffect(() => {
+    if (highlightField && !loading) {
+      setHighlightedFieldKey(highlightField);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => setHighlightedFieldKey(null), 4500);
+    }
+  }, [highlightField, loading]);
 
   useEffect(() => {
     return () => {
