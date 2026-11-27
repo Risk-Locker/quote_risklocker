@@ -111,8 +111,23 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          NODE_OPTIONS: "--max-old-space-size=1536"
+          NODE_OPTIONS: "--max-old-space-size=3072"
         run: npm run build
+
+      - name: Package frontend standalone bundle
+        run: |
+          test -f frontend/.next/standalone/server.js
+          test -d frontend/.next/standalone/.next/static
+          tar -czf frontend-standalone.tar.gz -C frontend/.next/standalone .
+          ls -lh frontend-standalone.tar.gz
+
+      - name: Upload frontend standalone artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-standalone
+          path: frontend-standalone.tar.gz
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Run frontend Playwright CI suite
         working-directory: frontend
@@ -154,6 +169,13 @@ jobs:
             exit 1
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Download frontend standalone artifact
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-standalone
+          path: .
 
       - name: Install rsync
         if: steps.secrets.outputs.ready == 'true'
@@ -201,6 +223,9 @@ jobs:
             --exclude "frontend/node_modules/" \
             --exclude ".venv/" \
             --exclude "frontend/.next/" \
+            --exclude "frontend/.lock-hash" \
+            --exclude "frontend/.next-standalone.tar.gz" \
+            --exclude "frontend-standalone.tar.gz" \
             --exclude ".qc-tmp/" \
             --exclude ".pytest_cache/" \
             --exclude ".agents/" \
@@ -213,6 +238,16 @@ jobs:
             --exclude "*.log" \
             --exclude "*.db" \
             ./ "$VPS_USER@$VPS_HOST:${DEPLOY_PATH}/"
+
+      - name: Upload frontend standalone bundle to VPS
+        if: steps.secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f frontend-standalone.tar.gz
+          rsync -az \
+            -e "ssh -i ~/.ssh/quote_deploy_key -o ServerAliveInterval=30 -o ServerAliveCountMax=8 -p ${VPS_PORT:-22}" \
+            frontend-standalone.tar.gz "$VPS_USER@$VPS_HOST:${DEPLOY_PATH}/frontend/.next-standalone.tar.gz"
 
       - name: Provision ClamAV on the VPS
         if: steps.secrets.outputs.ready == 'true'
@@ -304,21 +339,36 @@ jobs:
               echo "== Playwright Chromium already verified and operational."
             fi
 
-            # Frontend: fast dependency caching & incremental build
+            # Frontend: install pre-built standalone bundle from CI (avoids OOM on 3.7GB VPS),
+            # falling back to a low-memory local build only if non-x86_64 or artifact missing.
             cd frontend
-            LOCK_HASH=$(sha256sum package-lock.json | awk '{print $1}')
-            if [ ! -d node_modules ] || [ ! -f .lock-hash ] || [ "$(<.lock-hash)" != "$LOCK_HASH" ]; then
-              echo "== Dependencies changed; running npm ci..."
-              npm ci
-              echo "$LOCK_HASH" > .lock-hash
+            if [ "$(uname -m)" = "x86_64" ] && [ -f .next-standalone.tar.gz ]; then
+              echo "== Installing pre-built CI frontend standalone bundle..."
+              mkdir -p .next
+              rm -rf .next/standalone.new .next/standalone.old
+              mkdir -p .next/standalone.new
+              tar -xzf .next-standalone.tar.gz -C .next/standalone.new
+              if [ -d .next/standalone ]; then
+                mv .next/standalone .next/standalone.old
+              fi
+              mv .next/standalone.new .next/standalone
+              rm -rf .next/standalone.old .next-standalone.tar.gz
             else
-              echo "== Node dependencies up to date (lockfile matches; skipping npm ci)."
+              echo "== Fallback: stopping worker/frontend to free RAM before local build..."
+              pm2 stop rl-quote-worker rl-quote-frontend 2>/dev/null || true
+              LOCK_HASH=$(sha256sum package-lock.json | awk '{print $1}')
+              if [ ! -d node_modules ] || [ ! -f .lock-hash ] || [ "$(<.lock-hash)" != "$LOCK_HASH" ]; then
+                echo "== Dependencies changed; running npm ci..."
+                npm ci
+                echo "$LOCK_HASH" > .lock-hash
+              else
+                echo "== Node dependencies up to date (lockfile matches; skipping npm ci)."
+              fi
+              # Heap cap: the VPS has 3.7GB RAM with clamd resident; without a
+              # strict cap the Next build can trip the OOM killer mid-deploy.
+              echo "== Building frontend (low-memory fallback)..."
+              NODE_OPTIONS="--max-old-space-size=1024" npm run build
             fi
-
-            # Heap cap: the VPS has 3.7GB RAM with clamd resident; without a
-            # cap the Next build can trip the OOM killer mid-deploy.
-            echo "== Building frontend..."
-            NODE_OPTIONS="--max-old-space-size=1536" npm run build
             test -f .next/standalone/server.js && test -d .next/standalone/.next/static
 
             # Stop worker during migration/pre-flight to release pool connections cleanly
