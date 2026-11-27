@@ -845,3 +845,229 @@ def test_admin_oversight_readonly_plus_delete_and_ledger_tenure_ids(sqlite_db):
     returned_ids = {item["id"] for item in r_ten.json()["items"]}
     assert returned_ids == {ids["t_2025"], ids["t_888"]}
 
+
+def test_extract_exact_83_user_paste_and_pure_bulk_intent():
+    from app.services.copilot_agent_service import (
+        _extract_bulk_plates_from_message,
+        _is_pure_bulk_plate_check,
+    )
+
+    user_prompt = (
+        'i need to knwo clearly if the following cars are in the motor renewal ledger or not '
+        '"QBG1431 - WONG SUI PENG " JYP3000 - TAN YAO FENG JWR8053 - CSH BAKERY & CONFECTIONERY SDN BHD '
+        'JUJ7091 - CSH BAKERY & CONFECTIONERY SDN BHD JUJ7218 - CSH BAKERY & CONFECTIONERY SDN BHD '
+        'JPQ6655 - HOW YEOK CHIAN JSM1285 - CSH BAKERY & CONFECTIONERY SDN BHD WCM688 - CHAI KAU YEN '
+        'JYP387 - TOP MIX CONCRETE (M) SDN BHD JWR9256 - LEONG JIA HAO WRP8273 - SUN WAH PROPERTY SDN BHD '
+        'JUM9967 - CHUA MIN SIEW JUY4804 - CSH BAKERY & CONFECTIONERY SDN BHD AMQ9611 - ADRINA A/P ANTONY THAS '
+        'JUY4805 - CSH BAKERY & CONFECTIONERY SDN BHD JSM6607 - CSH BAKERY & CONFECTIONERY SDN BHD '
+        'JSK4791 - CSH BAKERY & CONFECTIONERY SDN BHD JPP6517 - CSH BAKERY & CONFECTIONERY SDN BHD '
+        'JMP2272 - LIH HENG MUN JRE1098 - CHAI XINYI NEJ2232 - RAMACON ENGINEERING & CONSTRUCTION SDN BHD '
+        'JXL6996 - CHAI KEAN SENG JXC4323 - MEGA MIX CONCRETE SDN BHD JRF1699 - XIN XIN TRAVEL SDN BHD '
+        'JRB3583 - CSH BAKERY & CONFECTIONERY SDN BHD VED9349 - LEONG JIA HAO UG1349 - PL INKJET SDN. BHD. '
+        'JTS3448 - CHEONG SEK MUN WX38 - EWE CHEE YENG JHW6819 - TAN TENG HONG JJH3338 - CHIA CHIN KOK '
+        'SK6818C - A L DAKSHNAMOORTHY PGR9641 - CHUA TECK HOCK JLQ866 - MUGEN DESIGN & BUILD SDN BHD '
+        'BNQ1379 - RAMACON ENGINEERING & CONSTRUCTION SDN BHD WJS7728 - LOW CHEU YUANG JMP7728 - ONG KAR ENG '
+        'JRX8396 - EXA WELDING (M) SDN BHD VNM5057 - RAMACON ENGINEERING & CONSTRUCTION SDN BHD '
+        'JSM6355 - KEI WEI TRADING VAA6082 - SII HAU CHIN JTE6416 - CSH BAKERY & CONFECTIONERY SDN BHD '
+        'JUY6819 - LEE XIA WEI VJY8397 - RAMESH S/O PULANDARAN JXE1496 - MEGA MIX CONCRETE SDN BHD '
+        'JWS8434 - OOI WEI CHUN DEW56 - YI DING ENGINEERING SDN BHD JRG9029 - HENG CHOON YANG '
+        'JXE3890 - MEGA MIX CONCRETE SDN BHD JME1219 - TAN WAI HOONG TDB1001 - KEJAYA TUNNEL SDN BHD '
+        'T/WC811 - KEJAYA TUNNEL SDN BHD SMU5251 - LIM WEI JIE JQQ2080 - LOW POH HEOT '
+        'JPK888 - TOP OCEAN MARITIME SDN BHD JQN66 - TOP OCEAN MARITIME SDN BHD BFN2187 - LONG HIN TUANG '
+        'VMD868 - SEAW CHONG YONG VFV5002 - FOO YONGHAO JKC9933 - YAP POT LIEONG WRK8482 - VICTOR TAN '
+        'JRN47 - CHOO SENG HOOI VJV6336 - NEW SOGO SDN. BHD. JRA1728 - CSH BAKERY & CONFECTIONERY SDN BHD '
+        'JRH1364 - CSH BAKERY & CONFECTIONERY SDN BHD JJH3366 - TAN JENN SHI JWL5813 - WONG NYUK POH '
+        'WUL9396 - KOEY HOI LENG JQX3339 - CHIA CHIN KOK JXM6088 - HAU LEE HUA JLS8255 - TAN LIAN SENG '
+        'JVY8361 - LEE SIEW MUI JVA9628 - CHAN YUNG FONG JVA1087 - CSH BAKERY & CONFECTIONERY SDN BHD '
+        'JVB2388 - VINNIE SOH MIN MBR4649 - RAMACON ENGINEERING & CONSTRUCTION SDN BHD VFU2906 - NG WEE RONG '
+        'VHD8612 - GAN AH CHONG AKM9978 - JONATHAN SINGAM JTU4043 - LAI MUN LOONG '
+        'JSM6575 - CSH BAKERY & CONFECTIONERY SDN BHD JPW7198 - SUN HUP TYRE SDN. BHD. '
+        'JYH2089 - MOHD RAFIQUE BIN MOHD HANIFA also a proepr table please'
+    )
+    entries, dup_count = _extract_bulk_plates_from_message(user_prompt)
+    plates = [e["plate"] for e in entries]
+    assert dup_count == 0
+    assert len(entries) == 83
+    assert "T/WC811" in plates
+    assert "SK6818C" in plates
+    assert "WX38" in plates
+    assert "DEW56" in plates
+    assert "UG1349" in plates
+    assert entries[0]["plate"] == "QBG1431"
+    assert entries[0]["pasted_name"] == "WONG SUI PENG"
+    assert entries[-1]["plate"] == "JYH2089"
+    assert entries[-1]["pasted_name"] == "MOHD RAFIQUE BIN MOHD HANIFA"
+    assert _is_pure_bulk_plate_check(user_prompt, entries) is True
+
+    # Non-plate noise tokens filtered cleanly & analytical requests stay in Gemini ReAct mode
+    noise_entries, _ = _extract_bulk_plates_from_message("Budget RM1500 IC90 NO12 V1 Q1 A4 for WCM688 WX38 JYP387")
+    assert [e["plate"] for e in noise_entries] == ["WCM688", "WX38", "JYP387"]
+    assert _is_pure_bulk_plate_check("Compare insurer quotes and write a WhatsApp pitch for WCM688 WX38 JYP387 JPK888 DEW56", entries[:5]) is False
+
+
+def test_bulk_check_active_ledger_vs_projected_hidden_and_comparison_counts(sqlite_db):
+    from app.models.tables import ClientRecord, VehiclePlateHistory
+    from app.services.copilot_agent_service import (
+        _collect_verified_links,
+        _execute_bulk_check_plates_full,
+        _render_deterministic_bulk_report,
+    )
+
+    ids = _seed_agency_data(sqlite_db)
+    with sqlite_db() as db:
+        proj_veh = TrackedVehicle(id=new_id(), vehicle_no="PROJ111", car_brand="Honda", car_model="Civic")
+        hid_veh = TrackedVehicle(id=new_id(), vehicle_no="HID222", car_brand="Toyota", car_model="Vios")
+        db.add_all([proj_veh, hid_veh])
+        db.flush()
+
+        t_proj = InsuranceTenure(
+            id=new_id(),
+            tracked_vehicle_id=proj_veh.id,
+            vehicle_no="PROJ111",
+            customer_name="Projected Owner",
+            coverage_start_date=datetime(2027, 1, 1, tzinfo=timezone.utc),
+            coverage_end_date=datetime(2027, 12, 31, tzinfo=timezone.utc),
+            expiry_month="2027-12",
+            stage="Quotations",
+            status="active",
+            is_projected=True,
+        )
+        t_hid = InsuranceTenure(
+            id=new_id(),
+            tracked_vehicle_id=hid_veh.id,
+            vehicle_no="HID222",
+            customer_name="Hidden Owner",
+            coverage_start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+            coverage_end_date=datetime(2027, 2, 28, tzinfo=timezone.utc),
+            expiry_month="2027-02",
+            stage="Pending",
+            status="active",
+            is_hidden=True,
+        )
+        db.add_all([t_proj, t_hid])
+        db.add(VehiclePlateHistory(id=new_id(), tracked_vehicle_id=ids["veh1"], plate_no="OLD9999"))
+        db.add(
+            ClientRecord(
+                id=new_id(),
+                insurer_no="INS-100",
+                vehicle_no="CR5555",
+                customer_name="Client Only Enterprise",
+                insurance_company="STMB",
+            )
+        )
+        db.commit()
+
+        summary, all_rows, matched_rows = _execute_bulk_check_plates_full(
+            db, ["JWX1234", "VAA888", "OLD9999", "PROJ111", "HID222", "CR5555", "MISSING99"]
+        )
+        assert summary["total_checked"] == 7
+        assert summary["in_ledger_count"] == 3  # JWX1234, VAA888, OLD9999 -> veh1 active ledger
+        assert summary["other_record_only_count"] == 3  # PROJ111, HID222, CR5555
+        assert summary["missing_count"] == 1  # MISSING99
+
+        by_q = {r["queried_plate"]: r for r in all_rows}
+        assert by_q["JWX1234"]["ledger_status"] == "In Ledger"
+        assert by_q["JWX1234"]["comparison_quote_count"] == 2
+        assert by_q["OLD9999"]["ledger_status"] == "In Ledger"
+        assert by_q["OLD9999"]["tenure_id"] is not None
+        assert by_q["PROJ111"]["ledger_status"] == "Other Record Only"
+        assert by_q["PROJ111"]["tenure_id"] is None
+        assert "Projected" in (by_q["PROJ111"]["other_reason"] or "")
+        assert by_q["HID222"]["ledger_status"] == "Other Record Only"
+        assert by_q["HID222"]["tenure_id"] is None
+        assert "Hidden" in (by_q["HID222"]["other_reason"] or "")
+        assert by_q["CR5555"]["ledger_status"] == "Other Record Only"
+        assert by_q["MISSING99"]["ledger_status"] == "Not Found"
+
+        md = _render_deterministic_bulk_report(summary, all_rows)
+        # Escapes pipe inside =CMD|' /C calc'!A0 so table columns never corrupt
+        assert r"\|" in md
+        assert "/ledger?tenure_ids=" in md
+        # Projected/hidden tenures must NEVER appear as /ledger?tenure_ids= links
+        assert t_proj.id not in md
+        assert t_hid.id not in md
+
+        links = _collect_verified_links(matched_rows, final_markdown=md, prefer_all_ledger_rows=True)
+        batch_link = next(lnk for lnk in links if lnk["kind"] == "ledger_batch")
+        assert "highlight=all" in batch_link["href"]
+        assert t_proj.id not in batch_link["href"]
+        assert t_hid.id not in batch_link["href"]
+
+
+def test_stream_agent_turn_deterministic_bulk_fastpath_and_4000_scale(sqlite_db, tmp_path, monkeypatch):
+    from app.services import copilot_excel_service
+    from app.services.copilot_agent_service import stream_agent_turn
+
+    monkeypatch.setattr(copilot_excel_service, "COPILOT_EXPORTS_DIR", tmp_path.resolve())
+    ids = _seed_agency_data(sqlite_db)
+
+    with sqlite_db() as db:
+        th = CopilotThread(id=new_id(), user_id=ids["admin"], title="New Chat")
+        db.add(th)
+        db.commit()
+        tid = th.id
+
+    class _FailIfCalledGateway:
+        def get_copilot_barrel_snapshot(self, db):
+            return []
+
+        def execute_gemini_request(self, *args, **kwargs):
+            raise AssertionError("Pure bulk plate verification must use 0 Gemini LLM calls")
+
+    # 1. 60-plate batch triggers 0-token complete report + auto 0-token .xlsx artifact
+    plates_60 = ["JWX 1234", "VAA 888"] + [f"MS{i:04d}" for i in range(58)]
+    prompt_60 = "Check if these plates exist in the motor renewal ledger as a proper table:\n" + "\n".join(
+        f"{p} - TEST CUSTOMER {idx}" for idx, p in enumerate(plates_60, start=1)
+    )
+    events_60 = list(
+        stream_agent_turn(
+            session_factory=sqlite_db,
+            user_id=ids["admin"],
+            thread_id=tid,
+            message_text=prompt_60,
+            gateway=_FailIfCalledGateway(),
+        )
+    )
+    done_60 = next(e for e in events_60 if e["type"] == "done")
+    msg_60 = done_60["message"]
+    assert msg_60["model_used"] == "direct-db-verified"
+    assert msg_60["total_tokens"] == 0
+    assert "Complete Vehicle Status Table (60 rows)" in msg_60["content_markdown"]
+    assert "MS0057" in msg_60["content_markdown"]
+    assert len(msg_60["artifacts"]) == 1
+    assert msg_60["artifacts"][0]["row_count"] == 60
+    assert any(lnk["kind"] == "ledger_batch" and "highlight=all" in lnk["href"] for lnk in msg_60["verified_links"])
+
+    # 2. 4,000-plate scale completes cleanly with all 4,000 rows in output
+    plates_4000 = [f"ZZ{i // 1000}{(i % 1000):03d}" for i in range(4000)]
+    prompt_4000 = "Check existence in ledger:\n" + " ".join(plates_4000)
+    events_4000 = list(
+        stream_agent_turn(
+            session_factory=sqlite_db,
+            user_id=ids["admin"],
+            thread_id=tid,
+            message_text=prompt_4000,
+            gateway=_FailIfCalledGateway(),
+        )
+    )
+    done_4000 = next(e for e in events_4000 if e["type"] == "done")
+    assert done_4000["message"]["model_used"] == "direct-db-verified"
+    assert done_4000["message"]["total_tokens"] == 0
+    assert "Complete Vehicle Status Table (4,000 rows)" in done_4000["message"]["content_markdown"]
+    assert "ZZ3999" in done_4000["message"]["content_markdown"]
+
+    # 3. 5,001 plates fails closed cleanly instead of silently truncating
+    plates_5001 = [f"Z{chr(65 + (i // 1000))}{i % 1000:03d}" for i in range(5001)]
+    events_5001 = list(
+        stream_agent_turn(
+            session_factory=sqlite_db,
+            user_id=ids["admin"],
+            thread_id=tid,
+            message_text="Check plates:\n" + " ".join(plates_5001),
+            gateway=_FailIfCalledGateway(),
+        )
+    )
+    done_5001 = next(e for e in events_5001 if e["type"] == "done")
+    assert "5,001" in done_5001["message"]["content_markdown"]
+    assert "5,000" in done_5001["message"]["content_markdown"]
+

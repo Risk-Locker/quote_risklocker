@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   FileXls,
   Globe,
@@ -9,7 +9,6 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { CopilotConfirmModal } from "./CopilotConfirmModal";
 import type { CopilotPageContext, CopilotUserQuota } from "./types";
 
 type CopilotComposerProps = {
@@ -24,11 +23,6 @@ type CopilotComposerProps = {
   onConsumeExternalDraft?: () => void;
 };
 
-function formatCompactTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
-}
-
 export function CopilotComposer({
   streaming,
   quota,
@@ -42,7 +36,6 @@ export function CopilotComposer({
 }: CopilotComposerProps) {
   const [text, setText] = useState("");
   const [webResearch, setWebResearch] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -63,50 +56,12 @@ export function CopilotComposer({
 
   const isDisabledByQuota = !!quota && (!quota.enabled || quota.is_exhausted);
 
-  const draftStats = useMemo(() => {
-    const trimmed = text.trim();
-    if (!trimmed) {
-      return { inputTokens: 0, lowTotal: 0, highTotal: 0, lines: 0 };
-    }
-    const lines = trimmed.split(/\r?\n/).filter((l) => l.trim().length > 0).length;
-    // System prompt + tool declarations overhead (~1,900 tok) + ~0.28 tok/char
-    const inputTokens = Math.max(300, Math.round(1_900 + trimmed.length * 0.28));
-    // Bulk checks normally resolve in 1 tool hop + 1 answer hop (low ~2x, high ~3.2x)
-    const lowTotal = Math.round(inputTokens * 1.4 + 400);
-    const highTotal = Math.round(inputTokens * 3.0 + 1_500);
-    return { inputTokens, lowTotal, highTotal, lines };
-  }, [text]);
-
-  const warnThreshold = quota?.warn_turn_tokens ?? 15_000;
-  const needsConfirmation = useMemo(() => {
-    if (!text.trim()) return false;
-    if (draftStats.highTotal >= warnThreshold) return true;
-    if (draftStats.lines >= 40) return true;
-    if (quota && quota.tokens_remaining > 0 && draftStats.highTotal >= quota.tokens_remaining * 0.5) {
-      return true;
-    }
-    return false;
-  }, [text, draftStats, warnThreshold, quota]);
-
-  function dispatchSend() {
+  function handleSubmit() {
     const trimmed = text.trim();
     if (!trimmed || streaming || isDisabledByQuota) return;
     onSend(trimmed, { enableWebResearch: webResearch, usePageContext: contextPinned });
     setText("");
-    setConfirmOpen(false);
   }
-
-  function handleSubmit() {
-    const trimmed = text.trim();
-    if (!trimmed || streaming || isDisabledByQuota) return;
-    if (needsConfirmation) {
-      setConfirmOpen(true);
-      return;
-    }
-    dispatchSend();
-  }
-
-  const barrels = quota?.barrels || [];
 
   return (
     <div className="border-t border-[var(--rl-border)] bg-white px-4 py-3 flex flex-col gap-2 shrink-0">
@@ -171,46 +126,24 @@ export function CopilotComposer({
           </button>
         </div>
 
-        {/* Live Quota & Barrel Capacity Pills */}
-        {quota && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {barrels.length > 0 && (
-              <span
-                className="text-[10px] font-mono px-2 py-0.5 rounded-full border border-neutral-200 bg-neutral-50 text-[var(--rl-text-muted)]"
-                title="Live 80s barrel TPM remaining across active Chatbot models"
-              >
-                {barrels
-                  .slice(0, 2)
-                  .map(
-                    (b, idx) =>
-                      `M${idx + 1}: ${formatCompactTokens(b.tpm_remaining)}${
-                        b.reload_in_sec > 0 ? ` (${Math.ceil(b.reload_in_sec)}s)` : ""
-                      }`
-                  )
-                  .join(" · ")}
-              </span>
-            )}
-            <span
-              className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                !quota.enabled
-                  ? "border-rose-200 bg-rose-50 text-rose-700"
-                  : quota.tokens_remaining <= 20_000 || quota.turns_remaining <= 5
-                  ? "border-amber-200 bg-amber-50 text-amber-800"
-                  : "border-neutral-200 bg-neutral-50 text-[var(--rl-text-muted)]"
-              }`}
-              title={`Daily chats left: ${quota.turns_remaining}/${quota.turns_limit}`}
-            >
-              {!quota.enabled
-                ? "Paused by Admin"
-                : `${formatCompactTokens(quota.tokens_remaining)}/${formatCompactTokens(quota.tokens_limit)} tok · ${quota.turns_remaining} chats`}
-            </span>
-          </div>
+        {/* Subtle Status Pill (only when paused or running low) */}
+        {quota && (!quota.enabled || quota.turns_remaining <= 5) && (
+          <span
+            className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+              !quota.enabled
+                ? "border-rose-200 bg-rose-50 text-rose-700"
+                : "border-amber-200 bg-amber-50 text-amber-800"
+            }`}
+            title={`Daily chats left: ${quota.turns_remaining}/${quota.turns_limit}`}
+          >
+            {!quota.enabled ? "Paused by Admin" : `${quota.turns_remaining} chats left`}
+          </span>
         )}
       </div>
 
       {/* Input Area */}
       <div className="flex items-end gap-2">
-        <div className="flex-1 flex flex-col gap-1">
+        <div className="flex-1">
           <textarea
             ref={textareaRef}
             rows={2}
@@ -226,33 +159,10 @@ export function CopilotComposer({
             placeholder={
               isDisabledByQuota
                 ? "Copilot quota reached or paused by admin..."
-                : "Ask anything or paste up to 400+ plates — search ledgers, compare years, or export Excel..."
+                : "Ask anything or paste vehicle plates to check..."
             }
             className="w-full resize-none overflow-y-auto rounded-[var(--rl-radius-md)] border border-[var(--rl-border)] bg-[var(--rl-bg)]/70 px-3.5 py-2.5 text-sm leading-relaxed text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] focus:outline-none focus:border-[var(--rl-black)] focus:bg-white disabled:opacity-60"
           />
-          {text.trim().length > 0 && (
-            <div className="flex items-center justify-between px-1 text-[11px] font-mono text-[var(--rl-text-muted)]">
-              <div className="flex items-center gap-2">
-                <span
-                  className={
-                    needsConfirmation ? "text-amber-700 font-semibold" : "text-[var(--rl-text-muted)]"
-                  }
-                >
-                  ~{draftStats.inputTokens.toLocaleString()} input tok (est. {formatCompactTokens(draftStats.lowTotal)}–{formatCompactTokens(draftStats.highTotal)} total)
-                </span>
-                {draftStats.lines >= 3 && (
-                  <span className="rounded bg-neutral-100 px-1.5 py-0.2 text-[10px] text-neutral-700">
-                    {draftStats.lines.toLocaleString()} lines
-                  </span>
-                )}
-              </div>
-              {needsConfirmation && (
-                <span className="text-amber-700 font-sans text-[11px] font-medium">
-                  Confirmation required before send
-                </span>
-              )}
-            </div>
-          )}
         </div>
 
         {streaming ? (
@@ -279,17 +189,6 @@ export function CopilotComposer({
           </Button>
         )}
       </div>
-
-      <CopilotConfirmModal
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        estimatedInputTokens={draftStats.inputTokens}
-        estimatedLowTotal={draftStats.lowTotal}
-        estimatedHighTotal={draftStats.highTotal}
-        lineCount={draftStats.lines}
-        quota={quota}
-        onConfirm={dispatchSend}
-      />
     </div>
   );
 }

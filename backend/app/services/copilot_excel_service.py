@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -65,23 +67,22 @@ def _is_money_column(col_name: str) -> bool:
     return any(tok in low for tok in _MONEY_COL_TOKENS)
 
 
-def export_sql_to_excel(
+def _write_workbook_and_artifact(
     db: Session,
     *,
     user: User,
     thread_id: str,
     message_id: str | None,
-    sql: str,
-    filename: str = "risklocker_report.xlsx",
-    sheet_name: str = "Report",
-    max_rows: int = 25_000,
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    filename: str,
+    sheet_name: str,
+    truncated: bool,
+    elapsed_ms: int,
+    sql_fingerprint: str,
 ) -> tuple[CopilotArtifact, dict[str, Any]]:
-    """Execute read-only SQL and stream results directly to .xlsx without passing rows through LLM."""
+    """Render rows to a styled openpyxl .xlsx artifact and record audit metadata."""
     COPILOT_EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    result = execute_readonly_sql(db, sql, max_rows=max_rows, timeout_ms=10_000)
-    columns: list[str] = result["columns"]
-    rows: list[dict[str, Any]] = result["rows"]
-
     wb = Workbook()
     ws = wb.active
     ws.title = _safe_sheet_name(sheet_name)
@@ -160,8 +161,8 @@ def export_sql_to_excel(
         "columns": columns,
         "rows": rows[:25],
         "totals": totals_serialized,
-        "truncated": result["truncated"],
-        "elapsed_ms": result["elapsed_ms"],
+        "truncated": truncated,
+        "elapsed_ms": elapsed_ms,
     }
 
     artifact = CopilotArtifact(
@@ -176,7 +177,7 @@ def export_sql_to_excel(
         size_bytes=size_bytes,
         storage_path=str(file_path),
         preview_json=preview_payload,
-        sql_fingerprint=result["sql_fingerprint"],
+        sql_fingerprint=sql_fingerprint,
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
     )
     db.add(artifact)
@@ -190,7 +191,7 @@ def export_sql_to_excel(
                 "filename": safe_name,
                 "row_count": len(rows),
                 "size_bytes": size_bytes,
-                "sql_fingerprint": result["sql_fingerprint"],
+                "sql_fingerprint": sql_fingerprint,
             },
         )
     )
@@ -208,6 +209,64 @@ def export_sql_to_excel(
         "download_url": f"/api/copilot/artifacts/{artifact_id}/download",
     }
     return artifact, llm_metadata
+
+
+def export_rows_to_excel(
+    db: Session,
+    *,
+    user: User,
+    thread_id: str,
+    message_id: str | None,
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    filename: str = "risklocker_bulk_check.xlsx",
+    sheet_name: str = "Bulk Check",
+) -> tuple[CopilotArtifact, dict[str, Any]]:
+    """Export pre-computed tabular rows directly to a styled .xlsx artifact with zero LLM tokens."""
+    t0 = time.perf_counter()
+    fp = hashlib.sha256(f"{filename}:{len(rows)}:{','.join(columns)}".encode("utf-8")).hexdigest()[:16]
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    return _write_workbook_and_artifact(
+        db,
+        user=user,
+        thread_id=thread_id,
+        message_id=message_id,
+        columns=columns,
+        rows=rows,
+        filename=filename,
+        sheet_name=sheet_name,
+        truncated=False,
+        elapsed_ms=elapsed_ms,
+        sql_fingerprint=fp,
+    )
+
+
+def export_sql_to_excel(
+    db: Session,
+    *,
+    user: User,
+    thread_id: str,
+    message_id: str | None,
+    sql: str,
+    filename: str = "risklocker_report.xlsx",
+    sheet_name: str = "Report",
+    max_rows: int = 25_000,
+) -> tuple[CopilotArtifact, dict[str, Any]]:
+    """Execute read-only SQL and stream results directly to .xlsx without passing rows through LLM."""
+    result = execute_readonly_sql(db, sql, max_rows=max_rows, timeout_ms=10_000)
+    return _write_workbook_and_artifact(
+        db,
+        user=user,
+        thread_id=thread_id,
+        message_id=message_id,
+        columns=result["columns"],
+        rows=result["rows"],
+        filename=filename,
+        sheet_name=sheet_name,
+        truncated=bool(result["truncated"]),
+        elapsed_ms=int(result["elapsed_ms"]),
+        sql_fingerprint=str(result["sql_fingerprint"]),
+    )
 
 
 def resolve_artifact_file_path(artifact: CopilotArtifact) -> Path | None:

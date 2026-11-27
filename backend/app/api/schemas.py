@@ -730,7 +730,7 @@ class CopilotThreadUpdateRequest(StrictRequest):
 
 
 class CopilotStreamRequest(StrictRequest):
-    message: str = Field(min_length=1, max_length=60000)
+    message: str = Field(min_length=1, max_length=400000)
     enable_web_research: bool = False
     page_context: dict[str, Any] | None = None
 
