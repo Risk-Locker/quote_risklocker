@@ -86,8 +86,8 @@ export const CANONICAL_24_CATALOG: Array<{
     {
       id: "betterment",
       title: "Waiver of Betterment",
-      description: "Waives betterment deduction on new parts for vehicles up to 15 years.",
-      default_value: "Up to 15 Years",
+      description: "Waives betterment deduction on new parts for vehicles up to 10 years.",
+      default_value: "Up to 10 Years",
       icon_hint: "betterment",
     },
     {
@@ -1071,10 +1071,7 @@ export function buildUnifiedMatrixCards(
       if (typeof rawVal === "string" && /^\s*rm\b/i.test(rawVal.trim())) {
         rawVal = "";
       }
-      const compL = (insurerName || "").toLowerCase();
-      const defaultYears = (compL.includes("qbe") || compL.includes("lonpac") || compL.includes("stmb") || compL.includes("takaful"))
-        ? "Up to 10 Years"
-        : "Up to 15 Years";
+      const defaultYears = "Up to 10 Years";
       if (!rawVal || rawVal === "Up to 10 Years" || rawVal === "Up to 15 Years" || rawVal === "Standard") {
         formattedVal = defaultYears;
       } else {
@@ -1280,18 +1277,12 @@ export function buildUnifiedMatrixCards(
       if (excludedIds.has(cat.id)) {
         continue;
       }
-      if (cat.id === "towing" && !canonicalOverrides[cat.id]) {
+      if ((cat.id === "towing" || cat.id === "betterment") && !canonicalOverrides[cat.id]) {
         continue;
       }
       if (!seenInOutput.has(cat.id)) {
         seenInOutput.add(cat.id);
-        let fillVal = formatAddonValue(cat.default_value);
-        if (cat.id === "betterment") {
-          const compL = (insurerName || "").toLowerCase();
-          fillVal = (compL.includes("qbe") || compL.includes("lonpac") || compL.includes("stmb") || compL.includes("takaful"))
-            ? "Up to 10 Years"
-            : "Up to 15 Years";
-        }
+        const fillVal = formatAddonValue(cat.default_value);
         processed.push({
           id: cat.id,
           code: cat.id,

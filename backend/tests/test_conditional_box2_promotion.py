@@ -218,12 +218,12 @@ def test_render_context_and_unified_engine_suppress_cost_leaked_as_coverage():
     o_llop.optional_price = {"amount": 15.0, "currency": "MYR"}  # Different from selection.price to test reversed-check regression!
     o_pc365 = _make_offering("o-pc365", "c-pc365", "pc365-opt", "optional", "addon_option", "", "", 20)
     o_ws = _make_offering("o-ws", "c-ws", "ws-opt", "optional", "addon_option", "", "", 30)
-    o_bet = _make_offering("o-bet", "c-bet", "bet-opt", "base", "included", "Up to 15 Years", "", 40)
+    o_bet = _make_offering("o-bet", "c-bet", "bet-opt", "optional", "addon_option", "Up to 10 Years", "", 40)
 
     sel_llop = _make_selection("s-llop", "c-llop", "o-llop", "current", "paid", display_text="RM 7.50", price={"amount": 7.50, "currency": "MYR"})
     sel_pc365 = _make_selection("s-pc365", "c-pc365", "o-pc365", "current", "paid", display_text="RM 130.00", price={"amount": 130.00, "currency": "MYR"})
     sel_ws = _make_selection("s-ws", "c-ws", "o-ws", "current", "paid", display_text="RM 15,000.00", price={"amount": 2250.00, "currency": "MYR"})
-    sel_bet = _make_selection("s-bet", "c-bet", "o-bet", "current", "included", display_text="Up to 15 Years")
+    sel_bet = _make_selection("s-bet", "c-bet", "o-bet", "current", "paid", display_text="Up to 10 Years", price={"amount": 100.00, "currency": "MYR"})
 
     resolved = resolve_benefit_cards(
         selections=[sel_llop, sel_pc365, sel_ws, sel_bet],
@@ -236,14 +236,14 @@ def test_render_context_and_unified_engine_suppress_cost_leaked_as_coverage():
     assert by_key["legal-liability-of-passengers"]["value"] == ""
     assert by_key["private-car-365"]["value"] == ""
     assert "15,000" in by_key["windscreen"]["value"]
-    assert by_key["betterment-protection"]["value"] == "Up to 15 Years"
+    assert by_key["betterment-protection"]["value"] == "Up to 10 Years"
 
     matrix = build_unified_matrix_cards(resolved["current_benefits"], resolved["available_addons"], fill_to_slots=8, insurer_name="AmAssurance")
     m_by_id = {c["id"]: c for c in matrix}
     assert m_by_id["llop"]["value"] == ""
     assert m_by_id["private_car_365"]["value"] == ""
     assert "15,000" in m_by_id["windscreen"]["value"]
-    assert m_by_id["betterment"]["value"] == "Up to 15 Years"
+    assert m_by_id["betterment"]["value"] == "Up to 10 Years"
 
 
 def test_comparison_syncs_updated_company_name_without_duplicates():
@@ -318,4 +318,226 @@ def test_comparison_syncs_updated_company_name_without_duplicates():
         assert entries[0].company_id == lib_id
         assert len(result["entries"]) == 1
         assert result["entries"][0]["company_name"] == "Liberty"
+
+
+def test_betterment_10yr_cap_qbe_and_other_insurers():
+    """Verify QBE vs non-QBE 10-year betterment caps, motorcycle/TPFT exclusion, and >10yr manual override preservation."""
+    from types import SimpleNamespace
+    from app.domain.betterment_engine import evaluate_betterment_catalog_eligibility
+    from app.services.marketing_comparison.ncd_evaluator import evaluate_betterment_rules
+
+    qbe = SimpleNamespace(slug="qbe", name="QBE", policy_rules={
+        "betterment": {"auto_waive_without_peril": True, "allow_addon_purchase": False, "free_exemption_years": 10, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 10 Years"}
+    })
+    allianz = SimpleNamespace(slug="allianz", name="Allianz", policy_rules={
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"}
+    })
+
+    # QBE: free Box 1 up to age 10, never Box 2, hidden at age 11+
+    assert evaluate_betterment_catalog_eligibility(0, company_obj=qbe, coverage_type="Comprehensive")["placement"] == "box1_free"
+    qbe_10 = evaluate_betterment_catalog_eligibility(10, company_obj=qbe, coverage_type="Comprehensive")
+    assert qbe_10["placement"] == "box1_free" and qbe_10["display_value"] == "Up to 10 Years"
+    assert evaluate_betterment_catalog_eligibility(11, company_obj=qbe, coverage_type="Comprehensive")["placement"] == "hidden"
+
+    # Non-QBE: 0-4 => box1_free ("Up to 5 Years"); 5-10 => box2_optional ("Up to 10 Years"); 11+ => hidden
+    b4 = evaluate_betterment_catalog_eligibility(4, company_obj=allianz, coverage_type="Comprehensive")
+    assert b4["placement"] == "box1_free" and b4["display_value"] == "Up to 5 Years"
+    b5 = evaluate_betterment_catalog_eligibility(5, company_obj=allianz, coverage_type="Comprehensive")
+    assert b5["placement"] == "box2_optional" and b5["display_value"] == "Up to 10 Years"
+    b10 = evaluate_betterment_catalog_eligibility(10, company_obj=allianz, coverage_type="Comprehensive")
+    assert b10["placement"] == "box2_optional" and b10["display_value"] == "Up to 10 Years"
+    assert evaluate_betterment_catalog_eligibility(11, company_obj=allianz, coverage_type="Comprehensive")["placement"] == "hidden"
+
+    # Box 1 included betterment must NOT be duplicated into Box 2 via fill_to_slots
+    c_bet_box1 = _make_concept("c-bet-box1", "betterment-protection", "Waiver of Betterment")
+    o_bet_box1 = _make_offering("o-bet-b1", "c-bet-box1", "bet-b1", "base", "included", "Up to 5 Years", "", 10)
+    sel_bet_box1 = _make_selection("s-bet-b1", "c-bet-box1", "o-bet-b1", "current", "included", display_text="Up to 5 Years")
+    res_box1 = resolve_benefit_cards(
+        selections=[sel_bet_box1],
+        offerings=[o_bet_box1],
+        concepts=[c_bet_box1],
+        relations=[],
+        facets=[],
+        betterment_policy_context=b4,
+    )
+    box2_matrix = build_unified_matrix_cards(res_box1["current_benefits"], [], fill_to_slots=8, insurer_name="Allianz")
+    assert all(c["id"] != "betterment" for c in box2_matrix)
+
+    # Excluded from motorcycle/commercial & TPFT/TPO
+    assert evaluate_betterment_catalog_eligibility(3, company_obj=allianz, coverage_type="Comprehensive", is_commercial_or_moto=True)["placement"] == "hidden"
+    assert evaluate_betterment_catalog_eligibility(3, company_obj=allianz, coverage_type="TPFT")["placement"] == "hidden"
+
+    # Comparison evaluator cutoff: QBE age 10 (yom 2016 @ 2026) Yes(0%), age 11 No(40%); Allianz age 10 w/o waiver No(40%), w/ waiver Yes(0%), age 11 w/o manual No(40%)
+    assert evaluate_betterment_rules(2016, 2026, "QBE", False, company_obj=qbe)[2] == "Yes (0%)"
+    assert evaluate_betterment_rules(2015, 2026, "QBE", False, company_obj=qbe)[2] == "No (40%)"
+    assert evaluate_betterment_rules(2016, 2026, "Allianz", False, company_obj=allianz)[2] == "No (40%)"
+    assert evaluate_betterment_rules(2016, 2026, "Allianz", True, company_obj=allianz)[2] == "Yes (0%)"
+    assert evaluate_betterment_rules(2015, 2026, "Allianz", False, company_obj=allianz)[2] == "No (40%)"
+
+    # >10yo car hides default Box1/Box2 betterment in render_context, unless staff manually selects/overrides it
+    c_bet = _make_concept("c-bet", "betterment-protection", "Waiver of Betterment")
+    o_bet_inc = _make_offering("o-bet-1", "c-bet", "bet-inc", "base", "included", "Up to 10 Years", "", 10)
+    ctx_hidden = {"placement": "hidden", "veh_age": 14, "eligible": False}
+
+    res_auto = resolve_benefit_cards(
+        selections=[],
+        offerings=[o_bet_inc],
+        concepts=[c_bet],
+        relations=[],
+        facets=[],
+        betterment_policy_context=ctx_hidden,
+    )
+    assert all(c["concept_key"] != "betterment-protection" for c in res_auto["current_benefits"] + res_auto["available_addons"])
+
+    sel_manual = _make_selection("s-bet-m", "c-bet", "o-bet-1", "current", "paid", display_text="Up to 10 Years")
+    sel_manual.evidence_snapshot = {"source": "manual", "manually_edited": True}
+    res_manual = resolve_benefit_cards(
+        selections=[sel_manual],
+        offerings=[o_bet_inc],
+        concepts=[c_bet],
+        relations=[],
+        facets=[],
+        betterment_policy_context=ctx_hidden,
+    )
+    assert any(c["concept_key"] == "betterment-protection" for c in res_manual["current_benefits"])
+
+
+def test_catalog_lifecycle_fixes_and_betterment_policy_rule_endpoint():
+    """Verify cascade delete of plan items, formula->expression normalization, clear_value, role exclusion, and partial policy-rules updates."""
+    from types import SimpleNamespace
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+    from app.models.enums import Role
+    from app.models.tables import (
+        Base, BenefitCatalog, BenefitCatalogRevision, BenefitConcept,
+        BenefitPackage, BenefitPackagePlan, BenefitPackagePlanItem,
+        CatalogOffering, InsuranceCompany, InsuranceProduct, new_id,
+    )
+    from app.services.catalog_lifecycle_service import remove_catalog_offering, save_catalog_offering
+    from app.services.company_setup_service import update_company_betterment_rule
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    admin = SimpleNamespace(id=new_id(), role=Role.ADMIN.value)
+
+    with Session(engine) as db:
+        comp = InsuranceCompany(id=new_id(), name="Allianz", slug="allianz", status="active", policy_rules={})
+        prod = InsuranceProduct(id=new_id(), company_id=comp.id, product_key="motor-comp", name="Motor Comprehensive", status="active")
+        concept = BenefitConcept(id=new_id(), concept_key="windscreen", label="Windscreen Cover", sort_order=1, status="active")
+        cat = BenefitCatalog(id=new_id(), company_id=comp.id, product_id=prod.id, name="Test Cat", revision=1, status="draft")
+        rev = BenefitCatalogRevision(id=new_id(), catalog_id=cat.id, revision_number=1, state="draft", source_document_ids=[], content_hash="")
+        pkg = BenefitPackage(id=new_id(), catalog_revision_id=rev.id, package_key="bundle", name="Bundle", package_kind="addon_bundle", status="active")
+        plan = BenefitPackagePlan(id=new_id(), package_id=pkg.id, plan_key="plan-1", name="Plan 1", status="active")
+        db.add_all([comp, prod, concept, cat, rev, pkg, plan])
+        db.commit()
+
+        # Save with formula->expression normalization
+        saved = save_catalog_offering(db, admin, cat.id, {
+            "base_revision": 1,
+            "offering_key": "ws-test",
+            "concept_id": concept.id,
+            "offering_kind": "optional",
+            "applies_to_type": "product",
+            "applies_to_id": prod.id,
+            "role": "addon_option",
+            "display_value": "RM 1,000",
+            "typed_value": {"type": "custom", "display_text": "RM 1,000"},
+            "optional_price": {"type": "formula", "formula": "15% of Sum Covered", "display_text": "15% of Sum Covered"},
+        })
+        assert saved["optional_price"]["expression"] == "15% of Sum Covered"
+
+        # 1-role-per-concept mutual exclusion when moving/adding same concept as included
+        saved_inc = save_catalog_offering(db, admin, cat.id, {
+            "base_revision": 2,
+            "offering_key": "ws-test-inc",
+            "concept_id": concept.id,
+            "offering_kind": "base",
+            "applies_to_type": "product",
+            "applies_to_id": prod.id,
+            "role": "included",
+            "display_value": "RM 1,000",
+        })
+        remaining = list(db.scalars(select(CatalogOffering).where(CatalogOffering.catalog_revision_id == rev.id, CatalogOffering.concept_id == concept.id)).all())
+        assert len(remaining) == 1 and remaining[0].id == saved_inc["id"]
+
+        # clear_value clears both display_value & typed_value
+        cleared = save_catalog_offering(db, admin, cat.id, {"id": saved_inc["id"], "base_revision": 3, "applies_to_type": "product", "applies_to_id": prod.id, "clear_value": True})
+        assert cleared["display_value"] is None and cleared["typed_value"] is None
+
+        # Deleting offering referenced by BenefitPackagePlanItem must not fail FK RESTRICT
+        item = BenefitPackagePlanItem(id=new_id(), plan_id=plan.id, offering_id=cleared["id"], sort_order=1)
+        db.add(item)
+        db.commit()
+        remove_catalog_offering(db, admin, cat.id, cleared["id"])
+        assert db.get(CatalogOffering, cleared["id"]) is None
+
+        # Partial policy_rules update preserves omitted fields
+        res1 = update_company_betterment_rule(db, admin, comp.id, {"free_exemption_years": 6})
+        assert res1["betterment_rule"]["free_exemption_years"] == 6
+        assert res1["betterment_rule"]["max_waiver_years"] == 10
+        assert res1["betterment_rule"]["allow_addon_purchase"] is True
+
+
+def test_workspace_manual_edit_discrepancy_and_brn_guards():
+    """Verify insurer BRN exclusion, punctuation-insensitive name match, and discrepancy dismiss without customer."""
+    from types import SimpleNamespace
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.api.routers.sessions import post_resolve_customer_discrepancy
+    from app.models.enums import Role
+    from app.models.tables import Base, Batch, QuotationDraft, Session as QuotationSession, UploadedFile, new_id
+    from app.services.customer_account_service import resolve_or_create_customer
+    from app.services.identity_normalization_service import normalize_government_id
+    from app.services.workspace_patch_service import _apply_select_catalog_offering
+    from app.models.tables import BenefitCatalog, BenefitCatalogRevision, BenefitConcept, CatalogOffering, InsuranceCompany
+
+    assert normalize_government_id("197801007153") == ("", "unknown")
+    assert normalize_government_id("44191-P") == ("", "unknown")
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    u_id = new_id()
+    user = SimpleNamespace(id=u_id, role=Role.ADMIN.value)
+
+    with Session(engine) as db:
+        c1, disc1 = resolve_or_create_customer(db, "CSH BAKERY & CONFECTIONERY SDN BHD", "202001001234")
+        c2, disc2 = resolve_or_create_customer(db, "CSH BAKERY CONFECTIONERY SDN. BHD.", "202001001234")
+        assert c1 is not None and c2 is not None and c1.id == c2.id
+        assert disc2 == []
+
+        batch = Batch(id=new_id(), owner_id=u_id, name="B", status="ready")
+        uf = UploadedFile(id=new_id(), batch_id=batch.id, owner_id=u_id, original_filename="q.pdf", content_type="application/pdf", storage_path="p", storage_provider="local", storage_status="available", storage_sha256="s", size_bytes=1, status="ready")
+        draft = QuotationDraft(id=new_id(), revision=1, uploaded_file_id=uf.id, owner_id=u_id, status="ready", fields={}, scalar_decisions={}, warnings=[], display_options={"customer_discrepancies": [{"field": "name", "current": "A", "detected": "B", "message": "diff"}]})
+        sess = QuotationSession(id=new_id(), owner_id=u_id, uploaded_file_id=uf.id, draft_id=draft.id, quotation_ref="RL1", status="active")
+        comp = InsuranceCompany(id=new_id(), name="Allianz", slug="allianz", status="active")
+        concept = BenefitConcept(id=new_id(), concept_key="windscreen", label="Windscreen", sort_order=1, status="active")
+        cat = BenefitCatalog(id=new_id(), company_id=comp.id, name="C", revision=1, status="draft")
+        rev = BenefitCatalogRevision(id=new_id(), catalog_id=cat.id, revision_number=1, state="published", source_document_ids=[], content_hash="")
+        off = CatalogOffering(id=new_id(), catalog_revision_id=rev.id, offering_key="ws", concept_id=concept.id, offering_kind="optional", role="addon_option", status="active")
+        db.add_all([batch, uf, draft, sess, comp, concept, cat, rev, off])
+        db.commit()
+
+        # Dismiss without session.customer succeeds and persists
+        res = post_resolve_customer_discrepancy(sess.id, {"action": "dismiss", "field": "name"}, db=db, user=user)
+        assert res["resolved"] is True and res["discrepancies_remaining"] == 0
+        assert db.get(QuotationDraft, draft.id).display_options["customer_discrepancies"] == []
+
+        # _apply_select_catalog_offering with overrides & description clear
+        draft.catalog_revision_id = rev.id
+        path = _apply_select_catalog_offering(db, draft, user, {
+            "op": "select_catalog_offering",
+            "offering_id": off.id,
+            "state": "available_addon",
+            "label": "Custom WS",
+            "description": "Initial desc",
+        })
+        assert path.startswith("benefits.")
+        _apply_select_catalog_offering(db, draft, user, {
+            "op": "select_catalog_offering",
+            "offering_id": off.id,
+            "state": "available_addon",
+            "description": "",
+        })
+        db.commit()
+
 

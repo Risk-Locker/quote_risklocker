@@ -110,8 +110,8 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
 
   const previousValuesRef = useRef<Record<string, string>>({});
   const lastSyncedRevisionRef = useRef<number | null>(null);
-  const promptedRef = useRef<Set<string>>(new Set());
-  const [learnPrompt, setLearnPrompt] = useState<{ field: string; value: string } | null>(null);
+  const lastFormSyncKeyRef = useRef<string | null>(null);
+  const wasDirtyRef = useRef<boolean>(false);
 
   /** Staged draft buffer: edits stay local until explicit Save & Sync or pre-flight export. */
   const scheduleSave = useCallback(() => {
@@ -590,45 +590,51 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
   }, [workspace]);
 
   useEffect(() => {
-    syncForm();
-  }, [syncForm, mutation.lastSavedAt]);
+    if (!workspace) return;
+    const syncKey = `${workspace.session_id}:${workspace.draft_id}:${workspace.revision}:${mutation.lastSavedAt ?? ""}`;
+    const transitionedToClean = wasDirtyRef.current && !mutation.dirty;
+    wasDirtyRef.current = mutation.dirty;
+
+    if (lastFormSyncKeyRef.current !== syncKey || transitionedToClean) {
+      lastFormSyncKeyRef.current = syncKey;
+      syncForm();
+      return;
+    }
+
+    // Surgical update only for recalculated totals/premium during optimistic benefit or fee changes
+    setFormValues((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      const premVal = displayValue("money", (workspace.fields?.premium as WorkspaceField | undefined)?.value ?? null);
+      if (premVal !== (prev.premium ?? "")) {
+        next.premium = premVal;
+        next.insurance_premium_total = premVal;
+        changed = true;
+      }
+      const totalField = workspace.fields?.total_amount as WorkspaceField | undefined;
+      const isManualTotal = totalField?.decision?.decision === "edit" && totalField?.value;
+      const computedTotal = isManualTotal
+        ? displayValue("money", totalField.value)
+        : workspace.total_premium_adjusted
+        ? formatMoney(workspace.total_premium_adjusted)
+        : totalField?.value
+        ? displayValue("money", totalField.value)
+        : "";
+      if (computedTotal !== (prev.total_amount ?? "")) {
+        next.total_amount = computedTotal;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [workspace, mutation.lastSavedAt, mutation.dirty, syncForm]);
 
   async function saveAndCheckLearning() {
     setActionError(null);
     try {
       await save();
-      if (!workspace) return;
-      for (const fieldName of LEARNABLE.keys()) {
-        const stored = (workspace.fields[fieldName] as WorkspaceField | undefined)?.value;
-        const value = String(stored ?? "").trim();
-        if (!value || promptedRef.current.has(`${fieldName}:${value}`)) continue;
-        promptedRef.current.add(`${fieldName}:${value}`);
-        try {
-          const known = await api<{ known: boolean }>(`/business/dictionaries/contains?field=${encodeURIComponent(LEARNABLE.get(fieldName) || fieldName)}&value=${encodeURIComponent(value)}`);
-          if (!known.known) {
-            setLearnPrompt({ field: LEARNABLE.get(fieldName) || fieldName, value });
-            break;
-          }
-        } catch {
-          // Best effort
-        }
-      }
     } catch (error) {
       setActionError(apiErrorMessage(error));
     }
-  }
-
-  async function learnValue() {
-    if (!learnPrompt) return;
-    try {
-      await api(`/business/dictionaries/learn`, {
-        method: "POST",
-        body: JSON.stringify({ field: learnPrompt.field, value: learnPrompt.value }),
-      });
-    } catch (error) {
-      setToastMessage(apiErrorMessage(error));
-    }
-    setLearnPrompt(null);
   }
 
   async function handleApplyMotorDiscountPct(pct: number) {
@@ -669,9 +675,6 @@ export function useReviewWorkspaceState(props: UseReviewWorkspaceStateProps = {}
     handleExtrasDisplayModeChange,
     previousValuesRef,
     scheduleSave,
-    learnPrompt,
-    setLearnPrompt,
-    learnValue,
     saveAndCheckLearning,
     savingDiscount,
     handleApplyMotorDiscountPct,

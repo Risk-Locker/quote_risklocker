@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { PageLoading } from "@/components/ui/page-loading";
 import { ArrowClockwise, CheckCircle, Info, MagnifyingGlass } from "@phosphor-icons/react";
 import type {
+  BettermentPolicyRule,
   CompanySummary as Company,
   ConceptSummary as Concept,
   BenefitProfile,
@@ -18,6 +19,7 @@ export interface CompanyBenefitsTabProps {
   selectedProfile: BenefitProfile | null;
   isProfileArchived: boolean;
   selectedCompany: Company | null;
+  onSaveBettermentRule?: (companyId: string, rule: BettermentPolicyRule) => Promise<void>;
   concepts: Concept[];
   companyConfigs: CompanyBenefitConfig[];
   configsLoading: boolean;
@@ -40,6 +42,7 @@ export function CompanyBenefitsTab({
   selectedProfile,
   isProfileArchived,
   selectedCompany,
+  onSaveBettermentRule,
   concepts,
   companyConfigs,
   configsLoading,
@@ -57,6 +60,57 @@ export function CompanyBenefitsTab({
   updateConfigBaseline,
   updateConfigBaselineCost,
 }: CompanyBenefitsTabProps) {
+  const [ruleDraft, setRuleDraft] = useState<BettermentPolicyRule>({
+    auto_waive_without_peril: false,
+    allow_addon_purchase: true,
+    free_exemption_years: 5,
+    max_waiver_years: 10,
+    free_display: "Up to 5 Years",
+    default_display: "Up to 10 Years",
+  });
+  const [ruleSaving, setRuleSaving] = useState(false);
+  const [ruleStatus, setRuleStatus] = useState<"idle" | "saved" | "error">("idle");
+  const [ruleError, setRuleError] = useState("");
+
+  useEffect(() => {
+    setRuleStatus("idle");
+    setRuleError("");
+  }, [selectedCompany?.id]);
+
+  useEffect(() => {
+    const r = selectedCompany?.betterment_rule || selectedCompany?.policy_rules?.betterment;
+    const freeYrs = typeof r?.free_exemption_years === "number" ? r.free_exemption_years : 5;
+    const maxYrs = typeof r?.max_waiver_years === "number" ? r.max_waiver_years : 10;
+    setRuleDraft({
+      auto_waive_without_peril: Boolean(r?.auto_waive_without_peril ?? false),
+      allow_addon_purchase: Boolean(r?.allow_addon_purchase ?? true),
+      free_exemption_years: freeYrs,
+      max_waiver_years: maxYrs,
+      free_display: r?.free_display || `Up to ${freeYrs} Years`,
+      default_display: r?.default_display || "Up to 10 Years",
+    });
+  }, [selectedCompany?.id, selectedCompany?.betterment_rule, selectedCompany?.policy_rules]);
+
+  async function handleSaveRule() {
+    if (!selectedCompany || !onSaveBettermentRule) return;
+    if (ruleDraft.free_exemption_years > ruleDraft.max_waiver_years) {
+      setRuleError("Free exemption years cannot exceed max waiver years.");
+      setRuleStatus("error");
+      return;
+    }
+    setRuleSaving(true);
+    setRuleError("");
+    setRuleStatus("idle");
+    try {
+      await onSaveBettermentRule(selectedCompany.id, ruleDraft);
+      setRuleStatus("saved");
+    } catch (err) {
+      setRuleError(err instanceof Error ? err.message : "Failed to save betterment policy rules.");
+      setRuleStatus("error");
+    } finally {
+      setRuleSaving(false);
+    }
+  }
   const enabledConfigsCount = useMemo(() => {
     const configMap = new Map(companyConfigs.map((c) => [c.concept_id, c]));
     return concepts.filter((c) => {
@@ -109,6 +163,129 @@ export function CompanyBenefitsTab({
             <strong>Archived Profile (Read-Only):</strong> Profile <em>{selectedProfile?.name} (v{selectedProfile?.version_number})</em> is an immutable historical record. Toggling benefits and editing descriptions is locked. Click <strong>&quot;Clone as New Version&quot;</strong> in the profile bar above to create an editable draft.
           </span>
         </div>
+      )}
+
+      {selectedCompany && onSaveBettermentRule && (
+        <Card className="border border-[var(--rl-border)] bg-[var(--rl-surface)] p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--rl-border)] pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-[var(--rl-text-strong)]">
+                Waiver of Betterment Rules — {selectedCompany.name}
+              </h3>
+              <p className="mt-0.5 text-xs text-[var(--rl-text-muted)]">
+                Database-driven age thresholds controlling Box 1 free coverage, Box 2 paid option, and comparison scale.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {ruleStatus === "saved" && (
+                <span className="text-xs font-semibold text-emerald-700">Saved</span>
+              )}
+              <Button
+                size="sm"
+                onClick={() => void handleSaveRule()}
+                disabled={ruleSaving || isProfileArchived}
+                className="h-8 gap-1.5 text-xs"
+              >
+                {ruleSaving ? <ArrowClockwise size={13} className="animate-spin" /> : <CheckCircle size={13} weight="bold" />}
+                <span>{ruleSaving ? "Saving..." : "Save Policy Rules"}</span>
+              </Button>
+            </div>
+          </div>
+
+          {ruleError && (
+            <div className="mt-3 rounded-[var(--rl-radius-sm)] border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+              {ruleError}
+            </div>
+          )}
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+            <label className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] px-3 py-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ruleDraft.auto_waive_without_peril}
+                disabled={isProfileArchived || ruleSaving}
+                onChange={(e) => setRuleDraft((p) => ({ ...p, auto_waive_without_peril: e.target.checked }))}
+                className="h-3.5 w-3.5 accent-[var(--rl-black)]"
+              />
+              <span className="font-medium text-[var(--rl-text-strong)]">Auto-waive (Free)</span>
+            </label>
+
+            <label className="flex items-center gap-2 rounded-[var(--rl-radius-sm)] border border-[var(--rl-border)] bg-[var(--rl-bg)] px-3 py-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ruleDraft.allow_addon_purchase}
+                disabled={isProfileArchived || ruleSaving}
+                onChange={(e) => setRuleDraft((p) => ({ ...p, allow_addon_purchase: e.target.checked }))}
+                className="h-3.5 w-3.5 accent-[var(--rl-black)]"
+              />
+              <span className="font-medium text-[var(--rl-text-strong)]">Allow Box 2 Add-on</span>
+            </label>
+
+            <div className="space-y-1">
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--rl-text-muted)]">
+                Free Exemption Yrs
+              </label>
+              <Input
+                type="number"
+                min={0}
+                max={20}
+                value={ruleDraft.free_exemption_years}
+                disabled={isProfileArchived || ruleSaving}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setRuleDraft((p) => ({ ...p, free_exemption_years: Math.max(0, Number(e.target.value) || 0) }))
+                }
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--rl-text-muted)]">
+                Max Waiver Yrs
+              </label>
+              <Input
+                type="number"
+                min={0}
+                max={20}
+                value={ruleDraft.max_waiver_years}
+                disabled={isProfileArchived || ruleSaving}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setRuleDraft((p) => ({ ...p, max_waiver_years: Math.max(0, Number(e.target.value) || 0) }))
+                }
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--rl-text-muted)]">
+                Free Display Label
+              </label>
+              <Input
+                value={ruleDraft.free_display || ""}
+                disabled={isProfileArchived || ruleSaving}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setRuleDraft((p) => ({ ...p, free_display: e.target.value }))
+                }
+                placeholder="Up to 5 Years"
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--rl-text-muted)]">
+                Add-on Display Label
+              </label>
+              <Input
+                value={ruleDraft.default_display || ""}
+                disabled={isProfileArchived || ruleSaving}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setRuleDraft((p) => ({ ...p, default_display: e.target.value }))
+                }
+                placeholder="Up to 10 Years"
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+        </Card>
       )}
 
       {/* Header & Filter Controls */}

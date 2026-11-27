@@ -11,18 +11,35 @@ from typing import Any
 
 DEFAULT_BETTERMENT_RULE: dict[str, Any] = {
     "auto_waive_without_peril": False,
+    "allow_addon_purchase": True,
+    "free_exemption_years": 5,
     "max_waiver_years": 10,
     "default_display": "Up to 10 Years",
+    "free_display": "Up to 5 Years",
 }
 
 DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
     "mmip": {
         "allowed_coverage_types": ["third_party"],
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 0, "default_display": "No"},
+        "betterment": {
+            "auto_waive_without_peril": False,
+            "allow_addon_purchase": False,
+            "free_exemption_years": 0,
+            "max_waiver_years": 0,
+            "default_display": "No",
+            "free_display": "No",
+        },
         "towing": {"metric": "none", "base_limit": "No towing"},
     },
     "qbe": {
-        "betterment": {"auto_waive_without_peril": True, "max_waiver_years": 10, "default_display": "Up to 10 Years"},
+        "betterment": {
+            "auto_waive_without_peril": True,
+            "allow_addon_purchase": False,
+            "free_exemption_years": 10,
+            "max_waiver_years": 10,
+            "default_display": "Up to 10 Years",
+            "free_display": "Up to 10 Years",
+        },
         "towing": {
             "metric": "RM",
             "base_limit": "RM 500",
@@ -50,7 +67,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "etiqa": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 15, "default_display": "Up to 15 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "km",
             "base_limit": "200 km",
@@ -61,7 +78,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "takaful-malaysia": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 10, "default_display": "Up to 10 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "km",
             "base_limit": "50 km",
@@ -79,7 +96,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "lonpac": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 10, "default_display": "Up to 10 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "RM",
             "base_limit": "RM 400",
@@ -101,7 +118,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "berjaya-sompo": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 15, "default_display": "Up to 15 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "Unlimited",
             "base_limit": "Unlimited",
@@ -110,7 +127,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "tune-protect": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 15, "default_display": "Up to 15 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "RM",
             "base_limit": "RM 300",
@@ -127,7 +144,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "amassurance": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 15, "default_display": "Up to 15 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "km",
             "base_limit": "100 km",
@@ -140,7 +157,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "kurnia": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 15, "default_display": "Up to 15 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "km",
             "base_limit": "100 km",
@@ -153,7 +170,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "allianz": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 15, "default_display": "Up to 15 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "km",
             "base_limit": "150 km",
@@ -161,7 +178,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "liberty": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 15, "default_display": "Up to 15 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {
             "metric": "km",
             "base_limit": "100 km",
@@ -174,7 +191,7 @@ DEFAULT_COMPANY_POLICY_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "zurich": {
-        "betterment": {"auto_waive_without_peril": False, "max_waiver_years": 15, "default_display": "Up to 15 Years"},
+        "betterment": {"auto_waive_without_peril": False, "allow_addon_purchase": True, "free_exemption_years": 5, "max_waiver_years": 10, "default_display": "Up to 10 Years", "free_display": "Up to 5 Years"},
         "towing": {"metric": "km", "base_limit": "150 km"},
     },
 }
@@ -224,23 +241,53 @@ def resolve_company_policy_rules(
     return base_rules
 
 
+def resolve_company_betterment_policy(
+    company_name: str | None = None,
+    company_obj: Any = None,
+) -> dict[str, Any]:
+    """Return full DB-first betterment policy configuration for an underwriter."""
+    rules = resolve_company_policy_rules(company_name=company_name, company_obj=company_obj)
+    bet = rules.get("betterment") if isinstance(rules.get("betterment"), dict) else {}
+    auto_waive = bool(bet.get("auto_waive_without_peril", DEFAULT_BETTERMENT_RULE["auto_waive_without_peril"]))
+    allow_addon_purchase = bool(
+        bet.get("allow_addon_purchase", not auto_waive)
+    )
+    max_years = int(bet.get("max_waiver_years", DEFAULT_BETTERMENT_RULE["max_waiver_years"]))
+    if max_years <= 0:
+        allow_addon_purchase = False
+    free_years_default = max_years if auto_waive else (5 if max_years > 0 else 0)
+    free_exemption_years = int(bet.get("free_exemption_years", free_years_default))
+    default_disp = str(
+        bet.get("default_display")
+        or ("No" if max_years <= 0 else f"Up to {max_years} Years")
+    )
+    if default_disp.strip().lower() == "n/a (third party)":
+        default_disp = "No"
+    free_disp = str(
+        bet.get("free_display")
+        or (default_disp if auto_waive else ("No" if free_exemption_years <= 0 else f"Up to {free_exemption_years} Years"))
+    )
+    return {
+        "auto_waive_without_peril": auto_waive,
+        "allow_addon_purchase": allow_addon_purchase,
+        "free_exemption_years": max(0, free_exemption_years),
+        "max_waiver_years": max(0, max_years),
+        "default_display": default_disp,
+        "free_display": free_disp,
+    }
+
+
 def resolve_company_betterment_rule(
     company_name: str | None = None,
     company_obj: Any = None,
 ) -> tuple[bool, int, str]:
     """Return `(auto_waive_without_peril, max_waiver_years, default_display)`."""
-    rules = resolve_company_policy_rules(company_name=company_name, company_obj=company_obj)
-    bet = rules.get("betterment") if isinstance(rules.get("betterment"), dict) else DEFAULT_BETTERMENT_RULE
-    # Note legacy tests check Allianz/Zurich/Liberty/Kurnia display = Up to 15 Years unless overridden in DB
-    key = _match_rule_key(company_name or getattr(company_obj, "name", None))
-    if not rules and not key and company_name:
-        return False, 15, "Up to 15 Years"
-    auto_waive = bool(bet.get("auto_waive_without_peril", False))
-    max_years = int(bet.get("max_waiver_years", 15))
-    default_disp = str(bet.get("default_display") or f"Up to {max_years} Years")
-    if default_disp.strip().lower() == "n/a (third party)":
-        default_disp = "No"
-    return auto_waive, max_years, default_disp
+    pol = resolve_company_betterment_policy(company_name=company_name, company_obj=company_obj)
+    return (
+        bool(pol["auto_waive_without_peril"]),
+        int(pol["max_waiver_years"]),
+        str(pol["default_display"]),
+    )
 
 
 def resolve_company_towing_rule(

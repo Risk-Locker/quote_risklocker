@@ -133,7 +133,7 @@ def test_zero_fake_coverage_gate_for_optional_covers_and_detected_sync():
     assert is_auto_coverage_allowed_for_benefit("windscreen", "Windscreen Damage", "15,000.00", "2,250.00") is True
     assert is_auto_coverage_allowed_for_benefit("windscreen", "Windscreen Damage", "2,250.00", "2,250.00") is False
     assert is_auto_coverage_allowed_for_benefit("towing", "Unlimited Towing", "365 km", "0") is True
-    assert is_auto_coverage_allowed_for_benefit("betterment-protection", "Waiver of Betterment", "Up to 15 Years", "0") is True
+    assert is_auto_coverage_allowed_for_benefit("betterment-protection", "Waiver of Betterment", "Up to 10 Years", "0") is True
     assert is_auto_coverage_allowed_for_benefit("betterment-protection", "Waiver of Betterment", "RM 100.00", "100.00") is False
     assert is_auto_coverage_allowed_for_benefit("legal-liability-of-passengers", "Legal Liability Of Passengers", "RM 7.50", "7.50") is False
     assert is_auto_coverage_allowed_for_benefit("legal-liability-of-passengers", "Legal Liability Of Passengers", "RM 7.50", "") is False

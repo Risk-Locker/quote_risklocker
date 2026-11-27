@@ -18,7 +18,7 @@ Never invent Malaysian motor rules from memory or compute them in browser TypeSc
 
 - **STMB / Takaful Malaysia vs Etiqa vs Lonpac vs QBE vs AmAssurance vs Berjaya Sompo vs Tune Protect:**
   - **Towing Protection:** Never parse `"4" in text` (`towing_evaluator.py` defect) and never default unknown/unmentioned towing to `"Unlimited"` (`ncd_evaluator.py` defect). Match structured tokens (`unlimited`, explicit `km`, `200km`, etc.) cleanly and preserve exact reviewed overrides (`999 km`, `1,200 km`).
-  - **Waiver of Betterment:** Private Car Comprehensive only (ICE & EV) — **excluded** from motorcycles & commercial vehicles. QBE offers it in Defaults (`0 RM`, up to 10 years); Tune/Sompo/AmAssurance/Etiqa offer it in Add-ons (up to 15 years); Lonpac/STMB offer it in Add-ons (up to 10 years).
+  - **Waiver of Betterment:** Private Car Comprehensive only (ICE & EV) — **excluded** from motorcycles, commercial vehicles, TPO, and TPFT. Maximum cap is **10 years** across all insurers (up to & including 10 completed years = `0%` when waived; 11th year+ = `40%`, hidden by default). QBE waives automatically free in Box 1 up to 10 years (never sold as Box 2 add-on); other insurers show Box 1 `"Up to 5 Years"` free exemption for 0–4yo cars, Box 2 `"Up to 10 Years"` optional add-on for 5–10yo cars, and hide for 11+ years (while preserving explicit 1-in-1000 manual staff overrides).
   - **Coverage Type:** `coverage_type` is informational and never forces catalog entitlements silently.
 
 ## 3. Quotations vs Cover Notes & Calendar Renewals

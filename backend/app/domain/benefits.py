@@ -111,6 +111,8 @@ class BenefitValue(BaseModel):
         if not isinstance(data, dict):
             return data
         normalized = dict(data)
+        if normalized.get("type") == "formula" and not normalized.get("expression") and normalized.get("formula") is not None:
+            normalized["expression"] = str(normalized.pop("formula"))
         if normalized.get("type") in {"money", "distance", "percentage", "per_day"}:
             value = normalized.get("value")
             if value is not None and not isinstance(value, bool):

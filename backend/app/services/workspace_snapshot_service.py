@@ -322,12 +322,20 @@ def _workspace_benefit_cards(
     except Exception:
         pass
 
+    betterment_policy_context = None
+    try:
+        from app.domain.betterment_engine import resolve_draft_betterment_policy_context
+        betterment_policy_context = resolve_draft_betterment_policy_context(db, draft, company=draft_company)
+    except Exception:
+        betterment_policy_context = None
+
     return resolve_benefit_cards(
         selections=valid_selections, offerings=offerings, concepts=concepts, relations=relations, facets=facets,
         plans=plans, eval_context=eval_context, insurer_catalog=insurer_catalog,
         company_conditions=company_conditions, company_configs=company_configs,
         company_bundles=company_bundles, catalog_name=catalog_name,
         visual_profile_assets=visual_profile_assets,
+        betterment_policy_context=betterment_policy_context,
     )
 
 

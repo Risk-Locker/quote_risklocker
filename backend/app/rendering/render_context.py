@@ -998,6 +998,7 @@ def resolve_benefit_cards(
     company_bundles: list[Any] | None = None,
     catalog_name: str | None = None,
     visual_profile_assets: dict[str, str] | None = None,
+    betterment_policy_context: dict[str, Any] | None = None,
 ) -> dict[str, list[dict]]:
     """Resolve current and available cards solely from pinned rows and decisions."""
     _global_card = globals().get("_card")
@@ -1481,6 +1482,132 @@ def resolve_benefit_cards(
             synth_card["icon_hint"] = str(eff_spec["icon_hint"])
         current_cards.append(synth_card)
         emitted_current_cids.add(t_cid)
+
+    # Age- and insurer-driven Betterment Waiver placement (DB policy_rules + tracked/draft vehicle age)
+    if betterment_policy_context is not None:
+        from app.domain.benefits import benefit_auto_coverage_domain
+
+        def _is_bet_card_or_concept(concept_key: str | None, label: str | None) -> bool:
+            return benefit_auto_coverage_domain(concept_key, label) == "betterment"
+
+        sel_by_id = {str(getattr(s, "id", "") or ""): s for s in selections if getattr(s, "id", None)}
+
+        def _is_explicit_bet_card(card_dict: dict) -> bool:
+            sid = str(card_dict.get("selection_id") or "")
+            sel_obj = sel_by_id.get(sid)
+            if sel_obj is None:
+                return False
+            if getattr(sel_obj, "item_kind", None) == "custom":
+                return True
+            ev = getattr(sel_obj, "evidence_snapshot", None)
+            if isinstance(ev, dict):
+                src = str(ev.get("source") or "").strip().lower()
+                if src in {"manual", "extraction", "extracted", "comparison_sync", "gemini_multimodal"} or ev.get("manually_edited"):
+                    return True
+            if getattr(sel_obj, "selected_by", None):
+                return True
+            if getattr(sel_obj, "source_line_id", None) and getattr(sel_obj, "state", None) == "current":
+                return True
+            return False
+
+        bet_concept = next(
+            (
+                c for c in concepts_by_id.values()
+                if _is_bet_card_or_concept(getattr(c, "concept_key", None), getattr(c, "label", None))
+            ),
+            None,
+        )
+        bet_cid = str(bet_concept.id) if bet_concept else ""
+        bet_removed = bool(bet_cid and bet_cid in removed_concepts)
+        bet_disabled = bool(bet_cid and bet_cid in disabled_concept_ids)
+        placement = str(betterment_policy_context.get("placement") or "")
+        pol_val = str(betterment_policy_context.get("display_value") or "").strip()
+        pol_desc = str(betterment_policy_context.get("description") or "").strip()
+
+        if placement == "hidden":
+            current_cards = [
+                c for c in current_cards
+                if not _is_bet_card_or_concept(c.get("concept_key"), c.get("label")) or _is_explicit_bet_card(c)
+            ]
+            available_cards = [
+                c for c in available_cards
+                if not _is_bet_card_or_concept(c.get("concept_key"), c.get("label")) or _is_explicit_bet_card(c)
+            ]
+        elif placement == "box1_free":
+            has_explicit_addon_move = any(
+                _is_bet_card_or_concept(c.get("concept_key"), c.get("label")) and _is_explicit_bet_card(c)
+                for c in available_cards
+            )
+            available_cards = [
+                c for c in available_cards
+                if not _is_bet_card_or_concept(c.get("concept_key"), c.get("label")) or _is_explicit_bet_card(c)
+            ]
+            existing_bet_cur = next(
+                (c for c in current_cards if _is_bet_card_or_concept(c.get("concept_key"), c.get("label"))),
+                None,
+            )
+            if existing_bet_cur is not None:
+                if not _is_explicit_bet_card(existing_bet_cur) or not existing_bet_cur.get("has_manual_value_override"):
+                    if pol_val and not existing_bet_cur.get("has_manual_value_override"):
+                        existing_bet_cur["value"] = pol_val
+                    if not _is_explicit_bet_card(existing_bet_cur):
+                        existing_bet_cur["cost_status"] = "included"
+                        existing_bet_cur["is_addon"] = False
+                        existing_bet_cur["is_extra"] = False
+                        existing_bet_cur["is_pure_default"] = True
+                        existing_bet_cur["price"] = None
+                        existing_bet_cur["optional_price"] = None
+                        if pol_desc:
+                            existing_bet_cur["description"] = pol_desc
+            elif bet_concept is not None and not bet_removed and not bet_disabled and not has_explicit_addon_move:
+                bet_offering = next(
+                    (
+                        o for o in offerings
+                        if str(o.concept_id) == bet_cid and getattr(o, "status", "active") in {"active", "compatibility"}
+                    ),
+                    None,
+                )
+                synth_offering = bet_offering or type(
+                    "PolicyBettermentOffering",
+                    (),
+                    {
+                        "id": f"policy:{bet_cid}",
+                        "offering_key": "betterment-protection",
+                        "concept_id": bet_concept.id,
+                        "role": "included",
+                        "offering_kind": "base",
+                        "label_override": None,
+                        "description_override": pol_desc or None,
+                        "typed_value": {"type": "text", "display_text": pol_val} if pol_val else None,
+                        "display_value": pol_val or None,
+                        "optional_price": None,
+                        "sort_order": int(getattr(bet_concept, "sort_order", 40) or 40),
+                        "presentation_facet_ids": [],
+                    },
+                )()
+                bet_card = _card(
+                    selection=None,
+                    offering=synth_offering,
+                    concept=bet_concept,
+                    typed_value={"type": "text", "display_text": pol_val} if pol_val else None,
+                    visual_profile_assets=visual_profile_assets,
+                )
+                bet_card["cost_status"] = "included"
+                bet_card["is_addon"] = False
+                bet_card["is_extra"] = False
+                bet_card["is_pure_default"] = True
+                bet_card["price"] = None
+                bet_card["optional_price"] = None
+                if pol_val:
+                    bet_card["value"] = pol_val
+                if pol_desc:
+                    bet_card["description"] = pol_desc
+                current_cards.append(bet_card)
+        elif placement == "box2_optional" and pol_val:
+            for c in [*current_cards, *available_cards]:
+                if _is_bet_card_or_concept(c.get("concept_key"), c.get("label")) and not c.get("has_manual_value_override"):
+                    if not c.get("value") or str(c.get("value")).strip() in {"Up to 15 Years", "Standard"}:
+                        c["value"] = pol_val
 
     # Strictly guarantee no duplicate benefits between current_benefits and available_addons
     current_concept_ids = {str(card.get("concept_id")) for card in current_cards if card.get("concept_id")}

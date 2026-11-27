@@ -36,6 +36,7 @@ import { BuilderNav } from "@/components/builder-nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -47,6 +48,7 @@ import { api, API_BASE, fileUrl } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
 import type {
   AssetSummary as Asset,
+  BettermentPolicyRule,
   CatalogRevisionSummary as CatalogRevision,
   CatalogSummary as Catalog,
   CatalogWorkspaceData as CatalogWorkspace,
@@ -77,6 +79,7 @@ import type {
 } from "./types";
 import { ROLE_FALLBACK } from "./types";
 import { BenefitConditionsTab } from "./components/benefit-conditions-tab";
+import { CatalogOfferingCard } from "./components/catalog-offering-card";
 import { OverviewMatrixTab } from "./components/overview-matrix-tab";
 import { CompanyBenefitsTab } from "./components/company-benefits-tab";
 import { BenefitsStepNavigator } from "./components/benefits-step-navigator";
@@ -131,170 +134,6 @@ function effectiveRole(offering: Offering): string {
   return offering.role || ROLE_FALLBACK[offering.offering_kind] || "included";
 }
 
-interface OfferingDescriptionEditorProps {
-  offering: Offering;
-  concept: Concept;
-  companyBaselineDesc: string | null;
-  onSave: (offering: Offering, newDesc: string) => void;
-  disabled?: boolean;
-}
-
-function OfferingDescriptionEditor({
-  offering,
-  concept,
-  companyBaselineDesc,
-  onSave,
-  disabled = false,
-}: OfferingDescriptionEditorProps) {
-  // Precedence: Tier Custom -> Company Baseline -> Global Default
-  const hasCustomOverride = Boolean(
-    offering.description_override && offering.description_override.trim().length > 0
-  );
-  const fallbackDesc = companyBaselineDesc || concept.description || "";
-  const serverDesc = hasCustomOverride ? (offering.description_override || "") : fallbackDesc;
-
-  const [text, setText] = useState<string>(serverDesc);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
-  const textRef = useRef(text);
-  textRef.current = text;
-  const isDirtyRef = useRef(false);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Sync state if offering ID or server description changes externally while user is not editing
-  useEffect(() => {
-    if (!isDirtyRef.current) {
-      setText(serverDesc);
-      textRef.current = serverDesc;
-    }
-  }, [serverDesc, offering.id]);
-
-  const flushSave = useCallback(() => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
-    }
-    if (!isDirtyRef.current) return;
-    isDirtyRef.current = false;
-
-    const currentVal = textRef.current.trim();
-    const currentOfferingDesc = (offering.description_override || "").trim();
-
-    // If nothing changed compared to what is currently saved in offering, do nothing
-    if (currentVal === currentOfferingDesc) {
-      setSaveStatus("idle");
-      return;
-    }
-
-    setSaveStatus("saving");
-    // If text was cleared or equals the fallback, save empty string to reset the override
-    if (currentVal === "" || currentVal === fallbackDesc.trim()) {
-      onSave(offering, "");
-    } else {
-      onSave(offering, currentVal);
-    }
-    setTimeout(() => setSaveStatus("saved"), 300);
-    setTimeout(() => setSaveStatus("idle"), 2000);
-  }, [offering, fallbackDesc, onSave]);
-
-  // Window blur listener to ensure saving when switching tabs or windows
-  useEffect(() => {
-    const handleWindowBlur = () => {
-      if (isDirtyRef.current) {
-        flushSave();
-      }
-    };
-    window.addEventListener("blur", handleWindowBlur);
-    return () => {
-      window.removeEventListener("blur", handleWindowBlur);
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-    };
-  }, [flushSave]);
-
-  const handleChange = (newVal: string) => {
-    setText(newVal);
-    textRef.current = newVal;
-    isDirtyRef.current = true;
-    setSaveStatus("idle");
-
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    debounceTimerRef.current = setTimeout(() => {
-      flushSave();
-    }, 600);
-  };
-
-  const handleReset = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
-    }
-    isDirtyRef.current = false;
-    setText(fallbackDesc);
-    textRef.current = fallbackDesc;
-    setSaveStatus("saving");
-    onSave(offering, "");
-    setTimeout(() => setSaveStatus("saved"), 300);
-    setTimeout(() => setSaveStatus("idle"), 2000);
-  };
-
-  return (
-    <div className="mt-2 pt-1.5 border-t border-[var(--rl-border)]/50 space-y-1" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center justify-between text-[10px]">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[var(--rl-text-muted)] font-medium">Description:</span>
-          {saveStatus === "saving" && (
-            <span className="text-[9px] text-[var(--rl-text-muted)] animate-pulse">saving...</span>
-          )}
-          {saveStatus === "saved" && (
-            <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold">saved</span>
-          )}
-        </div>
-        {hasCustomOverride ? (
-          <div className="flex items-center gap-1">
-            <span className="rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-1 py-0.2 text-[9.5px] font-semibold" title="Custom override for this tier">
-              Tier Custom
-            </span>
-            <button
-              type="button"
-              title="Reset to default description"
-              onClick={handleReset}
-              className="text-[var(--rl-text-muted)] hover:text-[var(--rl-red)] transition-colors p-0.5"
-            >
-              <ArrowCounterClockwise size={11} />
-            </button>
-          </div>
-        ) : companyBaselineDesc ? (
-          <span className="rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1 py-0.2 text-[9.5px] font-semibold" title="Inherited from Tab 1 Company Baseline">
-            Company Baseline
-          </span>
-        ) : concept.description ? (
-          <span className="rounded bg-[var(--rl-bg)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] px-1 py-0.2 text-[9.5px]">
-            Global Default
-          </span>
-        ) : (
-          <span className="text-[9.5px] text-[var(--rl-text-muted)] italic">
-            None
-          </span>
-        )}
-      </div>
-      <input
-        type="text"
-        value={text}
-        disabled={disabled}
-        onChange={(e) => handleChange(e.target.value)}
-        onBlur={flushSave}
-        className="w-full rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[10.5px] text-[var(--rl-text-strong)] placeholder:text-[var(--rl-text-muted)] placeholder:italic focus:outline-none focus:ring-1 focus:ring-[var(--rl-black)]"
-        placeholder={fallbackDesc || "Enter short description..."}
-        title="Short benefit description shown on quote cards"
-      />
-    </div>
-  );
-}
-
 let cachedReferenceData: {
   companies: Company[];
   segments: HierarchyItem[];
@@ -330,6 +169,9 @@ function BenefitsPageContent() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingOfferingIds, setSavingOfferingIds] = useState<Set<string>>(() => new Set());
+  const [pendingOfferingDelete, setPendingOfferingDelete] = useState<{ offering: Offering; concept: Concept } | null>(null);
+  const [removingOffering, setRemovingOffering] = useState(false);
   const [dialog, setDialog] = useState<"config" | "bundle" | "clone" | null>(null);
   const [builderCoverageFilter, setBuilderCoverageFilter] = useState<"comprehensive" | "tpft" | "tpo">("comprehensive");
 
@@ -485,6 +327,7 @@ function BenefitsPageContent() {
       const payload: Record<string, unknown> = {
         id: offering_id,
         [field === "display_value" ? "display_value" : "description_override"]: cleanVal || null,
+        ...(field === "display_value" ? { clear_value: !cleanVal } : {}),
       };
       await api(`/business/catalogs/${catalog_id}/offerings`, {
         method: "POST",
@@ -495,6 +338,62 @@ function BenefitsPageContent() {
       if (selectedCompanyId) {
         void loadMatrix(selectedCompanyId);
       }
+    }
+  }
+
+  async function clearMatrixCoverage(catalogId: string, offeringId: string) {
+    setMatrixData((prev) =>
+      prev
+        ? {
+            ...prev,
+            scenarios: prev.scenarios.map((s) =>
+              s.catalog_id === catalogId
+                ? {
+                    ...s,
+                    defaults: s.defaults.map((o) => (o.offering_id === offeringId ? { ...o, display_value: "" } : o)),
+                    addons: s.addons.map((o) => (o.offering_id === offeringId ? { ...o, display_value: "" } : o)),
+                  }
+                : s
+            ),
+          }
+        : prev
+    );
+    try {
+      await api(`/business/catalogs/${catalogId}/offerings`, {
+        method: "POST",
+        body: JSON.stringify({ id: offeringId, display_value: null, clear_value: true }),
+      });
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      if (selectedCompanyId) void loadMatrix(selectedCompanyId);
+    }
+  }
+
+  async function removeMatrixOffering(catalogId: string, offeringId: string) {
+    try {
+      await api(`/business/catalogs/${catalogId}/offerings/${offeringId}`, {
+        method: "DELETE",
+      });
+      setMatrixData((prev) =>
+        prev
+          ? {
+              ...prev,
+              scenarios: prev.scenarios.map((s) =>
+                s.catalog_id === catalogId
+                  ? {
+                      ...s,
+                      defaults: s.defaults.filter((o) => o.offering_id !== offeringId),
+                      addons: s.addons.filter((o) => o.offering_id !== offeringId),
+                    }
+                  : s
+              ),
+            }
+          : prev
+      );
+      catalogCacheRef.current.delete(catalogId);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      if (selectedCompanyId) void loadMatrix(selectedCompanyId);
     }
   }
 
@@ -893,21 +792,37 @@ function BenefitsPageContent() {
     window.location.href = `${API_BASE}/business/companies/${selectedCompanyId}/export-matrix?format=xlsx`;
   }
 
+  const companiesRef = useRef<Company[]>(companies);
+  companiesRef.current = companies;
+  const companyWorkspaceRef = useRef<CompanyWorkspace | null>(companyWorkspace);
+  companyWorkspaceRef.current = companyWorkspace;
+  const screenTabRef = useRef<ScreenTab>(screenTab);
+  screenTabRef.current = screenTab;
+
+  const markOfferingSaving = useCallback((idKey: string, active: boolean) => {
+    setSavingOfferingIds((prev) => {
+      const next = new Set(prev);
+      if (active) next.add(idKey);
+      else next.delete(idKey);
+      return next;
+    });
+  }, []);
+
   const syncUrl = useCallback(
     (companyId: string, productId = "", catalogId = "") => {
       const next = new URLSearchParams();
       if (companyId) {
-        const comp = companies.find((c) => c.id === companyId);
+        const comp = companiesRef.current.find((c) => c.id === companyId);
         next.set("company", comp ? getEntitySlug(comp) : companyId);
       }
       if (productId) {
-        const prod = companyWorkspace?.products?.find((p) => p.id === productId);
+        const prod = companyWorkspaceRef.current?.products?.find((p) => p.id === productId);
         next.set("product", prod ? getEntitySlug(prod) : productId);
       }
       if (catalogId) {
         const cat =
-          companyWorkspace?.catalogs?.find((c) => c.id === catalogId) ||
-          (catalogWorkspace?.catalog?.id === catalogId ? catalogWorkspace.catalog : undefined);
+          companyWorkspaceRef.current?.catalogs?.find((c) => c.id === catalogId) ||
+          (catalogWorkspaceRef.current?.catalog?.id === catalogId ? catalogWorkspaceRef.current.catalog : undefined);
         next.set("catalog", cat ? getEntitySlug(cat) : catalogId);
       }
 
@@ -922,10 +837,10 @@ function BenefitsPageContent() {
         companyId,
         productId,
         catalogId,
-        screenTab,
+        screenTab: screenTabRef.current,
       });
     },
-    [companies, companyWorkspace, catalogWorkspace, screenTab]
+    []
   );
 
   const loadReferenceData = useCallback(async (force = false) => {
@@ -1895,7 +1810,27 @@ ${aiMarkdownTable}`;
     return { applies_to_type: selectedCatalog?.product_id ? "product" : null, applies_to_id: selectedCatalog?.product_id || null };
   }
 
-  // ── 1-Click Fast Toggle Sticker Handler (Optimistic UI, Zero Reload) ───
+  async function saveCompanyBettermentRule(companyId: string, rule: BettermentPolicyRule) {
+    setError("");
+    const res = await api<{ company: Company }>(`/business/companies/${companyId}/policy-rules`, {
+      method: "PATCH",
+      body: JSON.stringify(rule),
+    });
+    if (res.company) {
+      setCompanies((prev) => prev.map((c) => (c.id === companyId ? { ...c, ...res.company } : c)));
+      setCompanyWorkspace((prev) =>
+        prev && prev.company.id === companyId ? { ...prev, company: { ...prev.company, ...res.company } } : prev
+      );
+      companyCacheRef.current.delete(companyId);
+      if (cachedReferenceData) {
+        cachedReferenceData.companies = cachedReferenceData.companies.map((c) =>
+          c.id === companyId ? { ...c, ...res.company } : c
+        );
+      }
+    }
+  }
+
+  // ── 1-Click Fast Add / Explicit Remove / Role Move Handlers ────────────
   async function toggleConceptFast(concept: Concept, targetRole: "included" | "addon_option") {
     if (inFlightRef.current.has(concept.id)) {
       return;
@@ -1917,106 +1852,231 @@ ${aiMarkdownTable}`;
           return !o.applies_to_id || o.applies_to_id === currentCatalog.product_id || o.applies_to_type === "product";
         });
 
-        setSaving(true);
+        markOfferingSaving(concept.id, true);
         setError("");
 
         if (existing) {
-          // 1. Optimistic Delete (0ms delay)
-          const prevWorkspace = currentWorkspace;
-          const nextRevision = (currentCatalog.revision || 1) + 1;
-          const updatedWorkspace: CatalogWorkspace = {
-            ...currentWorkspace,
-            catalog: { ...currentCatalog, revision: nextRevision },
-            offerings: currentOfferings.filter((o) => o.id !== existing.id),
-          };
-          setCatalogWorkspace(updatedWorkspace);
-          catalogWorkspaceRef.current = updatedWorkspace;
-          catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
-
-          try {
-            await api(`/business/catalogs/${currentCatalog.id}/offerings/${existing.id}?base_revision=${currentCatalog.revision}`, {
-              method: "DELETE",
-            });
-          } catch (err) {
-            // Rollback on error
-            setCatalogWorkspace(prevWorkspace);
-            catalogWorkspaceRef.current = prevWorkspace;
-            catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
-            setError(apiErrorMessage(err));
+          // If already exists for this concept, do not silently delete on add; move role if needed
+          if (effectiveRole(existing) !== targetRole) {
+            await moveOfferingRoleInline(existing, targetRole);
           }
-        } else {
-          // 2. Optimistic Add (0ms delay)
-          const tempId = `temp-${Date.now()}`;
-          const variantStr = concept.variants && concept.variants.length > 0 ? concept.variants[0] : "";
-          const labelOverride = variantStr ? `${concept.label} (${variantStr})` : null;
+          return;
+        }
 
-          const optimisticOffering: Offering = {
-            id: tempId,
-            catalog_revision_id: currentWorkspace.active_revision.id,
-            offering_key: `${concept.concept_key}-${Date.now()}`,
-            concept_id: concept.id,
-            offering_kind: targetRole === "included" ? "base" : "optional",
-            applies_to_type: target.applies_to_type,
-            applies_to_id: targetPkgId,
-            role: targetRole,
-            label_override: labelOverride,
-            display_value: null,
-            sort_order: currentPackageOfferings.length + 1,
-            status: "active",
-            source_aliases: [],
-            source_citation: {},
-            presentation_facet_ids: [],
-            concept: concept,
+        const tempId = `temp-${Date.now()}`;
+        const variantStr = concept.variants && concept.variants.length > 0 ? concept.variants[0] : "";
+        const labelOverride = variantStr ? `${concept.label} (${variantStr})` : null;
+
+        const optimisticOffering: Offering = {
+          id: tempId,
+          catalog_revision_id: currentWorkspace.active_revision.id,
+          offering_key: `${concept.concept_key}-${Date.now()}`,
+          concept_id: concept.id,
+          offering_kind: targetRole === "included" ? "base" : "optional",
+          applies_to_type: target.applies_to_type,
+          applies_to_id: targetPkgId,
+          role: targetRole,
+          label_override: labelOverride,
+          display_value: null,
+          sort_order: currentPackageOfferings.length + 1,
+          status: "active",
+          source_aliases: [],
+          source_citation: {},
+          presentation_facet_ids: [],
+          concept: concept,
+        };
+
+        const prevWorkspace = currentWorkspace;
+        const nextRevision = (currentCatalog.revision || 1) + 1;
+        const updatedWorkspace: CatalogWorkspace = {
+          ...currentWorkspace,
+          catalog: { ...currentCatalog, revision: nextRevision },
+          offerings: [...currentOfferings, optimisticOffering],
+        };
+        setCatalogWorkspace(updatedWorkspace);
+        catalogWorkspaceRef.current = updatedWorkspace;
+        catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
+
+        const payload: Record<string, unknown> = {
+          base_revision: currentCatalog.revision,
+          offering_key: optimisticOffering.offering_key,
+          concept_id: concept.id,
+          offering_kind: targetRole === "included" ? "base" : "optional",
+          applies_to_type: target.applies_to_type,
+          applies_to_id: targetPkgId,
+          role: targetRole,
+          label_override: labelOverride,
+          display_value: null,
+          sort_order: currentPackageOfferings.length + 1,
+          status: "active",
+        };
+
+        try {
+          const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          const finalWorkspace: CatalogWorkspace = {
+            ...updatedWorkspace,
+            offerings: updatedWorkspace.offerings.map((o) => (o.id === tempId ? { ...res.offering, concept } : o)),
           };
-
-          const prevWorkspace = currentWorkspace;
-          const nextRevision = (currentCatalog.revision || 1) + 1;
-          const updatedWorkspace: CatalogWorkspace = {
-            ...currentWorkspace,
-            catalog: { ...currentCatalog, revision: nextRevision },
-            offerings: [...currentOfferings, optimisticOffering],
-          };
-          setCatalogWorkspace(updatedWorkspace);
-          catalogWorkspaceRef.current = updatedWorkspace;
-          catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
-
-          const payload: Record<string, unknown> = {
-            base_revision: currentCatalog.revision,
-            offering_key: optimisticOffering.offering_key,
-            concept_id: concept.id,
-            offering_kind: targetRole === "included" ? "base" : "optional",
-            applies_to_type: target.applies_to_type,
-            applies_to_id: targetPkgId,
-            role: targetRole,
-            label_override: labelOverride,
-            display_value: null,
-            sort_order: currentPackageOfferings.length + 1,
-            status: "active",
-          };
-
-          try {
-            const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
-              method: "POST",
-              body: JSON.stringify(payload),
-            });
-            const finalWorkspace: CatalogWorkspace = {
-              ...updatedWorkspace,
-              offerings: updatedWorkspace.offerings.map((o) => (o.id === tempId ? { ...res.offering, concept } : o)),
-            };
-            setCatalogWorkspace(finalWorkspace);
-            catalogWorkspaceRef.current = finalWorkspace;
-            catalogCacheRef.current.set(currentCatalog.id, { workspace: finalWorkspace, ts: Date.now() });
-          } catch (err) {
-            // Rollback on error
-            setCatalogWorkspace(prevWorkspace);
-            catalogWorkspaceRef.current = prevWorkspace;
-            catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
-            setError(apiErrorMessage(err));
-          }
+          setCatalogWorkspace(finalWorkspace);
+          catalogWorkspaceRef.current = finalWorkspace;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: finalWorkspace, ts: Date.now() });
+        } catch (err) {
+          setCatalogWorkspace(prevWorkspace);
+          catalogWorkspaceRef.current = prevWorkspace;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+          setError(apiErrorMessage(err));
         }
       } finally {
         inFlightRef.current.delete(concept.id);
-        setSaving(false);
+        markOfferingSaving(concept.id, false);
+      }
+    });
+  }
+
+  async function removeOfferingConfirmed(offering: Offering, concept: Concept) {
+    enqueueTask(async () => {
+      const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
+      const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
+      if (!currentCatalog || !currentWorkspace) return;
+      const prevWorkspace = currentWorkspace;
+      const nextRevision = (currentCatalog.revision || 1) + 1;
+      markOfferingSaving(concept.id, true);
+      setError("");
+
+      const updatedWorkspace: CatalogWorkspace = {
+        ...currentWorkspace,
+        catalog: { ...currentCatalog, revision: nextRevision },
+        offerings: currentWorkspace.offerings.filter((o) => o.id !== offering.id),
+      };
+      setCatalogWorkspace(updatedWorkspace);
+      catalogWorkspaceRef.current = updatedWorkspace;
+      catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
+
+      try {
+        await api(`/business/catalogs/${currentCatalog.id}/offerings/${offering.id}?base_revision=${currentCatalog.revision}`, {
+          method: "DELETE",
+        });
+      } catch (err) {
+        setCatalogWorkspace(prevWorkspace);
+        catalogWorkspaceRef.current = prevWorkspace;
+        catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+        setError(apiErrorMessage(err));
+      } finally {
+        markOfferingSaving(concept.id, false);
+      }
+    });
+  }
+
+  async function moveOfferingRoleInline(offering: Offering, targetRole: "included" | "addon_option") {
+    enqueueTask(async () => {
+      const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
+      const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
+      if (!currentCatalog || !currentWorkspace) return;
+      const fresh = currentWorkspace.offerings.find((o) => o.id === offering.id) || offering;
+      const key = fresh.concept_id || fresh.id;
+      markOfferingSaving(key, true);
+      setError("");
+      const prevWorkspace = currentWorkspace;
+      const nextKind = targetRole === "included" ? "base" : "optional";
+      const nextRevision = (currentCatalog.revision || 1) + 1;
+
+      const updatedWorkspace: CatalogWorkspace = {
+        ...currentWorkspace,
+        catalog: { ...currentCatalog, revision: nextRevision },
+        offerings: currentWorkspace.offerings.map((o) =>
+          o.id === fresh.id ? { ...o, role: targetRole, offering_kind: nextKind } : o
+        ),
+      };
+      setCatalogWorkspace(updatedWorkspace);
+      catalogWorkspaceRef.current = updatedWorkspace;
+      catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
+
+      try {
+        const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
+          method: "POST",
+          body: JSON.stringify({
+            id: fresh.id,
+            base_revision: currentCatalog.revision,
+            role: targetRole,
+            offering_kind: nextKind,
+          }),
+        });
+        if (res.offering) {
+          const synced: CatalogWorkspace = {
+            ...updatedWorkspace,
+            offerings: updatedWorkspace.offerings.map((o) =>
+              o.id === fresh.id ? { ...o, ...res.offering, concept: o.concept } : o
+            ),
+          };
+          setCatalogWorkspace(synced);
+          catalogWorkspaceRef.current = synced;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: synced, ts: Date.now() });
+        }
+      } catch (err) {
+        setCatalogWorkspace(prevWorkspace);
+        catalogWorkspaceRef.current = prevWorkspace;
+        catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+        setError(apiErrorMessage(err));
+      } finally {
+        markOfferingSaving(key, false);
+      }
+    });
+  }
+
+  async function updateOfferingLabelInline(offering: Offering, newLabel: string) {
+    enqueueTask(async () => {
+      const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
+      const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
+      if (!currentCatalog || !currentWorkspace) return;
+      const fresh = currentWorkspace.offerings.find((o) => o.id === offering.id) || offering;
+      const key = fresh.concept_id || fresh.id;
+      markOfferingSaving(key, true);
+      setError("");
+      const cleanLabel = newLabel.trim() || null;
+      const prevWorkspace = currentWorkspace;
+      const nextRevision = (currentCatalog.revision || 1) + 1;
+
+      const updatedWorkspace: CatalogWorkspace = {
+        ...currentWorkspace,
+        catalog: { ...currentCatalog, revision: nextRevision },
+        offerings: currentWorkspace.offerings.map((o) =>
+          o.id === fresh.id ? { ...o, label_override: cleanLabel } : o
+        ),
+      };
+      setCatalogWorkspace(updatedWorkspace);
+      catalogWorkspaceRef.current = updatedWorkspace;
+      catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
+
+      try {
+        const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
+          method: "POST",
+          body: JSON.stringify({
+            id: fresh.id,
+            base_revision: currentCatalog.revision,
+            label_override: cleanLabel ?? "",
+          }),
+        });
+        if (res.offering) {
+          const synced: CatalogWorkspace = {
+            ...updatedWorkspace,
+            offerings: updatedWorkspace.offerings.map((o) =>
+              o.id === fresh.id ? { ...o, ...res.offering, concept: o.concept } : o
+            ),
+          };
+          setCatalogWorkspace(synced);
+          catalogWorkspaceRef.current = synced;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: synced, ts: Date.now() });
+        }
+      } catch (err) {
+        setCatalogWorkspace(prevWorkspace);
+        catalogWorkspaceRef.current = prevWorkspace;
+        catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
+        setError(apiErrorMessage(err));
+      } finally {
+        markOfferingSaving(key, false);
       }
     });
   }
@@ -2027,55 +2087,54 @@ ${aiMarkdownTable}`;
       const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
       const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
       if (!currentCatalog || !currentWorkspace) return;
-      setSaving(true);
+      const fresh = currentWorkspace.offerings.find((o) => o.id === offering.id) || offering;
+      const key = fresh.concept_id || fresh.id;
+      markOfferingSaving(key, true);
       setError("");
-      const concept = concepts.find((c) => c.id === offering.concept_id);
-      const label = `${concept?.label || offering.offering_key} (${variant})`;
+      const concept = concepts.find((c) => c.id === fresh.concept_id);
+      const label = `${concept?.label || fresh.offering_key} (${variant})`;
       const prevWorkspace = currentWorkspace;
       const nextRevision = (currentCatalog.revision || 1) + 1;
 
       const updatedWorkspace: CatalogWorkspace = {
         ...currentWorkspace,
         catalog: { ...currentCatalog, revision: nextRevision },
-        offerings: currentWorkspace.offerings.map((o) => (o.id === offering.id ? { ...o, label_override: label } : o)),
+        offerings: currentWorkspace.offerings.map((o) => (o.id === fresh.id ? { ...o, label_override: label } : o)),
       };
       setCatalogWorkspace(updatedWorkspace);
       catalogWorkspaceRef.current = updatedWorkspace;
       catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
 
       try {
-        const payload = {
-          id: offering.id,
-          offering_key: offering.offering_key,
-          offering_kind: offering.offering_kind,
-          concept_id: offering.concept_id,
-          applies_to_type: offering.applies_to_type,
-          applies_to_id: offering.applies_to_id,
-          role: offering.role,
-          base_revision: currentCatalog.revision,
-          label_override: label,
-        };
-        await api(`/business/catalogs/${currentCatalog.id}/offerings`, {
+        const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            id: fresh.id,
+            base_revision: currentCatalog.revision,
+            label_override: label,
+          }),
         });
+        if (res.offering) {
+          const synced: CatalogWorkspace = {
+            ...updatedWorkspace,
+            offerings: updatedWorkspace.offerings.map((o) =>
+              o.id === fresh.id ? { ...o, ...res.offering, concept: o.concept } : o
+            ),
+          };
+          setCatalogWorkspace(synced);
+          catalogWorkspaceRef.current = synced;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: synced, ts: Date.now() });
+        }
       } catch (err) {
         setCatalogWorkspace(prevWorkspace);
         catalogWorkspaceRef.current = prevWorkspace;
         catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
         setError(apiErrorMessage(err));
       } finally {
-        setSaving(false);
+        markOfferingSaving(key, false);
       }
     });
   }
-
-  const cleanCoverageValue = (val?: string | null) => {
-    if (!val) return "";
-    const s = String(val).trim();
-    if (!s || /^(?:included|optional|foc|as quoted|selected|standard)$/i.test(s)) return "";
-    return s;
-  };
 
   // ── Inline Display Value Editor (Optimistic UI, Zero Reload) ──────────
   async function updateOfferingValueInline(offering: Offering, newValue: string) {
@@ -2083,47 +2142,57 @@ ${aiMarkdownTable}`;
       const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
       const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
       if (!currentCatalog || !currentWorkspace) return;
-      setSaving(true);
+      const fresh = currentWorkspace.offerings.find((o) => o.id === offering.id) || offering;
+      const key = fresh.concept_id || fresh.id;
+      markOfferingSaving(key, true);
       setError("");
       const prevWorkspace = currentWorkspace;
       const trimmed = newValue.trim();
-      const isValid = Boolean(trimmed && !/^(?:included|optional|foc|as quoted|selected|standard)$/i.test(trimmed));
+      const isValid = Boolean(trimmed && !/^(?:0|0\.0+|rm\s*0+(?:\.0+)?|included|optional|foc|as quoted|selected|standard|none|null|-|—)$/i.test(trimmed));
       const cleanVal = isValid ? trimmed : null;
+      const nextTyped = cleanVal ? { type: "custom", display_text: cleanVal } : null;
       const nextRevision = (currentCatalog.revision || 1) + 1;
 
       const updatedWorkspace: CatalogWorkspace = {
         ...currentWorkspace,
         catalog: { ...currentCatalog, revision: nextRevision },
-        offerings: currentWorkspace.offerings.map((o) => (o.id === offering.id ? { ...o, display_value: cleanVal } : o)),
+        offerings: currentWorkspace.offerings.map((o) =>
+          o.id === fresh.id ? { ...o, display_value: cleanVal, typed_value: nextTyped } : o
+        ),
       };
       setCatalogWorkspace(updatedWorkspace);
       catalogWorkspaceRef.current = updatedWorkspace;
       catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
 
       try {
-        const payload = {
-          id: offering.id,
-          offering_key: offering.offering_key,
-          offering_kind: offering.offering_kind,
-          concept_id: offering.concept_id,
-          applies_to_type: offering.applies_to_type,
-          applies_to_id: offering.applies_to_id,
-          role: offering.role,
-          base_revision: currentCatalog.revision,
-          display_value: cleanVal,
-          typed_value: cleanVal ? { type: "custom", display_text: cleanVal } : null,
-        };
-        await api(`/business/catalogs/${currentCatalog.id}/offerings`, {
+        const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            id: fresh.id,
+            base_revision: currentCatalog.revision,
+            display_value: cleanVal,
+            typed_value: nextTyped,
+            clear_value: cleanVal === null,
+          }),
         });
+        if (res.offering) {
+          const synced: CatalogWorkspace = {
+            ...updatedWorkspace,
+            offerings: updatedWorkspace.offerings.map((o) =>
+              o.id === fresh.id ? { ...o, ...res.offering, concept: o.concept } : o
+            ),
+          };
+          setCatalogWorkspace(synced);
+          catalogWorkspaceRef.current = synced;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: synced, ts: Date.now() });
+        }
       } catch (err) {
         setCatalogWorkspace(prevWorkspace);
         catalogWorkspaceRef.current = prevWorkspace;
         catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
         setError(apiErrorMessage(err));
       } finally {
-        setSaving(false);
+        markOfferingSaving(key, false);
       }
     });
   }
@@ -2134,13 +2203,15 @@ ${aiMarkdownTable}`;
       const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
       const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
       if (!currentCatalog || !currentWorkspace) return;
-      setSaving(true);
+      const fresh = currentWorkspace.offerings.find((o) => o.id === offering.id) || offering;
+      const key = fresh.concept_id || fresh.id;
+      markOfferingSaving(key, true);
       setError("");
       const prevWorkspace = currentWorkspace;
       const trimmed = newPriceStr.trim();
-      let priceObj: any = null;
+      let priceObj: Offering["optional_price"] = null;
       if (trimmed.includes("%")) {
-        priceObj = { type: "formula", formula: trimmed, display_text: trimmed };
+        priceObj = { type: "formula", expression: trimmed, display_text: trimmed };
       } else {
         const cleanStr = trimmed.replace(/RM/i, "").replace(/,/g, "").trim();
         const num = cleanStr ? parseFloat(cleanStr) : null;
@@ -2151,37 +2222,41 @@ ${aiMarkdownTable}`;
       const updatedWorkspace: CatalogWorkspace = {
         ...currentWorkspace,
         catalog: { ...currentCatalog, revision: nextRevision },
-        offerings: currentWorkspace.offerings.map((o) => (o.id === offering.id ? { ...o, optional_price: priceObj } : o)),
+        offerings: currentWorkspace.offerings.map((o) =>
+          o.id === fresh.id ? { ...o, optional_price: priceObj } : o
+        ),
       };
       setCatalogWorkspace(updatedWorkspace);
       catalogWorkspaceRef.current = updatedWorkspace;
       catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
 
       try {
-        const payload = {
-          id: offering.id,
-          offering_key: offering.offering_key,
-          offering_kind: offering.offering_kind,
-          concept_id: offering.concept_id,
-          applies_to_type: offering.applies_to_type,
-          applies_to_id: offering.applies_to_id,
-          role: offering.role,
-          base_revision: currentCatalog.revision,
-          display_value: offering.display_value || undefined,
-          typed_value: offering.typed_value || undefined,
-          optional_price: priceObj,
-        };
-        await api(`/business/catalogs/${currentCatalog.id}/offerings`, {
+        const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            id: fresh.id,
+            base_revision: currentCatalog.revision,
+            optional_price: priceObj,
+          }),
         });
+        if (res.offering) {
+          const synced: CatalogWorkspace = {
+            ...updatedWorkspace,
+            offerings: updatedWorkspace.offerings.map((o) =>
+              o.id === fresh.id ? { ...o, ...res.offering, concept: o.concept } : o
+            ),
+          };
+          setCatalogWorkspace(synced);
+          catalogWorkspaceRef.current = synced;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: synced, ts: Date.now() });
+        }
       } catch (err) {
         setCatalogWorkspace(prevWorkspace);
         catalogWorkspaceRef.current = prevWorkspace;
         catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
         setError(apiErrorMessage(err));
       } finally {
-        setSaving(false);
+        markOfferingSaving(key, false);
       }
     });
   }
@@ -2192,7 +2267,9 @@ ${aiMarkdownTable}`;
       const currentWorkspace = catalogWorkspaceRef.current || catalogWorkspace;
       const currentCatalog = currentWorkspace?.catalog || selectedCatalog;
       if (!currentCatalog || !currentWorkspace) return;
-      setSaving(true);
+      const fresh = currentWorkspace.offerings.find((o) => o.id === offering.id) || offering;
+      const key = fresh.concept_id || fresh.id;
+      markOfferingSaving(key, true);
       setError("");
       const prevWorkspace = currentWorkspace;
       const cleanDesc = newDesc && newDesc.trim().length > 0 ? newDesc.trim() : null;
@@ -2201,38 +2278,41 @@ ${aiMarkdownTable}`;
       const updatedWorkspace: CatalogWorkspace = {
         ...currentWorkspace,
         catalog: { ...currentCatalog, revision: nextRevision },
-        offerings: currentWorkspace.offerings.map((o) => (o.id === offering.id ? { ...o, description_override: cleanDesc } : o)),
+        offerings: currentWorkspace.offerings.map((o) =>
+          o.id === fresh.id ? { ...o, description_override: cleanDesc } : o
+        ),
       };
       setCatalogWorkspace(updatedWorkspace);
       catalogWorkspaceRef.current = updatedWorkspace;
       catalogCacheRef.current.set(currentCatalog.id, { workspace: updatedWorkspace, ts: Date.now() });
 
       try {
-        const payload = {
-          id: offering.id,
-          offering_key: offering.offering_key,
-          offering_kind: offering.offering_kind,
-          concept_id: offering.concept_id,
-          applies_to_type: offering.applies_to_type,
-          applies_to_id: offering.applies_to_id,
-          role: offering.role,
-          base_revision: currentCatalog.revision,
-          display_value: offering.display_value || undefined,
-          typed_value: offering.typed_value || undefined,
-          optional_price: offering.optional_price || undefined,
-          description_override: cleanDesc,
-        };
-        await api(`/business/catalogs/${currentCatalog.id}/offerings`, {
+        const res = await api<{ offering: Offering }>(`/business/catalogs/${currentCatalog.id}/offerings`, {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            id: fresh.id,
+            base_revision: currentCatalog.revision,
+            description_override: cleanDesc ?? "",
+          }),
         });
+        if (res.offering) {
+          const synced: CatalogWorkspace = {
+            ...updatedWorkspace,
+            offerings: updatedWorkspace.offerings.map((o) =>
+              o.id === fresh.id ? { ...o, ...res.offering, concept: o.concept } : o
+            ),
+          };
+          setCatalogWorkspace(synced);
+          catalogWorkspaceRef.current = synced;
+          catalogCacheRef.current.set(currentCatalog.id, { workspace: synced, ts: Date.now() });
+        }
       } catch (err) {
         setCatalogWorkspace(prevWorkspace);
         catalogWorkspaceRef.current = prevWorkspace;
         catalogCacheRef.current.set(currentCatalog.id, { workspace: prevWorkspace, ts: Date.now() });
         setError(apiErrorMessage(err));
       } finally {
-        setSaving(false);
+        markOfferingSaving(key, false);
       }
     });
   }
@@ -2795,6 +2875,7 @@ ${aiMarkdownTable}`;
             selectedProfile={selectedProfile}
             isProfileArchived={isProfileArchived}
             selectedCompany={selectedCompany}
+            onSaveBettermentRule={saveCompanyBettermentRule}
             concepts={concepts}
             companyConfigs={companyConfigs}
             configsLoading={configsLoading}
@@ -2841,6 +2922,8 @@ ${aiMarkdownTable}`;
             editingMatrixItem={editingMatrixItem}
             setEditingMatrixItem={setEditingMatrixItem}
             saveMatrixInlineEdit={saveMatrixInlineEdit}
+            onClearCoverage={clearMatrixCoverage}
+            onRemoveOffering={removeMatrixOffering}
           />
         ) : workspaceLoading ? (
           <PageLoading />
@@ -3109,120 +3192,27 @@ ${aiMarkdownTable}`;
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {defaultConcepts.map((concept) => {
                   const offering = activeConceptIdSet.get(concept.id);
-                  const isActive = Boolean(offering && effectiveRole(offering) === "included");
-
                   return (
-                    <div
+                    <CatalogOfferingCard
                       key={concept.id}
-                      onClick={() => toggleConceptFast(concept, "included")}
-                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${isActive
-                        ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
-                        : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
-                        }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div
-                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${concept.default_asset?.url
-                              ? "bg-white border-[var(--rl-border)]"
-                              : isActive
-                              ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
-                              : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
-                              }`}
-                          >
-                            {concept.default_asset?.url ? (
-                              <img src={fileUrl(concept.default_asset.url)} alt={concept.label} loading="lazy" className="h-4 w-4 object-contain" />
-                            ) : (
-                              <ShieldCheck size={16} />
-                            )}
-                          </div>
-                          <span className="font-semibold text-xs text-[var(--rl-text-strong)] line-clamp-2 leading-snug break-words">
-                            {concept.label}
-                          </span>
-                          {disabledConceptIdSet.has(concept.id) && (
-                            <span
-                              className="rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 px-1 py-0.2 text-[8.5px] font-bold uppercase tracking-wider shrink-0"
-                              title="Excluded by active benefit profile cascade"
-                            >
-                              Excluded
-                            </span>
-                          )}
-                        </div>
-
-                        <div
-                          className={`h-4 w-4 rounded-[4px] border grid place-items-center ${isActive
-                            ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
-                            : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
-                            }`}
-                        >
-                          {isActive && <Check size={12} weight="bold" />}
-                        </div>
-                      </div>
-
-                      <div className="mt-2.5 flex items-center justify-between gap-1.5 text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
-                        {isActive ? (
-                          <>
-                            <input
-                              key={`${offering?.id || concept.id}-val-${cleanCoverageValue(offering?.display_value)}`}
-                              type="text"
-                              defaultValue={cleanCoverageValue(offering?.display_value)}
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                if (offering) updateOfferingValueInline(offering, e.target.value);
-                              }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-text-strong)] flex-1 min-w-0"
-                              placeholder="RM 0.00 (empty if none)"
-                              title="Coverage value / limit"
-                            />
-                            <input
-                              key={`${offering?.id || concept.id}-price-${JSON.stringify(offering?.optional_price || null)}`}
-                              type="text"
-                              defaultValue={
-                                offering?.optional_price?.type === "formula"
-                                  ? (offering.optional_price.display_text || offering.optional_price.formula || "")
-                                  : (offering?.optional_price?.value
-                                    ? `RM ${Number(offering.optional_price.value).toFixed(2)}`
-                                    : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : ""))
-                              }
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                if (offering) updateOfferingPriceInline(offering, e.target.value);
-                              }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-20 text-right shrink-0"
-                              placeholder={
-                                (offering?.concept_id ? baselineCostMap.get(offering.concept_id) : null) || "Free"
-                              }
-                              title="Cost / Price (empty for catalog baseline)"
-                            />
-                          </>
-                        ) : (
-                          <span className="text-[11px] text-[var(--rl-text-muted)]">Click to add</span>
-                        )}
-                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Default</span>
-                      </div>
-
-                      {isActive ? (() => {
-                        const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
-                        return (
-                          <OfferingDescriptionEditor
-                            offering={offering!}
-                            concept={concept}
-                            companyBaselineDesc={companyBaselineDesc || null}
-                            onSave={updateOfferingDescriptionInline}
-                            disabled={workspaceLoading || saving}
-                          />
-                        );
-                      })() : (
-                        (() => {
-                          const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
-                          return fallbackDesc ? (
-                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] line-clamp-3 leading-snug break-words" title={fallbackDesc}>
-                              {fallbackDesc}
-                            </div>
-                          ) : null;
-                        })()
-                      )}
-                    </div>
+                      concept={concept}
+                      offering={offering}
+                      mode="included"
+                      baselineDesc={baselineDescMap.get(concept.id) || null}
+                      baselineCost={baselineCostMap.get(concept.id) || null}
+                      isExcludedByProfile={disabledConceptIdSet.has(concept.id)}
+                      isSavingCard={savingOfferingIds.has(concept.id)}
+                      disabled={workspaceLoading || isProfileArchived}
+                      fileUrl={fileUrl}
+                      onAdd={toggleConceptFast}
+                      onMoveRole={moveOfferingRoleInline}
+                      onRequestRemove={(off, con) => setPendingOfferingDelete({ offering: off, concept: con })}
+                      onUpdateLabel={updateOfferingLabelInline}
+                      onUpdateValue={updateOfferingValueInline}
+                      onUpdatePrice={updateOfferingPriceInline}
+                      onUpdateDescription={updateOfferingDescriptionInline}
+                      onSelectVariant={updatePlanVariantInline}
+                    />
                   );
                 })}
               </div>
@@ -3236,7 +3226,7 @@ ${aiMarkdownTable}`;
                     Category 2: Optional Riders & Add-ons ({addonConcepts.length} items)
                   </h3>
                   <p className="text-xs text-[var(--rl-text-muted)]">
-                    Click any tile to toggle on/off optional endorsements and select plan variations (Plan A/B/C/D, etc.) in 1 click.
+                    Add optional endorsements, switch roles, clear limits to None, or edit prices and descriptions inline.
                   </p>
                 </div>
                 <span className="text-xs font-bold text-[var(--rl-text-strong)]">
@@ -3247,153 +3237,27 @@ ${aiMarkdownTable}`;
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {addonConcepts.map((concept) => {
                   const offering = activeConceptIdSet.get(concept.id);
-                  const isActive = Boolean(offering && effectiveRole(offering) === "addon_option");
-                  const hasVariants = Boolean(concept.variants && concept.variants.length > 0);
-
                   return (
-                    <div
+                    <CatalogOfferingCard
                       key={concept.id}
-                      onClick={() => toggleConceptFast(concept, "addon_option")}
-                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${isActive
-                        ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
-                        : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
-                        }`}
-                    >
-                      <div>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div
-                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${concept.default_asset?.url
-                                ? "bg-white border-[var(--rl-border)]"
-                                : isActive
-                                ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
-                                : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
-                                }`}
-                            >
-                              {concept.default_asset?.url ? (
-                                <img src={fileUrl(concept.default_asset.url)} alt={concept.label} loading="lazy" className="h-4 w-4 object-contain" />
-                              ) : (
-                                <Sparkle size={16} />
-                              )}
-                            </div>
-                            <span className="font-semibold text-xs text-[var(--rl-text-strong)] line-clamp-2 leading-snug break-words">
-                              {concept.label}
-                            </span>
-                            {disabledConceptIdSet.has(concept.id) && (
-                              <span
-                                className="rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 px-1 py-0.2 text-[8.5px] font-bold uppercase tracking-wider shrink-0"
-                                title="Excluded by active benefit profile cascade"
-                              >
-                                Excluded
-                              </span>
-                            )}
-                          </div>
-
-                          <div
-                            className={`h-4 w-4 rounded-[4px] border grid place-items-center ${isActive
-                              ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
-                              : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
-                              }`}
-                          >
-                            {isActive && <Check size={12} weight="bold" />}
-                          </div>
-                        </div>
-
-                        {/* Plan Variations 1-Click Switcher */}
-                        {hasVariants && (
-                          <div
-                            className="mt-2 flex flex-wrap gap-1"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {concept.variants!.map((variant) => {
-                              const isVariantActive = offering?.label_override?.includes(variant);
-                              return (
-                                <button
-                                  key={variant}
-                                  onClick={() => {
-                                    if (offering) {
-                                      updatePlanVariantInline(offering, variant);
-                                    } else {
-                                      toggleConceptFast(concept, "addon_option");
-                                    }
-                                  }}
-                                  className={`rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold transition-all ${isVariantActive
-                                    ? "bg-[var(--rl-black)] text-white"
-                                    : "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                                    }`}
-                                >
-                                  {variant}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-2.5 flex items-center justify-between gap-1.5 text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
-                        {isActive ? (
-                          <>
-                            <input
-                              key={`${offering?.id || concept.id}-val-${cleanCoverageValue(offering?.display_value)}`}
-                              type="text"
-                              defaultValue={cleanCoverageValue(offering?.display_value)}
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                if (offering) updateOfferingValueInline(offering, e.target.value);
-                              }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-text-strong)] flex-1 min-w-0"
-                              placeholder="RM 0.00 (empty if none)"
-                              title="Coverage value / limit"
-                            />
-                            <input
-                              key={`${offering?.id || concept.id}-price-${JSON.stringify(offering?.optional_price || null)}`}
-                              type="text"
-                              defaultValue={
-                                offering?.optional_price?.type === "formula"
-                                  ? (offering.optional_price.display_text || offering.optional_price.formula || "")
-                                  : (offering?.optional_price?.value
-                                    ? `RM ${Number(offering.optional_price.value).toFixed(2)}`
-                                    : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : ""))
-                              }
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                if (offering) updateOfferingPriceInline(offering, e.target.value);
-                              }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-20 text-right shrink-0"
-                              placeholder={
-                                (offering?.concept_id ? baselineCostMap.get(offering.concept_id) : null) || "Optional"
-                              }
-                              title="Cost / Price (empty for catalog baseline)"
-                            />
-                          </>
-                        ) : (
-                          <span className="text-[11px] text-[var(--rl-text-muted)]">Click to add</span>
-                        )}
-                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Add-on</span>
-                      </div>
-
-                      {isActive ? (() => {
-                        const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
-                        return (
-                          <OfferingDescriptionEditor
-                            offering={offering!}
-                            concept={concept}
-                            companyBaselineDesc={companyBaselineDesc || null}
-                            onSave={updateOfferingDescriptionInline}
-                            disabled={workspaceLoading || saving}
-                          />
-                        );
-                      })() : (
-                        (() => {
-                          const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
-                          return fallbackDesc ? (
-                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] line-clamp-3 leading-snug break-words" title={fallbackDesc}>
-                              {fallbackDesc}
-                            </div>
-                          ) : null;
-                        })()
-                      )}
-                    </div>
+                      concept={concept}
+                      offering={offering}
+                      mode="addon_option"
+                      baselineDesc={baselineDescMap.get(concept.id) || null}
+                      baselineCost={baselineCostMap.get(concept.id) || null}
+                      isExcludedByProfile={disabledConceptIdSet.has(concept.id)}
+                      isSavingCard={savingOfferingIds.has(concept.id)}
+                      disabled={workspaceLoading || isProfileArchived}
+                      fileUrl={fileUrl}
+                      onAdd={toggleConceptFast}
+                      onMoveRole={moveOfferingRoleInline}
+                      onRequestRemove={(off, con) => setPendingOfferingDelete({ offering: off, concept: con })}
+                      onUpdateLabel={updateOfferingLabelInline}
+                      onUpdateValue={updateOfferingValueInline}
+                      onUpdatePrice={updateOfferingPriceInline}
+                      onUpdateDescription={updateOfferingDescriptionInline}
+                      onSelectVariant={updatePlanVariantInline}
+                    />
                   );
                 })}
               </div>
@@ -3502,120 +3366,27 @@ ${aiMarkdownTable}`;
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {defaultConcepts.map((concept) => {
                   const offering = activeConceptIdSet.get(concept.id);
-                  const isActive = Boolean(offering && effectiveRole(offering) === "included");
-
                   return (
-                    <div
+                    <CatalogOfferingCard
                       key={concept.id}
-                      onClick={() => toggleConceptFast(concept, "included")}
-                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${isActive
-                        ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
-                        : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
-                        }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div
-                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${concept.default_asset?.url
-                              ? "bg-white border-[var(--rl-border)]"
-                              : isActive
-                              ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
-                              : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
-                              }`}
-                          >
-                            {concept.default_asset?.url ? (
-                              <img src={fileUrl(concept.default_asset.url)} alt={concept.label} loading="lazy" className="h-4 w-4 object-contain" />
-                            ) : (
-                              <ShieldCheck size={16} />
-                            )}
-                          </div>
-                          <span className="font-semibold text-xs text-[var(--rl-text-strong)] line-clamp-2 leading-snug break-words">
-                            {concept.label}
-                          </span>
-                          {disabledConceptIdSet.has(concept.id) && (
-                            <span
-                              className="rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 px-1 py-0.2 text-[8.5px] font-bold uppercase tracking-wider shrink-0"
-                              title="Excluded by active benefit profile cascade"
-                            >
-                              Excluded
-                            </span>
-                          )}
-                        </div>
-
-                        <div
-                          className={`h-4 w-4 rounded-[4px] border grid place-items-center ${isActive
-                            ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
-                            : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
-                            }`}
-                        >
-                          {isActive && <Check size={12} weight="bold" />}
-                        </div>
-                      </div>
-
-                      <div className="mt-2.5 flex items-center justify-between gap-1.5 text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
-                        {isActive ? (
-                          <>
-                            <input
-                              key={`${offering?.id || concept.id}-val-${cleanCoverageValue(offering?.display_value)}`}
-                              type="text"
-                              defaultValue={cleanCoverageValue(offering?.display_value)}
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                if (offering) updateOfferingValueInline(offering, e.target.value);
-                              }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-text-strong)] flex-1 min-w-0"
-                              placeholder="RM 0.00 (empty if none)"
-                              title="Coverage value / limit"
-                            />
-                            <input
-                              key={`${offering?.id || concept.id}-price-${JSON.stringify(offering?.optional_price || null)}`}
-                              type="text"
-                              defaultValue={
-                                offering?.optional_price?.type === "formula"
-                                  ? (offering.optional_price.display_text || offering.optional_price.formula || "")
-                                  : (offering?.optional_price?.value
-                                    ? `RM ${Number(offering.optional_price.value).toFixed(2)}`
-                                    : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : ""))
-                              }
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                if (offering) updateOfferingPriceInline(offering, e.target.value);
-                              }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-20 text-right shrink-0"
-                              placeholder={
-                                (offering?.concept_id ? baselineCostMap.get(offering.concept_id) : null) || "Free"
-                              }
-                              title="Cost / Price (empty for catalog baseline)"
-                            />
-                          </>
-                        ) : (
-                          <span className="text-[11px] text-[var(--rl-text-muted)]">Click to add</span>
-                        )}
-                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Default</span>
-                      </div>
-
-                      {isActive ? (() => {
-                        const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
-                        return (
-                          <OfferingDescriptionEditor
-                            offering={offering!}
-                            concept={concept}
-                            companyBaselineDesc={companyBaselineDesc || null}
-                            onSave={updateOfferingDescriptionInline}
-                            disabled={workspaceLoading || saving}
-                          />
-                        );
-                      })() : (
-                        (() => {
-                          const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
-                          return fallbackDesc ? (
-                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] line-clamp-3 leading-snug break-words" title={fallbackDesc}>
-                              {fallbackDesc}
-                            </div>
-                          ) : null;
-                        })()
-                      )}
-                    </div>
+                      concept={concept}
+                      offering={offering}
+                      mode="included"
+                      baselineDesc={baselineDescMap.get(concept.id) || null}
+                      baselineCost={baselineCostMap.get(concept.id) || null}
+                      isExcludedByProfile={disabledConceptIdSet.has(concept.id)}
+                      isSavingCard={savingOfferingIds.has(concept.id)}
+                      disabled={workspaceLoading || isProfileArchived}
+                      fileUrl={fileUrl}
+                      onAdd={toggleConceptFast}
+                      onMoveRole={moveOfferingRoleInline}
+                      onRequestRemove={(off, con) => setPendingOfferingDelete({ offering: off, concept: con })}
+                      onUpdateLabel={updateOfferingLabelInline}
+                      onUpdateValue={updateOfferingValueInline}
+                      onUpdatePrice={updateOfferingPriceInline}
+                      onUpdateDescription={updateOfferingDescriptionInline}
+                      onSelectVariant={updatePlanVariantInline}
+                    />
                   );
                 })}
               </div>
@@ -3629,7 +3400,7 @@ ${aiMarkdownTable}`;
                     Category 2: Unique Add-ons &amp; Multi-Plan Variations ({addonConcepts.length} items)
                   </h3>
                   <p className="text-xs text-[var(--rl-text-muted)]">
-                    Click any tile to toggle on/off optional endorsements and select plan variations (Plan A/B/C/D, etc.) in 1 click.
+                    Add optional endorsements, switch roles, clear limits to None, or edit prices and descriptions inline.
                   </p>
                 </div>
                 <span className="text-xs font-bold text-[var(--rl-text-strong)]">
@@ -3640,153 +3411,27 @@ ${aiMarkdownTable}`;
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {addonConcepts.map((concept) => {
                   const offering = activeConceptIdSet.get(concept.id);
-                  const isActive = Boolean(offering && effectiveRole(offering) === "addon_option");
-                  const hasVariants = Boolean(concept.variants && concept.variants.length > 0);
-
                   return (
-                    <div
+                    <CatalogOfferingCard
                       key={concept.id}
-                      onClick={() => toggleConceptFast(concept, "addon_option")}
-                      className={`group relative flex flex-col justify-between rounded-[var(--rl-radius-sm)] border p-3 cursor-pointer transition-all ${isActive
-                        ? "border-[var(--rl-black)] bg-[var(--rl-bg)] shadow-sm ring-1 ring-[var(--rl-black)]"
-                        : "border-[var(--rl-border)] bg-[var(--rl-surface)] opacity-70 hover:opacity-100 hover:border-[var(--rl-text-muted)]"
-                        }`}
-                    >
-                      <div>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div
-                              className={`grid h-7 w-7 shrink-0 place-items-center rounded-[4px] border ${concept.default_asset?.url
-                                ? "bg-white border-[var(--rl-border)]"
-                                : isActive
-                                ? "bg-[var(--rl-black)] text-white border-[var(--rl-black)]"
-                                : "bg-[var(--rl-bg)] text-[var(--rl-text-muted)] border-[var(--rl-border)]"
-                                }`}
-                            >
-                              {concept.default_asset?.url ? (
-                                <img src={fileUrl(concept.default_asset.url)} alt={concept.label} loading="lazy" className="h-4 w-4 object-contain" />
-                              ) : (
-                                <Sparkle size={16} />
-                              )}
-                            </div>
-                            <span className="font-semibold text-xs text-[var(--rl-text-strong)] line-clamp-2 leading-snug break-words">
-                              {concept.label}
-                            </span>
-                            {disabledConceptIdSet.has(concept.id) && (
-                              <span
-                                className="rounded bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 px-1 py-0.2 text-[8.5px] font-bold uppercase tracking-wider shrink-0"
-                                title="Excluded by active benefit profile cascade"
-                              >
-                                Excluded
-                              </span>
-                            )}
-                          </div>
-
-                          <div
-                            className={`h-4 w-4 rounded-[4px] border grid place-items-center ${isActive
-                              ? "bg-[var(--rl-black)] border-[var(--rl-black)] text-white"
-                              : "border-[var(--rl-border)] bg-[var(--rl-surface)]"
-                              }`}
-                          >
-                            {isActive && <Check size={12} weight="bold" />}
-                          </div>
-                        </div>
-
-                        {/* Plan Variations 1-Click Switcher */}
-                        {hasVariants && (
-                          <div
-                            className="mt-2 flex flex-wrap gap-1"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {concept.variants!.map((variant) => {
-                              const isVariantActive = offering?.label_override?.includes(variant);
-                              return (
-                                <button
-                                  key={variant}
-                                  onClick={() => {
-                                    if (offering) {
-                                      updatePlanVariantInline(offering, variant);
-                                    } else {
-                                      toggleConceptFast(concept, "addon_option");
-                                    }
-                                  }}
-                                  className={`rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold transition-all ${isVariantActive
-                                    ? "bg-[var(--rl-black)] text-white"
-                                    : "bg-[var(--rl-surface)] border border-[var(--rl-border)] text-[var(--rl-text-muted)] hover:text-[var(--rl-text-strong)]"
-                                    }`}
-                                >
-                                  {variant}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-2.5 flex items-center justify-between gap-1.5 text-[11px] pt-1.5 border-t border-[var(--rl-border)]/60">
-                        {isActive ? (
-                          <>
-                            <input
-                              key={`${offering?.id || concept.id}-val-${cleanCoverageValue(offering?.display_value)}`}
-                              type="text"
-                              defaultValue={cleanCoverageValue(offering?.display_value)}
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                if (offering) updateOfferingValueInline(offering, e.target.value);
-                              }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-text-strong)] flex-1 min-w-0"
-                              placeholder="RM 0.00 (empty if none)"
-                              title="Coverage value / limit"
-                            />
-                            <input
-                              key={`${offering?.id || concept.id}-price-${JSON.stringify(offering?.optional_price || null)}`}
-                              type="text"
-                              defaultValue={
-                                offering?.optional_price?.type === "formula"
-                                  ? (offering.optional_price.display_text || offering.optional_price.formula || "")
-                                  : (offering?.optional_price?.value
-                                    ? `RM ${Number(offering.optional_price.value).toFixed(2)}`
-                                    : (offering?.optional_price?.amount ? `RM ${offering.optional_price.amount}` : ""))
-                              }
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                if (offering) updateOfferingPriceInline(offering, e.target.value);
-                              }}
-                              className="rounded-[4px] border border-[var(--rl-border)] bg-[var(--rl-surface)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--rl-red)] w-20 text-right shrink-0"
-                              placeholder={
-                                (offering?.concept_id ? baselineCostMap.get(offering.concept_id) : null) || "Optional"
-                              }
-                              title="Cost / Price (empty for catalog baseline)"
-                            />
-                          </>
-                        ) : (
-                          <span className="text-[11px] text-[var(--rl-text-muted)]">Click to add</span>
-                        )}
-                        <span className="text-[10px] font-semibold text-[var(--rl-text-muted)] shrink-0">Add-on</span>
-                      </div>
-
-                      {isActive ? (() => {
-                        const companyBaselineDesc = offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null;
-                        return (
-                          <OfferingDescriptionEditor
-                            offering={offering!}
-                            concept={concept}
-                            companyBaselineDesc={companyBaselineDesc || null}
-                            onSave={updateOfferingDescriptionInline}
-                            disabled={workspaceLoading || saving}
-                          />
-                        );
-                      })() : (
-                        (() => {
-                          const fallbackDesc = (offering?.concept_id ? baselineDescMap.get(offering.concept_id) : null) || concept.description;
-                          return fallbackDesc ? (
-                            <div className="mt-1.5 text-[10px] text-[var(--rl-text-muted)] line-clamp-3 leading-snug break-words" title={fallbackDesc}>
-                              {fallbackDesc}
-                            </div>
-                          ) : null;
-                        })()
-                      )}
-                    </div>
+                      concept={concept}
+                      offering={offering}
+                      mode="addon_option"
+                      baselineDesc={baselineDescMap.get(concept.id) || null}
+                      baselineCost={baselineCostMap.get(concept.id) || null}
+                      isExcludedByProfile={disabledConceptIdSet.has(concept.id)}
+                      isSavingCard={savingOfferingIds.has(concept.id)}
+                      disabled={workspaceLoading || isProfileArchived}
+                      fileUrl={fileUrl}
+                      onAdd={toggleConceptFast}
+                      onMoveRole={moveOfferingRoleInline}
+                      onRequestRemove={(off, con) => setPendingOfferingDelete({ offering: off, concept: con })}
+                      onUpdateLabel={updateOfferingLabelInline}
+                      onUpdateValue={updateOfferingValueInline}
+                      onUpdatePrice={updateOfferingPriceInline}
+                      onUpdateDescription={updateOfferingDescriptionInline}
+                      onSelectVariant={updatePlanVariantInline}
+                    />
                   );
                 })}
               </div>
@@ -4100,6 +3745,31 @@ ${aiMarkdownTable}`;
         setCloneNotes={setCloneNotes}
         handleCloneProfile={handleCloneProfile}
         profileActionLoading={profileActionLoading}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pendingOfferingDelete)}
+        onOpenChange={(open) => {
+          if (!open) setPendingOfferingDelete(null);
+        }}
+        title="Remove Benefit from Tier"
+        message={
+          pendingOfferingDelete
+            ? `Remove "${pendingOfferingDelete.offering.label_override || pendingOfferingDelete.concept.label}" from this catalog tier?`
+            : undefined
+        }
+        confirmLabel="Remove"
+        loading={removingOffering}
+        onConfirm={async () => {
+          if (!pendingOfferingDelete) return;
+          setRemovingOffering(true);
+          try {
+            await removeOfferingConfirmed(pendingOfferingDelete.offering, pendingOfferingDelete.concept);
+            setPendingOfferingDelete(null);
+          } finally {
+            setRemovingOffering(false);
+          }
+        }}
       />
     </AppShell>
   );

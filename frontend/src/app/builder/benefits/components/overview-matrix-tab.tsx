@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { PageLoading } from "@/components/ui/page-loading";
 import {
@@ -14,6 +15,7 @@ import {
   PencilSimple,
   Plus,
   ShieldCheck,
+  Trash,
   X,
 } from "@phosphor-icons/react";
 import type { CompanyMatrixData } from "../types";
@@ -42,6 +44,8 @@ export interface OverviewMatrixTabProps {
     } | null>
   >;
   saveMatrixInlineEdit: () => Promise<void>;
+  onClearCoverage?: (catalogId: string, offeringId: string) => Promise<void>;
+  onRemoveOffering?: (catalogId: string, offeringId: string) => Promise<void>;
 }
 
 export function OverviewMatrixTab({
@@ -56,7 +60,15 @@ export function OverviewMatrixTab({
   editingMatrixItem,
   setEditingMatrixItem,
   saveMatrixInlineEdit,
+  onClearCoverage,
+  onRemoveOffering,
 }: OverviewMatrixTabProps) {
+  const [pendingDelete, setPendingDelete] = useState<{
+    catalogId: string;
+    offeringId: string;
+    label: string;
+  } | null>(null);
+  const [removing, setRemoving] = useState(false);
   const filteredMatrixScenarios = useMemo(() => {
     if (!matrixData) return [];
     return matrixData.scenarios.filter((s) => {
@@ -274,9 +286,27 @@ export function OverviewMatrixTab({
                                       <span className="font-bold text-[12px] text-emerald-950 leading-tight">
                                         {d.label}
                                       </span>
-                                      <span className="shrink-0 rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
-                                        0 RM
-                                      </span>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
+                                          0 RM
+                                        </span>
+                                        {onRemoveOffering && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setPendingDelete({
+                                                catalogId: s.catalog_id,
+                                                offeringId: d.offering_id,
+                                                label: d.label,
+                                              })
+                                            }
+                                            className="p-0.5 rounded text-emerald-700 hover:text-red-600 hover:bg-red-100/80 transition-colors"
+                                            title="Remove benefit from this catalog"
+                                          >
+                                            <Trash size={11} />
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
 
                                     {/* Limit Display / Inline Edit */}
@@ -298,6 +328,19 @@ export function OverviewMatrixTab({
                                           className="h-6 text-[11px] px-1.5 py-0 bg-white font-semibold text-emerald-900 border-emerald-300"
                                           placeholder="e.g. 200 km"
                                         />
+                                        {onClearCoverage && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingMatrixItem(null);
+                                              void onClearCoverage(s.catalog_id, d.offering_id);
+                                            }}
+                                            className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 hover:bg-amber-200 text-[10px] font-semibold shrink-0"
+                                            title="Clear coverage value to None"
+                                          >
+                                            None
+                                          </button>
+                                        )}
                                         <button
                                           type="button"
                                           onClick={() => void saveMatrixInlineEdit()}
@@ -328,7 +371,7 @@ export function OverviewMatrixTab({
                                         className="group/limit mt-0.5 font-semibold text-[11px] text-emerald-900 flex items-center gap-1 cursor-pointer hover:underline"
                                         title="Click to edit limit"
                                       >
-                                        <span>Limit: {d.display_value || "None (Click to set)"}</span>
+                                        <span>Limit: {d.display_value || "None"}</span>
                                         <PencilSimple
                                           size={11}
                                           className="opacity-0 group-hover/limit:opacity-100 text-emerald-700"
@@ -441,9 +484,27 @@ export function OverviewMatrixTab({
                                       <span className="font-bold text-[12px] text-blue-950 leading-tight">
                                         {a.label}
                                       </span>
-                                      <span className="shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
-                                        {a.price_text}
-                                      </span>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                                          {a.price_text}
+                                        </span>
+                                        {onRemoveOffering && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setPendingDelete({
+                                                catalogId: s.catalog_id,
+                                                offeringId: a.offering_id,
+                                                label: a.label,
+                                              })
+                                            }
+                                            className="p-0.5 rounded text-blue-700 hover:text-red-600 hover:bg-red-100/80 transition-colors"
+                                            title="Remove benefit from this catalog"
+                                          >
+                                            <Trash size={11} />
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
 
                                     {/* Limit Display / Inline Edit */}
@@ -465,6 +526,19 @@ export function OverviewMatrixTab({
                                           className="h-6 text-[11px] px-1.5 py-0 bg-white font-semibold text-blue-900 border-blue-300"
                                           placeholder="e.g. RM 500"
                                         />
+                                        {onClearCoverage && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingMatrixItem(null);
+                                              void onClearCoverage(s.catalog_id, a.offering_id);
+                                            }}
+                                            className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 hover:bg-amber-200 text-[10px] font-semibold shrink-0"
+                                            title="Clear coverage value to None"
+                                          >
+                                            None
+                                          </button>
+                                        )}
                                         <button
                                           type="button"
                                           onClick={() => void saveMatrixInlineEdit()}
@@ -495,7 +569,7 @@ export function OverviewMatrixTab({
                                         className="group/limit mt-0.5 font-semibold text-[11px] text-blue-900 flex items-center gap-1 cursor-pointer hover:underline"
                                         title="Click to edit limit"
                                       >
-                                        <span>Limit: {a.display_value || "None (Click to set)"}</span>
+                                        <span>Limit: {a.display_value || "None"}</span>
                                         <PencilSimple
                                           size={11}
                                           className="opacity-0 group-hover/limit:opacity-100 text-blue-700"
@@ -613,6 +687,31 @@ export function OverviewMatrixTab({
           </div>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title="Remove Benefit from Catalog"
+        message={
+          pendingDelete
+            ? `Remove "${pendingDelete.label}" from this catalog?`
+            : undefined
+        }
+        confirmLabel="Remove"
+        loading={removing}
+        onConfirm={async () => {
+          if (!pendingDelete || !onRemoveOffering) return;
+          setRemoving(true);
+          try {
+            await onRemoveOffering(pendingDelete.catalogId, pendingDelete.offeringId);
+            setPendingDelete(null);
+          } finally {
+            setRemoving(false);
+          }
+        }}
+      />
     </div>
   );
 }

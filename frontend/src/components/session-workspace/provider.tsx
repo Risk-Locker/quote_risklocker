@@ -706,14 +706,42 @@ function applyWorkingOperation(snapshot: WorkspaceSnapshot, operation: Workspace
                     (c) => c.selection_id === selId || c.card_key === selId
                   );
                   const desiredState = operation.state ? String(operation.state) : null;
-                  if (desiredState === "current" && inBaseCurrent && !("label" in operation) && !("price" in operation) && !("typed_value" in operation)) {
+                  const hasMutationPayload = (
+                    "label" in operation ||
+                    "label_override" in operation ||
+                    "description" in operation ||
+                    "description_override" in operation ||
+                    "typed_value" in operation ||
+                    "typed_value_override" in operation ||
+                    "price" in operation ||
+                    "cost_status" in operation ||
+                    "icon_hint" in operation ||
+                    "is_extra" in operation
+                  );
+                  if (desiredState === "current" && inBaseCurrent && !hasMutationPayload) {
                     return true;
                   }
-                  if (desiredState === "available_addon" && inBaseAddon && !("label" in operation) && !("price" in operation) && !("typed_value" in operation)) {
+                  if (desiredState === "available_addon" && inBaseAddon && !hasMutationPayload) {
                     return true;
                   }
                 }
                 if (operation.op === "select_catalog_offering") {
+                  const hasOverrideOrPlacement = (
+                    "label" in operation ||
+                    "label_override" in operation ||
+                    "description" in operation ||
+                    "description_override" in operation ||
+                    "typed_value" in operation ||
+                    "typed_value_override" in operation ||
+                    "price" in operation ||
+                    "cost_status" in operation ||
+                    "bundle_tier_id" in operation ||
+                    "confirm_plan_tier" in operation ||
+                    "is_extra" in operation
+                  );
+                  if (hasOverrideOrPlacement) {
+                    return false;
+                  }
                   const offeringId = String(operation.offering_id || "");
                   const inBaseCurrent = base.benefit_cards.current_benefits.some((c) => c.offering_id === offeringId);
                   const inBaseAddon = base.benefit_cards.available_addons.some((c) => c.offering_id === offeringId);

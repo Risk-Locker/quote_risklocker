@@ -28,6 +28,33 @@ _CORP_SUFFIX_REPLACEMENTS = [
 # Old SSM format: 5 to 9 digits followed by 1 letter (e.g. 123456-X, 001234567-T)
 _OLD_SSM_RE = re.compile(r"^\d{5,9}[A-Z]$")
 
+# Insurer's own SSM registration numbers (often printed near company letterheads on cover notes/quotations)
+_INSURER_OWN_BRNS = frozenset({
+    "197801007153",  # Liberty General Insurance / AmAssurance (formerly AmGeneral)
+    "44191P",        # Liberty General Insurance old SSM
+    "197801000752",
+    "200601015674",  # Allianz General
+    "200601012246",  # Zurich General Insurance
+    "201701035077",  # Etiqa General Insurance
+    "201701042850",  # Etiqa General Takaful
+    "200101001522",  # Kurnia Insurans legacy
+    "199901018508",  # Tokio Marine
+    "197901002705",  # MSIG Insurance
+    "198001008821",  # Berjaya Sompo
+    "197801000983",  # RHB Insurance
+    "197501002042",  # Generali / AXA Affin General
+    "198401019089",  # Syarikat Takaful Malaysia
+    "200201025412",  # Takaful Ikhlas General
+    "200701037463",  # AIG Malaysia
+    "197001000564",  # Chubb Insurance
+    "197601004719",  # Tune Insurance
+    "197201000959",  # Pacific & Orient
+    "199401021735",  # Lonpac Insurance
+    "197301001061",  # MPI Generali
+    "197401001891",  # Progressive Insurance
+    "198701002415",  # QBE Insurance (Malaysia)
+})
+
 # PB (Place of Birth) state codes for Malaysian NRIC
 _NRIC_STATE_CODES: dict[str, str] = {
     "01": "Johor", "21": "Johor", "22": "Johor", "23": "Johor", "24": "Johor",
@@ -131,6 +158,8 @@ def normalize_government_id(raw_id: str | None) -> tuple[str, str]:
 
     cleaned = re.sub(r"[^A-Za-z0-9]", "", cleaned_note.upper())
     if not cleaned:
+        return "", "unknown"
+    if cleaned in _INSURER_OWN_BRNS:
         return "", "unknown"
 
     # 1. Limited Liability Partnership: starts with LLP

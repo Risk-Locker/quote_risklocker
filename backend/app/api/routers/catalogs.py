@@ -27,6 +27,7 @@ from app.api.schemas import (
     BusinessCompanySaveRequest,
     BusinessProductSaveRequest,
     BusinessTierSaveRequest,
+    CompanyBettermentRuleUpdateRequest,
     CatalogContextRequest,
     CatalogOfferingSaveRequest,
     CatalogPublishRequest,
@@ -317,6 +318,7 @@ from app.services.business_setup_service import (
     restore_benefit_concept,
     save_business_company,
     delete_business_company,
+    update_company_betterment_rule,
     save_business_product,
     delete_business_product,
     save_business_tier,
@@ -463,6 +465,17 @@ def business_company_save(
     user: User = Depends(current_user),
 ) -> dict:
     return {"company": save_business_company(db, user, payload.model_dump(exclude_none=True))}
+
+
+@router.patch("/business/companies/{company_id}/policy-rules")
+def business_company_policy_rules_update(
+    company_id: str,
+    payload: CompanyBettermentRuleUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    require_role(user, Role.SUPER_ADMIN, Role.ADMIN)
+    return {"company": update_company_betterment_rule(db, user, company_id, payload.model_dump(exclude_unset=True))}
 
 
 

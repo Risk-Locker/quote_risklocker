@@ -212,7 +212,7 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
 
             # Catalog structure display partitioning: separates base offerings from optional add-ons
             # Note: Actual quotation cost_status is decoupled and determined per-draft by extraction evidence
-            is_default = o.role == "included" or o.offering_kind == "base"
+            is_default = (o.role == "included") if o.role else (o.offering_kind == "base")
             if is_default:
                 defaults.append({
                     "offering_id": o.id,
@@ -222,7 +222,7 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
                     "description": c_desc,
                     "is_custom_description": is_custom,
                     "description_override": off_desc,
-                    "display_value": o.display_value or "Included",
+                    "display_value": o.display_value or "",
                     "price": 0.0,
                     "price_text": "0 RM",
                 })
@@ -253,7 +253,7 @@ def get_company_matrix_data(db: Session, company_id: str) -> dict[str, Any]:
                     "description": c_desc,
                     "is_custom_description": is_custom,
                     "description_override": off_desc,
-                    "display_value": o.display_value or "Optional",
+                    "display_value": o.display_value or "",
                     "price": price_val,
                     "price_text": price_str,
                 })

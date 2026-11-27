@@ -11,6 +11,7 @@ from typing import Any
 from collections import defaultdict
 
 from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.cache import _memory_cache, invalidate_cache
 from app.core.errors import AppError
@@ -371,6 +372,10 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
     if applies_type is not None and applies_id is None:
         applies_type = None
     optional_price = payload.get("optional_price")
+    if isinstance(optional_price, dict) and optional_price.get("type") == "formula" and not optional_price.get("expression") and optional_price.get("formula") is not None:
+        optional_price = {**optional_price, "expression": str(optional_price.get("formula"))}
+        optional_price.pop("formula", None)
+        payload["optional_price"] = optional_price
     if optional_price is not None:
         if isinstance(optional_price, (int, float, str)):
             str_val = str(optional_price).replace("RM", "").replace(",", "").strip()
@@ -394,6 +399,11 @@ def _validate_assignment_context(db, catalog: BenefitCatalog, revision: BenefitC
                     payload["optional_price"] = None
         else:
             raise AppError("Optional price must be a typed value object or price amount.", 422)
+    typed_value = payload.get("typed_value")
+    if isinstance(typed_value, dict) and typed_value.get("type") == "formula" and not typed_value.get("expression") and typed_value.get("formula") is not None:
+        tv_copy = dict(typed_value)
+        tv_copy["expression"] = str(tv_copy.pop("formula"))
+        payload["typed_value"] = tv_copy
     if applies_id is None:
         applies_type = None
     elif applies_type is None:
@@ -479,6 +489,7 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
             offering_kind=payload.get("offering_kind", "base"),
         )
         db.add(offering)
+    clear_value = bool(payload.get("clear_value"))
     for key in (
         "offering_key", "concept_id", "offering_kind", "applies_to_type", "applies_to_id", "role",
         "label_override", "description_override", "typed_value", "display_value", "optional_price", "source_document_id",
@@ -486,21 +497,52 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
     ):
         if key in payload:
             val = payload[key]
-            if key == "description_override" and val is not None:
+            if key == "label_override" and val is not None:
                 v_str = str(val).strip()
                 val = v_str if v_str else None
-            elif key == "display_value" and val is not None:
+            elif key == "description_override" and val is not None:
                 v_str = str(val).strip()
-                if not v_str or v_str.lower() in {"optional", "as quoted", "selected"}:
+                val = v_str if v_str else None
+            elif key == "display_value":
+                v_str = str(val).strip() if val is not None else ""
+                if clear_value or not v_str or v_str.lower() in {"0", "0.0", "0.00", "rm 0", "rm 0.00", "none", "null", "-", "—", "n/a", "optional", "as quoted", "selected"}:
                     val = None
+                    if "typed_value" not in payload:
+                        offering.typed_value = None
+                        flag_modified(offering, "typed_value")
                 else:
                     val = v_str
             setattr(offering, key, val)
+            if key in {"typed_value", "optional_price", "source_citation", "source_aliases", "presentation_facet_ids"}:
+                flag_modified(offering, key)
+    if clear_value:
+        offering.display_value = None
+        offering.typed_value = None
+        flag_modified(offering, "typed_value")
+    if offering.role == "included":
+        offering.offering_kind = "base"
+    elif offering.role == "addon_option" and offering.offering_kind == "base":
+        offering.offering_kind = "optional"
     if offering.applies_to_id is None:
         offering.applies_to_type = None
     elif offering.applies_to_type is None:
         offering.applies_to_id = None
     db.flush()
+    if offering.concept_id and offering.role in {"included", "addon_option"}:
+        conflict_stmt = select(CatalogOffering).where(
+            CatalogOffering.catalog_revision_id == revision.id,
+            CatalogOffering.concept_id == offering.concept_id,
+            CatalogOffering.id != offering.id,
+            or_(CatalogOffering.role.in_(["included", "addon_option"]), CatalogOffering.role.is_(None)),
+        )
+        if offering.applies_to_id:
+            conflict_stmt = conflict_stmt.where(CatalogOffering.applies_to_id == offering.applies_to_id)
+        else:
+            conflict_stmt = conflict_stmt.where(CatalogOffering.applies_to_id.is_(None))
+        for conflict in db.scalars(conflict_stmt).all():
+            db.execute(delete(BenefitPackagePlanItem).where(BenefitPackagePlanItem.offering_id == conflict.id))
+            db.delete(conflict)
+        db.flush()
     # Lightweight content hash: use offering IDs only instead of full _revision_content_payload
     # (the full hash is recomputed on publish via publish_catalog_revision)
     _offering_ids = sorted(
@@ -514,6 +556,7 @@ def save_catalog_offering(db, user, catalog_id: str, payload: dict) -> dict:
     revision.source_document_ids = sorted({row.source_document_id for row in db.scalars(
         select(CatalogOffering).where(CatalogOffering.catalog_revision_id == revision.id)
     ).all() if row.source_document_id})
+    flag_modified(revision, "source_document_ids")
     catalog.revision += 1
     _audit(db, user, "business.catalog_offering.save", "catalog_offering", offering.id, {"catalog_id": catalog.id, "new_revision": catalog.revision})
     db.commit()
@@ -563,6 +606,7 @@ def remove_catalog_offering(db, user, catalog_id: str, offering_id: str, *, base
         )
     if target_offering is not None:
         deleted_id = target_offering.id
+        db.execute(delete(BenefitPackagePlanItem).where(BenefitPackagePlanItem.offering_id == deleted_id))
         db.delete(target_offering)
         db.flush()
         # Lightweight content hash: use offering IDs only (full hash on publish)
